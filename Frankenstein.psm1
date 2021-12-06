@@ -541,7 +541,7 @@ function Get-FrankensteinExchangeOnlineDiscovery {
 }
 
 
-function Connect-All {    
+function Connect-All_NoMFA {    
     [CmdletBinding()]
     Param (
     
@@ -554,5 +554,17 @@ function Connect-All {
     Connect-AzureAD -Credential $adminCredentials
     Connect-MSOLService -Credential $adminCredentials
     Connect-ExchangeOnline -Credential $adminCredentials
+
+}
+
+function Connect-All_MFA {    
+    [CmdletBinding()]
+    Param (
+    
+    ) 
+    
+    Connect-AzureAD 
+    Connect-MSOLService 
+    Connect-ExchangeOnline 
 
 }

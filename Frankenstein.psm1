@@ -539,3 +539,18 @@ function Get-FrankensteinExchangeOnlineDiscovery {
   
         Stop-Transcript
 }
+
+
+function Connect-All {    
+    [CmdletBinding()]
+    Param (
+    
+    ) 
+    
+    $Credential = Get-Credential
+
+    Connect-AzureAD -Credential $Credential
+    Connect-MSOLService -Credential $Credential
+    Connect-ExchangeOnline -Credential $Credential
+
+}

@@ -547,10 +547,12 @@ function Connect-All {
     
     ) 
     
-    $Credential = Get-Credential
+    $AdminUsername = Read-Host -Prompt "Azure/Office 365 Admin User Account"
+    $AdminPassword = Read-Host -Prompt "Password" -AsSecureString
+    $adminCredentials = New-Object -TypeName System.Management.Automation.PSCredential -argumentlist $AdminUsername, $AdminPassword
 
-    Connect-AzureAD -Credential $Credential
-    Connect-MSOLService -Credential $Credential
-    Connect-ExchangeOnline -Credential $Credential
+    Connect-AzureAD -Credential $adminCredentials
+    Connect-MSOLService -Credential $adminCredentials
+    Connect-ExchangeOnline -Credential $adminCredentials
 
 }

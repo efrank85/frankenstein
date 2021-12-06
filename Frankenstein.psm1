@@ -318,7 +318,19 @@ function Get-FrankensteinExchangeDiscovery {
 
         Insert-Linebreak
         "Get-HybridConfiguration"
-        Get-HybridConfiguration
+        $Hybrid = Get-HybridConfiguration 
+        if($Hybrid -ne $null)
+        {
+            foreach($result in $Hybrid)
+            {
+                $Hybrid 
+            }
+        }
+            else {
+                "No hybrid configuration detected"
+            }
+        
+
         Start-Sleep -s 5
 
         Insert-Linebreak

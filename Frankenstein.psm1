@@ -58,6 +58,29 @@ function Connect-ExchangeOnPremServer {
     Import-PSSession $Session -DisableNameChecking
 }
 
+function Get-FrankensteinHelp {    
+    [CmdletBinding()]
+    Param (
+        )    
+        Write-Host "
+        
+        Frankenstein offers several modules to assist in Exchange and Azure discovery processes. Below represents a brief explanation of each:
+
+        1) Get-FrankensteinExchangeDiscovery - Provides Exchange on-premises discovery information and outputs a transcript along with various CSV outputs. 
+        You must be connected to Exchange PowerShell prior to launching this module.
+
+        [-virtualdirectories]
+
+        2) Get-FrankensteinExchangeOnlineDiscovery - Provides Exchange Online discovery information and outputs a transcript along with various CSV outputs. 
+        This function will automatically attempt to connect to Exchange Online and prompt for credentials.
+
+        [-virtualdirectories]
+
+        3) Install-ExchangeOnline - Will install and configure Exchange Online PowerShell requirements to run Connect-ExchangeOnline
+                
+                "
+        }
+
 
 
 function Get-FrankensteinVirtualDirectories {    

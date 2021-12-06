@@ -72,13 +72,13 @@ function Get-FrankensteinVirtualDirectories {
         Write-Host "Get-VirtualDirectories"
        
       
-        $ClientAccess | ForEach-Object{Get-AutoDiscoverVirtualDirectory | select server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation
-        $ClientAccess | ForEach-Object{Get-OwaVirtualDirectory | select server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-ECPVirtualDirectory | select server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-MAPIVirtualDirectory | select server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-ActiveSyncVirtualDirectory | select server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-WebServicesVirtualDirectory | select server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-OutlookAnywhere | select server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-AutoDiscoverVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation
+        $ClientAccess | ForEach-Object{Get-OwaVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-ECPVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-MAPIVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-ActiveSyncVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-WebServicesVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-OutlookAnywhere | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
         
 
         }
@@ -100,7 +100,7 @@ function Get-FrankensteinExchangeDiscovery {
         $AllMailboxes = Get-Mailbox -ResultSize Unlimited -IgnoreDefaultScope
         $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited -IgnoreDefaultScope 
         $ExchangeServers = Get-ExchangeServer
-        $ClientAccess = Get-ClientAccessService
+        #$ClientAccess = Get-ClientAccessService
    
         
         #Get Recipient Types
@@ -137,10 +137,10 @@ function Get-FrankensteinExchangeDiscovery {
         $DynamicDistributionGroup = (Get-DynamicDistributionGroup -ResultSize Unlimited).count 
         Write-Host "$DynamicDistributionGroup DynamicDistribution Groups"
 
-        $LitHoldCount = ($AllMailboxes | ?{$_.LitigationHoldEnabled -eq $TRUE}).count 
+        $LitHoldCount = ($AllMailboxes | Where-Object{$_.LitigationHoldEnabled -eq $TRUE}).count 
         Write-Host "$LitHoldCount Mailboxes on Litigation Hold"
 
-        $RetentionHoldCount = ($AllMailboxes | ?{$_.RetentionHoldEnabled -eq $TRUE}).count
+        $RetentionHoldCount = ($AllMailboxes | Where-Object{$_.RetentionHoldEnabled -eq $TRUE}).count
         Write-Host "$RetentionHoldCount Mailboxes on Retention Hold"
 
         $GetPublicFolder = (Get-PublicFolder -recurse).count
@@ -152,97 +152,100 @@ function Get-FrankensteinExchangeDiscovery {
         $GetPublicFolderMailbox = (Get-Mailbox -ResultSize unlimited -PublicFolder -IgnoreDefaultScope).count
         Write-Host "$GetPublicFolderMailbox Public Folder Mailboxes"
 
-        $POP = ($CASMailbox | ?{$_.popenabled -eq $true}).count 
+        $POP = ($CASMailbox | Where-Object{$_.popenabled -eq $true}).count 
         Write-Host "$POP Mailboxes with POP3 Enabled"
         
-        $IMAP = ($CASMailbox | ?{$_.imapenabled -eq $true}).count 
+        $IMAP = ($CASMailbox | Where-Object{$_.imapenabled -eq $true}).count 
         Write-Host "$IMAP Mailboxes with IMAP Enabled"
         
-        $MAPI = ($CASMailbox | ?{$_.mapienabled -eq $true}).count 
+        $MAPI = ($CASMailbox | Where-Object{$_.mapienabled -eq $true}).count 
         Write-Host "$MAPI Mailboxes with MAPI Enabled"
         
-        $ActiveSync = ($CASMailbox | ?{$_.activesyncenabled -eq $true}).count 
+        $ActiveSync = ($CASMailbox | Where-Object{$_.activesyncenabled -eq $true}).count 
         Write-Host "$ActiveSync Mailboxes with ActiveSync Enabled"
         
-        $OWA = ($CASMailbox | ?{$_.owaenabled -eq $true}).count 
+        $OWA = ($CASMailbox | Where-Object{$_.owaenabled -eq $true}).count 
         Write-Host "$OWA Mailboxes with OWA Enabled" 
         
-        $ADPDisabled = ($AllMailboxes | ?{$_.EmailAddressPolicyEnabled -eq $false}).count 
+        $ADPDisabled = ($AllMailboxes | Where-Object{$_.EmailAddressPolicyEnabled -eq $false}).count 
         Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"     
                 
 
         Insert-Linebreak
         "Get-ExchangeServer" 
         $ExchangeServers
-        $ExchangeServers|FL
+        $ExchangeServers|Format-List
 
         Insert-Linebreak
         "Get-ExchangeServerDatabase" 
         Get-MailboxDatabase
-        Get-MailboxDatabase | fl
-        Get-MailboxDatabase | select Name,Server,MailboxRetention,ProhibitSendReceiveQuota,ProhibitSendQuota,RecoverableItemsQuota,RecoverableItemsWarningQuota,IsExcludedFromProvisioning,ReplicationType,DeletedItemRetention,
+        Get-MailboxDatabase | Format-List
+        Get-MailboxDatabase | Select-Object Name,Server,MailboxRetention,ProhibitSendReceiveQuota,ProhibitSendQuota,RecoverableItemsQuota,RecoverableItemsWarningQuota,IsExcludedFromProvisioning,ReplicationType,DeletedItemRetention,
         CircularLoggingEnabled, AdminDisplayVersion | Export-Csv .\Databases.csv -NoTypeInformation
         
         Insert-Linebreak
         "Get-DatabaseAvailabilityGroup"
         Get-DatabaseAvailabilityGroup
-        Get-DatabaseAvailabilityGroup | fl
+        Get-DatabaseAvailabilityGroup | Format-List
         
         Insert-Linebreak
         "Get-RetentionPolicy"
         Get-RetentionPolicy
-        Get-RetentionPolicy | FL
-        Get-RetentionPolicy | select name,retentionpolicytaglinks | Export-Csv .\RetentionPolicies.csv -NoTypeInformation
+        Get-RetentionPolicy | Format-List
+        Get-RetentionPolicy | Select-Object name,retentionpolicytaglinks | Export-Csv .\RetentionPolicies.csv -NoTypeInformation
         
         Insert-Linebreak
         "Get-RetentionPolicyTag"
         Get-RetentionPolicyTag
-        Get-RetentionPolicyTag | FL
-        Get-RetentionPolicyTag | select name,type,agelimitforretention,retentionaction | Export-Csv .\RetentionPoliciesTag.csv -NoTypeInformation
+        Get-RetentionPolicyTag | Format-List
+        Get-RetentionPolicyTag | Select-Object name,type,agelimitforretention,retentionaction | Export-Csv .\RetentionPoliciesTag.csv -NoTypeInformation
 
         Insert-Linebreak
         "Get-JournalRule"
         Get-JournalRule
-        Get-JournalRule | FL
+        Get-JournalRule | Format-List
 
         Insert-Linebreak
         "Get-AcceptedDomain"
         $AcceptedDomain = Get-AcceptedDomain
         $AcceptedDomain
-        $AcceptedDomain | FL
-        $AcceptedDomain | select name,domainname,domaintype,default | Export-Csv -Path .\AcceptedDomains.csv -NoTypeInformation
+        $AcceptedDomain | Format-List
+        $AcceptedDomain | Select-Object name,domainname,domaintype,default | Export-Csv -Path .\AcceptedDomains.csv -NoTypeInformation
+        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type MX}
+        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type TXT}
+        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME} 
 
         Insert-Linebreak
         "Get-EmailAddressPolicy"
         Get-EmailAddressPolicy
-        Get-EmailAddressPolicy | fl
-        Get-EmailAddressPolicy | Select Name,Priority,IncludedRecipients,EnabledEmailAddressTemplates,RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies.csv -NoTypeInformation
+        Get-EmailAddressPolicy | Format-List
+        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,EnabledEmailAddressTemplates,RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies.csv -NoTypeInformation
         
       
         Insert-Linebreak
         "Get-TransportRule"
         Get-TransportRule
-        Get-TransportRule | fl
-        Get-TransportRule | Select Name,Description, State, Priority | Export-Csv -Path .\TransportRules.csv -NoTypeInformation
+        Get-TransportRule | Format-List
+        Get-TransportRule | Select-Object Name,Description, State, Priority | Export-Csv -Path .\TransportRules.csv -NoTypeInformation
         $file = Export-TransportRuleCollection
         Set-Content -Path ".\Rules.xml" -Value $file.FileData -Encoding Byte
 
         Insert-Linebreak
         "Get-SendConnector"
         Get-SendConnector
-        Get-SendConnector | fl
-        Get-SendConnector | select name,SmartHosts,Enabled,AddressSpaces,SourceTransportServers,FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\SendConnectors.csv -NoTypeInformation
+        Get-SendConnector | Format-List
+        Get-SendConnector | Select-Object name,SmartHosts,Enabled,AddressSpaces,SourceTransportServers,FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\SendConnectors.csv -NoTypeInformation
 
         Insert-Linebreak
         "Get-ReceiveConnector"
         Get-ReceiveConnector
-        Get-ReceiveConnector | fl
-        Get-ReceiveConnector | select name,authmechanism,bindings,enabled,remoteIPRanges,requireTLS,originatingserver | Export-Csv -Path .\ReceiveConnectors.csv -NoTypeInformation
+        Get-ReceiveConnector | Format-List
+        Get-ReceiveConnector | Select-Object name,authmechanism,bindings,enabled,remoteIPRanges,requireTLS,originatingserver | Export-Csv -Path .\ReceiveConnectors.csv -NoTypeInformation
 
         Insert-Linebreak
         "Get-TransportAgent"
         Get-TransportAgent
-        Get-TransportAgent | fl
+        Get-TransportAgent | Format-List
 
         Insert-Linebreak
         "Get-AddressList"
@@ -270,25 +273,25 @@ function Get-FrankensteinExchangeDiscovery {
         Insert-Linebreak
         "Get-FederationTrust"
         Get-FederationTrust
-        Get-FederationTrust | fl
+        Get-FederationTrust | Format-List
         Insert-Linebreak
         "Get-OrganizationRelationship"
         Get-OrganizationRelationship
-        Get-OrganizationRelationship | fl
-        Get-OrganizationRelationship | select name,domainnames,targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\OrganizationRelationships.csv -NoTypeInformation
+        Get-OrganizationRelationship | Format-List
+        Get-OrganizationRelationship | Select-Object name,domainnames,targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\OrganizationRelationships.csv -NoTypeInformation
 
 
         Insert-Linebreak
         "Get-RemoteDomain"
         Get-RemoteDomain
-        Get-RemoteDomain | fl
-        Get-RemoteDomain | select name,domainname,allowedooftype | Export-Csv -Path .\RemoteDomains.csv -NoTypeInformation
+        Get-RemoteDomain | Format-List
+        Get-RemoteDomain | Select-Object name,domainname,allowedooftype | Export-Csv -Path .\RemoteDomains.csv -NoTypeInformation
 
         Insert-Linebreak
         "Get-ExchangeCertificate"
         Get-ExchangeCertificate
-        Get-ExchangeCertificate | fl
-        Get-ExchangeCertificate | select subject,Issuer,Thumbprint,FriendlyName,NotAfter | Export-Csv .\ExchangeCertificates.csv -NoTypeInformation
+        Get-ExchangeCertificate | Format-List
+        Get-ExchangeCertificate | Select-Object subject,Issuer,Thumbprint,FriendlyName,NotAfter | Export-Csv .\ExchangeCertificates.csv -NoTypeInformation
 
         Insert-Linebreak
         "Get-HybridConfiguration"
@@ -374,10 +377,10 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         $DynamicDistributionGroup = (Get-DynamicDistributionGroup -ResultSize Unlimited).count 
         Write-Host "$DynamicDistributionGroup DynamicDistribution Groups"
 
-        $LitHoldCount = ($AllMailboxes | ?{$_.LitigationHoldEnabled -eq $TRUE}).count 
+        $LitHoldCount = ($AllMailboxes | Where-Object{$_.LitigationHoldEnabled -eq $TRUE}).count 
         Write-Host "$LitHoldCount Mailboxes on Litigation Hold"
 
-        $RetentionHoldCount = ($AllMailboxes | ?{$_.RetentionHoldEnabled -eq $TRUE}).count
+        $RetentionHoldCount = ($AllMailboxes | Where-Object{$_.RetentionHoldEnabled -eq $TRUE}).count
         Write-Host "$RetentionHoldCount Mailboxes on Retention Hold"
 
         $GetPublicFolder = (Get-PublicFolder -recurse).count
@@ -389,54 +392,57 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         $GetPublicFolderMailbox = (Get-Mailbox -ResultSize unlimited -PublicFolder).count
         Write-Host "$GetPublicFolderMailbox Public Folder Mailboxes"
 
-        $POP = ($CASMailbox | ?{$_.popenabled -eq $true}).count 
+        $POP = ($CASMailbox | Where-Object{$_.popenabled -eq $true}).count 
         Write-Host "$POP Mailboxes with POP3 Enabled"
         
-        $IMAP = ($CASMailbox | ?{$_.imapenabled -eq $true}).count 
+        $IMAP = ($CASMailbox | Where-Object{$_.imapenabled -eq $true}).count 
         Write-Host "$IMAP Mailboxes with IMAP Enabled"
         
-        $MAPI = ($CASMailbox | ?{$_.mapienabled -eq $true}).count 
+        $MAPI = ($CASMailbox | Where-Object{$_.mapienabled -eq $true}).count 
         Write-Host "$MAPI Mailboxes with MAPI Enabled"
         
-        $ActiveSync = ($CASMailbox | ?{$_.activesyncenabled -eq $true}).count 
+        $ActiveSync = ($CASMailbox | Where-Object{$_.activesyncenabled -eq $true}).count 
         Write-Host "$ActiveSync Mailboxes with ActiveSync Enabled"
         
-        $OWA = ($CASMailbox | ?{$_.owaenabled -eq $true}).count 
+        $OWA = ($CASMailbox | Where-Object{$_.owaenabled -eq $true}).count 
         Write-Host "$OWA Mailboxes with OWA Enabled" 
         
-        $ADPDisabled = ($AllMailboxes | ?{$_.EmailAddressPolicyEnabled -eq $false}).count 
+        $ADPDisabled = ($AllMailboxes | Where-Object{$_.EmailAddressPolicyEnabled -eq $false}).count 
         Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"     
                 
 
         Insert-Linebreak
         "Get-RetentionPolicy"
         Get-RetentionPolicy
-        Get-RetentionPolicy | FL
-        Get-RetentionPolicy | select name,retentionpolicytaglinks | Export-Csv .\EXORetentionPolicies.csv -NoTypeInformation
+        Get-RetentionPolicy | Format-List
+        Get-RetentionPolicy | Select-Object name,retentionpolicytaglinks | Export-Csv .\EXORetentionPolicies.csv -NoTypeInformation
         
         Insert-Linebreak
         "Get-RetentionPolicyTag"
         Get-RetentionPolicyTag
-        Get-RetentionPolicyTag | FL
-        Get-RetentionPolicyTag | Select
-        Get-RetentionPolicyTag | select name,type,agelimitforretention,retentionaction | Export-Csv .\EXORetentionPoliciesTag.csv -NoTypeInformation
+        Get-RetentionPolicyTag | Format-List
+        Get-RetentionPolicyTag | Select-Object
+        Get-RetentionPolicyTag | Select-Object name,type,agelimitforretention,retentionaction | Export-Csv .\EXORetentionPoliciesTag.csv -NoTypeInformation
 
         Insert-Linebreak
         "Get-JournalRule"
         Get-JournalRule
-        Get-JournalRule | FL
+        Get-JournalRule | Format-List
 
         Insert-Linebreak
         "Get-AcceptedDomain"
         $AcceptedDomain = Get-AcceptedDomain
-        $AcceptedDomain | FL
-        $AcceptedDomain | select name,domainname,domaintype,default | Export-Csv -Path .\EXOAcceptedDomains.csv -NoTypeInformation
+        $AcceptedDomain | Format-List
+        $AcceptedDomain | Select-Object name,domainname,domaintype,default | Export-Csv -Path .\EXOAcceptedDomains.csv -NoTypeInformation
+        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type MX}
+        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type TXT}
+        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME} 
 
         Insert-Linebreak
         "Get-EmailAddressPolicy"
         Get-EmailAddressPolicy
-        Get-EmailAddressPolicy | fl
-        Get-EmailAddressPolicy | Select Name,Priority,IncludedRecipients,EnabledEmailAddressTemplates,RecipientFilterApplied | Export-Csv -Path .\EXOEmailAddressPolicies.csv -NoTypeInformation
+        Get-EmailAddressPolicy | Format-List
+        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,EnabledEmailAddressTemplates,RecipientFilterApplied | Export-Csv -Path .\EXOEmailAddressPolicies.csv -NoTypeInformation
         $file = Export-TransportRuleCollection
         Set-Content -Path ".\EXORules.xml" -Value $file.FileData -Encoding Byte
 
@@ -444,21 +450,21 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         Insert-Linebreak
         "Get-TransportRule"
         Get-TransportRule
-        Get-TransportRule | fl
-        Get-TransportRule | Select Name,Description, State, Priority | Export-Csv -Path .\EXOTransportRules.csv -NoTypeInformation
+        Get-TransportRule | Format-List
+        Get-TransportRule | Select-Object Name,Description, State, Priority | Export-Csv -Path .\EXOTransportRules.csv -NoTypeInformation
 
 
         Insert-Linebreak
         "Get-OutboundConnector"
         Get-OutboundConnector
-        Get-OutboundConnector | fl
-        Get-OutboundConnector | select name,SmartHosts,Enabled,AddressSpaces,SourceTransportServers,FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\EXOOutboundConnectors.csv -NoTypeInformation
+        Get-OutboundConnector | Format-List
+        Get-OutboundConnector | Select-Object name,SmartHosts,Enabled,AddressSpaces,SourceTransportServers,FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\EXOOutboundConnectors.csv -NoTypeInformation
 
         Insert-Linebreak
         "Get-InboundConnector"
         Get-InboundConnector
-        Get-InboundConnector | fl
-        Get-InboundConnector | select name,ConnectorType, SenderDomains, Requiretls, TlsSenderCertificateName | Export-Csv -Path .\EXOInboundConnectors.csv -NoTypeInformation
+        Get-InboundConnector | Format-List
+        Get-InboundConnector | Select-Object name,ConnectorType, SenderDomains, Requiretls, TlsSenderCertificateName | Export-Csv -Path .\EXOInboundConnectors.csv -NoTypeInformation
 
         Insert-Linebreak
         "Get-AddressBookPolicy"
@@ -480,18 +486,18 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         Insert-Linebreak
         "Get-FederationTrust"
         Get-FederationTrust
-        Get-FederationTrust | fl
+        Get-FederationTrust | Format-List
         "Get-OrganizationRelationship"
         Get-OrganizationRelationship
-        Get-OrganizationRelationship | fl
-        Get-OrganizationRelationship | select name,domainnames,targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\EXOOrganizationRelationships.csv -NoTypeInformation
+        Get-OrganizationRelationship | Format-List
+        Get-OrganizationRelationship | Select-Object name,domainnames,targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\EXOOrganizationRelationships.csv -NoTypeInformation
 
 
         Insert-Linebreak
         "Get-RemoteDomain"
         Get-RemoteDomain
-        Get-RemoteDomain | fl
-        Get-RemoteDomain | select name,domainname,allowedooftype | Export-Csv -Path .\EXORemoteDomains.csv -NoTypeInformation
+        Get-RemoteDomain | Format-List
+        Get-RemoteDomain | Select-Object name,domainname,allowedooftype | Export-Csv -Path .\EXORemoteDomains.csv -NoTypeInformation
 
       
 

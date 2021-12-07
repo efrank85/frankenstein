@@ -81,7 +81,6 @@ function Get-FrankensteinHelp {
         }
 
 
-
 function Get-FrankensteinVirtualDirectories {    
     [CmdletBinding()]
     Param (
@@ -92,7 +91,7 @@ function Get-FrankensteinVirtualDirectories {
 
         Write-Host "Get-VirtualDirectories"
        
-      
+        $ClientAccess = Get-ClientAccessService
         $ClientAccess | ForEach-Object{Get-AutoDiscoverVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation
         $ClientAccess | ForEach-Object{Get-OwaVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
         $ClientAccess | ForEach-Object{Get-ECPVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
@@ -341,7 +340,6 @@ function Get-FrankensteinExchangeDiscovery {
   
         Stop-Transcript
 }
-
 
 
 function Install-ExchangeOnline {    

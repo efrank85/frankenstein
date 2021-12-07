@@ -9,17 +9,10 @@
     This module contains a series of functions used to collect and export data in preparation from an Exchange to Exchange Online migration.
 
 .PARAMETER 
-    Get-FrankensteinExchangeDiscovery: Retreives Exchange on-premises settings and outputs valid CSV tables used in Exchange design docs along with a transcript of relevant Exchange settings
-        [SWITCH] VirtualDirectories: Using this switch will retrieve virtual directory information and output a CSV table
-    
-    Get-FrankensteinExchangeOnlineDiscovery: Retreives Exchange Online settings and outputs valid CSV tables used in Exchange design docs along with a transcript of relevant Exchange Online settings
-    
-    Install-ExchangeOnline: Installs prerequisites for Exchange V2 module
-
-    Connect-ExchangeOnPremServer - Connects to Exchange on premises server by FQDN. Function will prompt for FQDN
+    Get-FrankensteinHelp: View all Functions in this module
 
 .EXAMPLE
-    Get-FrankensteinExchangeDiscovery -VirtualDirectories 
+    Get-FrankensteinExchangeOnlineDiscovery -VirtualDirectories 
 
 
 .INPUTS
@@ -31,7 +24,7 @@
 
 .NOTES
     Author:  Eric D. Frank
-    12/6/21 - Updated to support GitHub
+    12/6/21 - Updated to use GitHub as repository
   
 #>
  
@@ -66,17 +59,23 @@ function Get-FrankensteinHelp {
         
         Frankenstein offers several modules to assist in Exchange and Azure discovery processes. Below represents a brief explanation of each:
 
-        1) Get-FrankensteinExchangeDiscovery - Provides Exchange on-premises discovery information and outputs a transcript along with various CSV outputs. 
+        1) Get-FrankensteinExchangeDiscovery: Provides Exchange on-premises discovery information and outputs a transcript along with various CSV outputs. 
         You must be connected to Exchange PowerShell prior to launching this module.
 
         [-virtualdirectories]
 
-        2) Get-FrankensteinExchangeOnlineDiscovery - Provides Exchange Online discovery information and outputs a transcript along with various CSV outputs. 
+        2) Get-FrankensteinExchangeOnlineDiscovery: Provides Exchange Online discovery information and outputs a transcript along with various CSV outputs. 
         This function will automatically attempt to connect to Exchange Online and prompt for credentials.
 
         [-virtualdirectories]
 
-        3) Install-ExchangeOnline - Will install and configure Exchange Online PowerShell requirements to run Connect-ExchangeOnline
+        3) Install-ExchangeOnline: Will install and configure Exchange Online PowerShell requirements to run Connect-ExchangeOnline
+
+        4) Connect-All: Will connect to MSOL, AzureAD and ExO
+
+        [-noMFA]
+
+        5) Connect-OnPremServer: Connects to on-premises Exchange server using FQDN
                 
                 "
         }
@@ -87,7 +86,6 @@ function Get-FrankensteinVirtualDirectories {
     [CmdletBinding()]
     Param (
     )
- 
       
        
         Insert-Linebreak
@@ -541,30 +539,32 @@ function Get-FrankensteinExchangeOnlineDiscovery {
 }
 
 
-function Connect-All_NoMFA {    
+
+
+function Connect-All {    
     [CmdletBinding()]
     Param (
-    
+    #[Parameter(Mandatory=$false)]
+    [Switch]$NoMFA
     ) 
+
+    if($NoMFA)    {
+        $AdminUsername = Read-Host -Prompt "Azure/Office 365 Admin User Account"
+        $AdminPassword = Read-Host -Prompt "Password" -AsSecureString
+        $adminCredentials = New-Object -TypeName System.Management.Automation.PSCredential -argumentlist $AdminUsername, $AdminPassword
     
-    $AdminUsername = Read-Host -Prompt "Azure/Office 365 Admin User Account"
-    $AdminPassword = Read-Host -Prompt "Password" -AsSecureString
-    $adminCredentials = New-Object -TypeName System.Management.Automation.PSCredential -argumentlist $AdminUsername, $AdminPassword
+        Connect-AzureAD -Credential $adminCredentials
+        Connect-MSOLService -Credential $adminCredentials
+        Connect-ExchangeOnline -Credential $adminCredentials
+    }
 
-    Connect-AzureAD -Credential $adminCredentials
-    Connect-MSOLService -Credential $adminCredentials
-    Connect-ExchangeOnline -Credential $adminCredentials
-
+    else {
+        Connect-AzureAD 
+        Connect-MSOLService 
+        Connect-ExchangeOnline 
+    }
 }
 
-function Connect-All_MFA {    
-    [CmdletBinding()]
-    Param (
     
-    ) 
-    
-    Connect-AzureAD 
-    Connect-MSOLService 
-    Connect-ExchangeOnline 
+ 
 
-}

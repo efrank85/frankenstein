@@ -29,7 +29,7 @@
 #>
  
 
-function Insert-Linebreak {
+function Get-Linebreak {
     [CmdletBinding()]
     Param (
     )
@@ -88,7 +88,7 @@ function Get-FrankensteinVirtualDirectories {
     )
       
        
-        Insert-Linebreak
+        Get-Linebreak
 
         Write-Host "Get-VirtualDirectories"
        
@@ -192,41 +192,41 @@ function Get-FrankensteinExchangeDiscovery {
         Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"     
                 
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-ExchangeServer" 
         $ExchangeServers
         $ExchangeServers|Format-List
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-ExchangeServerDatabase" 
         Get-MailboxDatabase
         Get-MailboxDatabase | Format-List
         Get-MailboxDatabase | Select-Object Name,Server,MailboxRetention,ProhibitSendReceiveQuota,ProhibitSendQuota,RecoverableItemsQuota,RecoverableItemsWarningQuota,IsExcludedFromProvisioning,ReplicationType,DeletedItemRetention,
         CircularLoggingEnabled, AdminDisplayVersion | Export-Csv .\Databases.csv -NoTypeInformation
         
-        Insert-Linebreak
+        Get-Linebreak
         "Get-DatabaseAvailabilityGroup"
         Get-DatabaseAvailabilityGroup
         Get-DatabaseAvailabilityGroup | Format-List
         
-        Insert-Linebreak
+        Get-Linebreak
         "Get-RetentionPolicy"
         Get-RetentionPolicy
         Get-RetentionPolicy | Format-List
         Get-RetentionPolicy | Select-Object name,retentionpolicytaglinks | Export-Csv .\RetentionPolicies.csv -NoTypeInformation
         
-        Insert-Linebreak
+        Get-Linebreak
         "Get-RetentionPolicyTag"
         Get-RetentionPolicyTag
         Get-RetentionPolicyTag | Format-List
         Get-RetentionPolicyTag | Select-Object name,type,agelimitforretention,retentionaction | Export-Csv .\RetentionPoliciesTag.csv -NoTypeInformation
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-JournalRule"
         Get-JournalRule
         Get-JournalRule | Format-List
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-AcceptedDomain"
         $AcceptedDomain = Get-AcceptedDomain
         $AcceptedDomain
@@ -236,14 +236,14 @@ function Get-FrankensteinExchangeDiscovery {
         foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type TXT}
         foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME} 
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-EmailAddressPolicy"
         Get-EmailAddressPolicy
         Get-EmailAddressPolicy | Format-List
         Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,EnabledEmailAddressTemplates,RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies.csv -NoTypeInformation
         
       
-        Insert-Linebreak
+        Get-Linebreak
         "Get-TransportRule"
         Get-TransportRule
         Get-TransportRule | Format-List
@@ -251,30 +251,30 @@ function Get-FrankensteinExchangeDiscovery {
         $file = Export-TransportRuleCollection
         Set-Content -Path ".\Rules.xml" -Value $file.FileData -Encoding Byte
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-SendConnector"
         Get-SendConnector
         Get-SendConnector | Format-List
         Get-SendConnector | Select-Object name,SmartHosts,Enabled,AddressSpaces,SourceTransportServers,FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\SendConnectors.csv -NoTypeInformation
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-ReceiveConnector"
         Get-ReceiveConnector
         Get-ReceiveConnector | Format-List
         Get-ReceiveConnector | Select-Object name,authmechanism,bindings,enabled,remoteIPRanges,requireTLS,originatingserver | Export-Csv -Path .\ReceiveConnectors.csv -NoTypeInformation
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-TransportAgent"
         Get-TransportAgent
         Get-TransportAgent | Format-List
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-AddressList"
         Get-AddressList
         Get-AddressBookPolicy
         Start-Sleep -s 5
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-PublicFolder"
         Get-PublicFolder -Recurse
         Start-Sleep -s 5
@@ -286,35 +286,35 @@ function Get-FrankensteinExchangeDiscovery {
         Start-Sleep -s 5
 
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-OrganizationConfig"
         Get-OrganizationConfig
         Start-Sleep -s 5
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-FederationTrust"
         Get-FederationTrust
         Get-FederationTrust | Format-List
-        Insert-Linebreak
+        Get-Linebreak
         "Get-OrganizationRelationship"
         Get-OrganizationRelationship
         Get-OrganizationRelationship | Format-List
         Get-OrganizationRelationship | Select-Object name,domainnames,targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\OrganizationRelationships.csv -NoTypeInformation
 
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-RemoteDomain"
         Get-RemoteDomain
         Get-RemoteDomain | Format-List
         Get-RemoteDomain | Select-Object name,domainname,allowedooftype | Export-Csv -Path .\RemoteDomains.csv -NoTypeInformation
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-ExchangeCertificate"
         Get-ExchangeCertificate
         Get-ExchangeCertificate | Format-List
         Get-ExchangeCertificate | Select-Object subject,Issuer,Thumbprint,FriendlyName,NotAfter | Export-Csv .\ExchangeCertificates.csv -NoTypeInformation
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-HybridConfiguration"
         $Hybrid = Get-HybridConfiguration 
         if($Hybrid -ne $null)
@@ -331,7 +331,7 @@ function Get-FrankensteinExchangeDiscovery {
 
         Start-Sleep -s 5
 
-        Insert-Linebreak
+        Get-Linebreak
 
         
 #Call Functions        
@@ -444,25 +444,25 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"     
                 
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-RetentionPolicy"
         Get-RetentionPolicy
         Get-RetentionPolicy | Format-List
         Get-RetentionPolicy | Select-Object name,retentionpolicytaglinks | Export-Csv .\EXORetentionPolicies.csv -NoTypeInformation
         
-        Insert-Linebreak
+        Get-Linebreak
         "Get-RetentionPolicyTag"
         Get-RetentionPolicyTag
         Get-RetentionPolicyTag | Format-List
         Get-RetentionPolicyTag | Select-Object
         Get-RetentionPolicyTag | Select-Object name,type,agelimitforretention,retentionaction | Export-Csv .\EXORetentionPoliciesTag.csv -NoTypeInformation
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-JournalRule"
         Get-JournalRule
         Get-JournalRule | Format-List
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-AcceptedDomain"
         $AcceptedDomain = Get-AcceptedDomain
         $AcceptedDomain | Format-List
@@ -471,7 +471,7 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type TXT}
         foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME} 
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-EmailAddressPolicy"
         Get-EmailAddressPolicy
         Get-EmailAddressPolicy | Format-List
@@ -480,30 +480,30 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         Set-Content -Path ".\EXORules.xml" -Value $file.FileData -Encoding Byte
 
       
-        Insert-Linebreak
+        Get-Linebreak
         "Get-TransportRule"
         Get-TransportRule
         Get-TransportRule | Format-List
         Get-TransportRule | Select-Object Name,Description, State, Priority | Export-Csv -Path .\EXOTransportRules.csv -NoTypeInformation
 
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-OutboundConnector"
         Get-OutboundConnector
         Get-OutboundConnector | Format-List
         Get-OutboundConnector | Select-Object name,SmartHosts,Enabled,AddressSpaces,SourceTransportServers,FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\EXOOutboundConnectors.csv -NoTypeInformation
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-InboundConnector"
         Get-InboundConnector
         Get-InboundConnector | Format-List
         Get-InboundConnector | Select-Object name,ConnectorType, SenderDomains, Requiretls, TlsSenderCertificateName | Export-Csv -Path .\EXOInboundConnectors.csv -NoTypeInformation
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-AddressBookPolicy"
         Get-AddressBookPolicy
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-PublicFolder"
         Get-PublicFolder -Recurse -
         "Get-MailPublicFolder"
@@ -512,11 +512,11 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         Get-Mailbox -PublicFolder -ResultSize unlimited
 
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-OrganizationConfig"
         Get-OrganizationConfig
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-FederationTrust"
         Get-FederationTrust
         Get-FederationTrust | Format-List
@@ -526,7 +526,7 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         Get-OrganizationRelationship | Select-Object name,domainnames,targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\EXOOrganizationRelationships.csv -NoTypeInformation
 
 
-        Insert-Linebreak
+        Get-Linebreak
         "Get-RemoteDomain"
         Get-RemoteDomain
         Get-RemoteDomain | Format-List

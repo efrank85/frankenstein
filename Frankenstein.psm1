@@ -71,7 +71,7 @@ function Get-FrankensteinHelp {
 
         3) Install-ExchangeOnline: Will install and configure Exchange Online PowerShell requirements to run Connect-ExchangeOnline
 
-        4) Connect-All: Will connect to MSOL, AzureAD and ExO
+        4) Connect-All: Will connect to MSOL, AzureAD and ExO PS Sessions
 
         [-noMFA]
 
@@ -539,12 +539,9 @@ function Get-FrankensteinExchangeOnlineDiscovery {
 }
 
 
-
-
 function Connect-All {    
     [CmdletBinding()]
     Param (
-    #[Parameter(Mandatory=$false)]
     [Switch]$NoMFA
     ) 
 

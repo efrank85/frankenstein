@@ -212,7 +212,7 @@ function Get-FrankensteinExchangeDiscovery {
         "Get-RetentionPolicy"
         Get-RetentionPolicy
         Get-RetentionPolicy | Format-List
-        Get-RetentionPolicy | Select-Object name,retentionpolicytaglinks | Export-Csv .\RetentionPolicies.csv -NoTypeInformation
+        Get-RetentionPolicy | Select-Object name,@{Name="RetentionPolicyTagLinks";Expression={$_.RetentionPolicyTagLinks -join “;”}} | Export-Csv .\RetentionPolicies.csv -NoTypeInformation
         
         Get-Linebreak
         "Get-RetentionPolicyTag"
@@ -239,7 +239,7 @@ function Get-FrankensteinExchangeDiscovery {
         "Get-EmailAddressPolicy"
         Get-EmailAddressPolicy
         Get-EmailAddressPolicy | Format-List
-        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,EnabledEmailAddressTemplates,RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies.csv -NoTypeInformation
+        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,@{Name="EnabledEmailAddressTemplates";Expression={$_.EnabledEmailAddressTemplates -join “;”}},RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies.csv -NoTypeInformation
         
       
         Get-Linebreak
@@ -254,13 +254,13 @@ function Get-FrankensteinExchangeDiscovery {
         "Get-SendConnector"
         Get-SendConnector
         Get-SendConnector | Format-List
-        Get-SendConnector | Select-Object name,SmartHosts,Enabled,AddressSpaces,SourceTransportServers,FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\SendConnectors.csv -NoTypeInformation
+        Get-SendConnector | Select-Object name,@{Name="SmartHosts";Expression={$_.SmartHosts -join “;”}},Enabled,@{Name="AddressSpaces";Expression={$_.AddressSpaces -join “;”}},@{Name="SourceTransportServers";Expression={$_.SourceTransportServers -join “;”}},FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\SendConnectors.csv -NoTypeInformation
 
         Get-Linebreak
         "Get-ReceiveConnector"
         Get-ReceiveConnector
         Get-ReceiveConnector | Format-List
-        Get-ReceiveConnector | Select-Object name,authmechanism,bindings,enabled,remoteIPRanges,requireTLS,originatingserver | Export-Csv -Path .\ReceiveConnectors.csv -NoTypeInformation
+        Get-ReceiveConnector | Select-Object name,authmechanism,@{Name="Bindings";Expression={$_.Bindings -join “;”}},enabled,@{Name="RemoteIPRanges";Expression={$_.RemoteIPRanges -join “;”}},requireTLS,originatingserver | Export-Csv -Path .\ReceiveConnectors.csv -NoTypeInformation
 
         Get-Linebreak
         "Get-TransportAgent"
@@ -295,11 +295,11 @@ function Get-FrankensteinExchangeDiscovery {
         Get-FederationTrust
         Get-FederationTrust | Format-List
         Get-Linebreak
+
         "Get-OrganizationRelationship"
         Get-OrganizationRelationship
         Get-OrganizationRelationship | Format-List
-        Get-OrganizationRelationship | Select-Object name,domainnames,targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\OrganizationRelationships.csv -NoTypeInformation
-
+        Get-OrganizationRelationship | Select-Object name,@{Name="DomainNames";Expression={$_.DomainNames -join “;”}},targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\OrganizationRelationships.csv -NoTypeInformation
 
         Get-Linebreak
         "Get-RemoteDomain"
@@ -446,7 +446,7 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         "Get-RetentionPolicy"
         Get-RetentionPolicy
         Get-RetentionPolicy | Format-List
-        Get-RetentionPolicy | Select-Object name,retentionpolicytaglinks | Export-Csv .\EXORetentionPolicies.csv -NoTypeInformation
+        Get-RetentionPolicy | Select-Object name,@{Name="RetentionPolicyTagLinks";Expression={$_.RetentionPolicyTagLinks -join “;”}} | Export-Csv .\RetentionPolicies.csv -NoTypeInformation
         
         Get-Linebreak
         "Get-RetentionPolicyTag"
@@ -473,29 +473,27 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         "Get-EmailAddressPolicy"
         Get-EmailAddressPolicy
         Get-EmailAddressPolicy | Format-List
-        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,EnabledEmailAddressTemplates,RecipientFilterApplied | Export-Csv -Path .\EXOEmailAddressPolicies.csv -NoTypeInformation
-        $file = Export-TransportRuleCollection
-        Set-Content -Path ".\EXORules.xml" -Value $file.FileData -Encoding Byte
-
-      
+        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,@{Name="EnabledEmailAddressTemplates";Expression={$_.EnabledEmailAddressTemplates -join “;”}},RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies.csv -NoTypeInformation
+       
         Get-Linebreak
         "Get-TransportRule"
         Get-TransportRule
         Get-TransportRule | Format-List
         Get-TransportRule | Select-Object Name,Description, State, Priority | Export-Csv -Path .\EXOTransportRules.csv -NoTypeInformation
-
+        $file = Export-TransportRuleCollection
+        Set-Content -Path ".\EXORules.xml" -Value $file.FileData -Encoding Byte
 
         Get-Linebreak
         "Get-OutboundConnector"
         Get-OutboundConnector
         Get-OutboundConnector | Format-List
-        Get-OutboundConnector | Select-Object name,SmartHosts,Enabled,AddressSpaces,SourceTransportServers,FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\EXOOutboundConnectors.csv -NoTypeInformation
+        Get-OutboundConnector | Select-Object name,@{Name="SmartHosts";Expression={$_.SmartHosts -join “;”}},Enabled,@{Name="AddressSpaces";Expression={$_.AddressSpaces -join “;”}},@{Name="SourceTransportServers";Expression={$_.SourceTransportServers -join “;”}},FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\SendConnectors.csv -NoTypeInformation
 
         Get-Linebreak
         "Get-InboundConnector"
         Get-InboundConnector
         Get-InboundConnector | Format-List
-        Get-InboundConnector | Select-Object name,ConnectorType, SenderDomains, Requiretls, TlsSenderCertificateName | Export-Csv -Path .\EXOInboundConnectors.csv -NoTypeInformation
+        Get-InboundConnector | Select-Object name,authmechanism,@{Name="Bindings";Expression={$_.Bindings -join “;”}},enabled,@{Name="RemoteIPRanges";Expression={$_.RemoteIPRanges -join “;”}},requireTLS,originatingserver | Export-Csv -Path .\ReceiveConnectors.csv -NoTypeInformation
 
         Get-Linebreak
         "Get-AddressBookPolicy"
@@ -521,8 +519,7 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         "Get-OrganizationRelationship"
         Get-OrganizationRelationship
         Get-OrganizationRelationship | Format-List
-        Get-OrganizationRelationship | Select-Object name,domainnames,targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\EXOOrganizationRelationships.csv -NoTypeInformation
-
+        Get-OrganizationRelationship | Select-Object name,@{Name="DomainNames";Expression={$_.DomainNames -join “;”}},targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\OrganizationRelationships.csv -NoTypeInformation
 
         Get-Linebreak
         "Get-RemoteDomain"

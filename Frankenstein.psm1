@@ -558,5 +558,36 @@ function Connect-All {
 }
 
     
- 
+function Get-FrankensteinAzureDiscovery {    
+    [CmdletBinding()]
+    Param (
+    
+    )
+   
+    Connect-AzureAD
+    Connect-MsolService
+        
+    #Define Variables
+    $MSOLUser = Get-MsolUser -All
+    $Device = Get-MSOLDevice -all
+    $Licenses = Get-MsolAccountSku
+
+    Start-Transcript .\Get-FrankensteinAzureDiscovery.txt
+
+    "Get-MsolUser"
+    Write-Host $MSOLUser.count "user's discovered"
+    $MsolUser | Select-Object @{Name="AlternateEmailAddresses";Expression={$_.AlternateEmailAddresses -join “;”}},@{Name="AlternateMobilePhones";Expression={$_.AlternateMobilePhones -join “;”}},@{Name="AlternativeSecurityIds";Expression={$_.AlternativeSecurityIds -join “;”}},BlockCredential,City,CloudExchangeRecipientType,Country,Department,@{Name="DirSyncProvisioningErrors";Expression={$_.DirSyncProvisioningErrors -join “;”}},DisplayName,Errors,Fax,FirstName,ImmutableID,@{Name="IndirectLicenseErrors";Expression={$_.IndirectLicenseErrors -join “;”}},IsBlackberryUser,IsLicensed,LastDirSynced,LastName,LastPasswordChangeTimestamp,@{Name="LicenseAssignmentDetails";Expression={$_.LicenseAssignmentDetails -join “;”}},LicenseReconciliationNeeded,@{Name="Licenses";Expression={$_.Licenses -join “;”}},LiveId,MSExchRecipientTypeDetails,MSRtcSipDeploymentLocator,MSRtcSipPrimaryUserAddress,MobilePhone,ObjectId,Office,OverallProvisioningStatus,PasswordNeverExpires,PasswordResetNotRequiredDuringActivate,PhoneNumber,PortalSettings,PostalCode,PreferredDataLocation,PreferredLanguage,@{Name="ProxyAddresses";Expression={$_.ProxyAddresses -join “;”}},ReleaseTrack,@{Name="ServiceInformation";Expression={$_.ServiceInformation -join “;”}},SignInName,SoftDeletionTimestamp,State,StreetAddress,@{Name="StrongAuthenticationMethods";Expression={$_.StrongAuthenticationMethods -join “;”}},@{Name="StrongAuthenticationPhoneAppDetails";Expression={$_.StrongAuthenticationPhoneAppDetails -join “;”}},@{Name="StrongAuthenticationProofupTime";Expression={$_.StrongAuthenticationProofupTime -join “;”}},@{Name="StrongAuthenticationRequirements";Expression={$_.StrongAuthenticationRequirements -join “;”}},@{Name="StrongAuthenticationUserDetails";Expression={$_.StrongAuthenticationUserDetails -join “;”}},StrongPasswordRequired,StsRefreshTokensValidFrom,Title,UsageLocation,UserLandingPageIdentifierForO365Shell,UserPrincipalName,UserThemeIdentifierForO365Shell,UserType,ValidationStatus,WhenCreated  | Export-Csv .\MSOLUsers.csv -NoTypeInformation
+
+    "Get-MsolCompanyInformation"
+    Get-MsolCompanyInformation
+    
+    "Get-MsolAccountSku"
+    $Licenses
+    $Licenses | Select-Object AccountName,AccountSkuID,ActiveUnits,ConsumedUnits,LockedOutUnits,SKUID,SkuPartNumber,TargetClass,SuspendedUnits,WarningUnits | Export-Csv .\MSOLLicenses.csv -NoTypeInformation
+        
+    "Get-MsolDevice"
+    Write-Host $Device.count "device's discovered"
+    $Device |Select-Object Enabled,ObjectID,DeviceID,DisplayName,DeviceObjectVersion,DeviceOSType,DeviceOSVersion,DeviceTrustType,DeviceTrustLevel,@{Name="DevicePhysicalIds";Expression={$_.DevicePhysicalIds -join “;”}},ApproximateLastLogonTimestamp,@{Name="AlternativeSecurityIds";Expression={$_.AlternativeSecurityIds -join “;”}},DirSyncEnabled,LastDirSyncTime,RegisteredOwners,@{Name="GraphDeviceObject";Expression={$_.GraphDeviceObject -join “;”}}  | Export-Csv -NoTypeInformation .\MSOLDevices.csv
+
+}
 

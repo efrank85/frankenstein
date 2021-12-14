@@ -67,7 +67,7 @@ function Get-FrankensteinHelp {
         2) Get-FrankensteinExchangeOnlineDiscovery: Provides Exchange Online discovery information and outputs a transcript along with optional CSV outputs. 
         This function will automatically attempt to connect to Exchange Online and prompt for credentials.
 
-        [-virtualdirectories] [-CSV] [-UseCurrentSession]
+        [-CSV] [-UseCurrentSession]
 
         3) Install-ExchangeOnline: Will install and configure Exchange Online PowerShell requirements to run Connect-ExchangeOnline
 
@@ -81,7 +81,6 @@ function Get-FrankensteinHelp {
                 
                 "
         }
-
 
 function Get-FrankensteinVirtualDirectories {    
     [CmdletBinding()]
@@ -137,9 +136,7 @@ function Get-FrankensteinExchangeDiscovery {
         Start-Transcript -Path .\ExchangeDiscoveryTranscript_$((Get-Date).ToString('MMddyy')).txt
         
         Get-Linebreak
-        "RecipientCounts"
-        Get-FrankensteinRecipientCounts     
-                
+        Get-FrankensteinRecipientCounts                     
 
         Get-Linebreak
         "Get-ExchangeServer"
@@ -459,7 +456,7 @@ function Get-FrankensteinRecipientCounts {
       $GetPublicFolder = (Get-PublicFolder -recurse | Measure-Object).count
       Write-Host "$GetPublicFolder Public Folders"
 
-      $GetMailPublicFolder = (Get-MailPublicFolder | Measure-Object).count
+      $GetMailPublicFolder = (Get-MailPublicFolder -Resultsize Unlimited | Measure-Object).count
       Write-Host "$GetMailPublicFolder Mail Public Folders"
 
       $GetPublicFolderMailbox = (Get-Mailbox -ResultSize unlimited -PublicFolder | Measure-Object).count
@@ -505,7 +502,6 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         
 
         Get-Linebreak
-        "RecipientCounts"
         Get-FrankensteinRecipientCounts                
 
         Get-Linebreak
@@ -536,15 +532,9 @@ function Get-FrankensteinExchangeOnlineDiscovery {
 
         Get-Linebreak
         "Get-JournalRule"
-        if($CSV){
         Get-JournalRule
         Get-JournalRule | Format-List
-        Get-JournalRule | Format-List | Export-Csv .\EXOJournalRules_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
-        }
-        else {
-            Get-JournalRule
-            Get-JournalRule | Format-List
-        }
+        
 
         Get-Linebreak
         "Get-AcceptedDomain"

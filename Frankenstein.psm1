@@ -131,6 +131,9 @@ function Get-FrankensteinExchangeDiscovery {
        Connect-ExchangeOnPremServer
    }
         
+        mkdir .\FrankensteinEXDiscovery_$((Get-Date).ToString('MMddyy'))
+        Set-Location  .\FrankensteinEXDiscovery_$((Get-Date).ToString('MMddyy'))
+        
         Start-Transcript -Path .\ExchangeDiscoveryTranscript_$((Get-Date).ToString('MMddyy')).txt
         
         Get-Linebreak
@@ -415,9 +418,11 @@ function Get-FrankensteinRecipientCounts {
       #Define Variables
       $AllMailboxes = Get-Mailbox -ResultSize Unlimited
       $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited
-      $CASMailbox = Get-CASMailbox
+      $CASMailbox = Get-CASMailbox -ResultSize Unlimited
       
-      "Exchange Recipient Count"  
+      "Exchange Recipient Count
+      
+      "  
       $TotalMBXCount = ($AllMailboxes).count 
       Write-Host "$TotalMBXCount Total Mailboxes"
 
@@ -492,9 +497,12 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         else {
             Connect-ExchangeOnline
         }
-        
+
+        mkdir .\FrankensteinEXODiscovery_$((Get-Date).ToString('MMddyy'))
+        Set-Location  .\FrankensteinEXODiscovery_$((Get-Date).ToString('MMddyy'))
 
         Start-Transcript -Path .\ExchangeOnlineDiscoveryTranscript_$((Get-Date).ToString('MMddyy')).txt
+        
 
         Get-Linebreak
         "RecipientCounts"
@@ -691,6 +699,9 @@ function Get-FrankensteinAzureDiscovery {
     $MSOLUser = Get-MsolUser -All
     $Device = Get-MSOLDevice -all
     $Licenses = Get-MsolAccountSku
+
+    mkdir .\FrankensteinAzureDiscovery_$((Get-Date).ToString('MMddyy'))
+    Set-Location  .\FrankensteinAzureDiscovery_$((Get-Date).ToString('MMddyy'))
 
     Start-Transcript .\Get-FrankensteinAzureDiscovery_$((Get-Date).ToString('MMddyy')).txt
 

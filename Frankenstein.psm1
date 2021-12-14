@@ -141,12 +141,12 @@ function Get-FrankensteinExchangeDiscovery {
         Get-Linebreak
         "Get-ExchangeServer"
         if($CSV){
-        $ExchangeServers
-        $ExchangeServers|Format-List
-        $ExchangeServers|Format-List | Export-Csv .\ExchangeServers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        $ExchangeServers = Get-ExchangeServer
+        $ExchangeServers|Format-List$ExchangeServers|Select-Object Name,Domain,Edition,FQDN,IsHubTransportServer,IsClientAccessServer,IsEdgeServer,IsMailboxServer,IsUnifiedMessagingServer,IsFrontendTransportServer,OrganizationalUnit,AdminDisplayVersion,Site,ServerRole | Export-Csv .\ExchangeServers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        
         }
         else {
-            $ExchangeServers
+            $ExchangeServers = Get-ExchangeServer
             $ExchangeServers|Format-List  
         }
 
@@ -205,7 +205,7 @@ function Get-FrankensteinExchangeDiscovery {
         if($CSV){
         Get-JournalRule
         Get-JournalRule | Format-List
-        Get-JournalRule | Format-List | Export-Csv .\JournalRules_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        Get-JournalRule | Select-Object Name,Recipient,JournalEmailAddress,Scope,Enabled | Export-Csv .\JournalRules_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
         }
         else {
             Get-JournalRule
@@ -291,17 +291,10 @@ function Get-FrankensteinExchangeDiscovery {
 
         Get-Linebreak
         "Get-AddressList"
-        if($CSV){
         Get-AddressList
         Get-AddressBookPolicy
-        Get-AddressBookPolicy | Format-List | Export-Csv .\AddressList_$((Get-Date).ToString('MMddyy')) -NoTypeInformation
         Start-Sleep -s 5
-        }
-        else {
-            Get-AddressList
-            Get-AddressBookPolicy
-            Start-Sleep -s 5 
-        }
+       
 
         Get-Linebreak
         "Get-PublicFolder"

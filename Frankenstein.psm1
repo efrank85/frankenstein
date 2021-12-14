@@ -59,15 +59,15 @@ function Get-FrankensteinHelp {
         
         Frankenstein offers several modules to assist in Exchange and Azure discovery processes. Below represents a brief explanation of each:
 
-        1) Get-FrankensteinExchangeDiscovery: Provides Exchange on-premises discovery information and outputs a transcript along with various CSV outputs. 
+        1) Get-FrankensteinExchangeDiscovery: Provides Exchange on-premises discovery information and outputs a transcript along with optional CSV outputs. 
         You must be connected to Exchange PowerShell prior to launching this module.
 
-        [-virtualdirectories]
+        [-virtualdirectories] [-CSV] [-UseCurrentSession]
 
-        2) Get-FrankensteinExchangeOnlineDiscovery: Provides Exchange Online discovery information and outputs a transcript along with various CSV outputs. 
+        2) Get-FrankensteinExchangeOnlineDiscovery: Provides Exchange Online discovery information and outputs a transcript along with optional CSV outputs. 
         This function will automatically attempt to connect to Exchange Online and prompt for credentials.
 
-        [-virtualdirectories]
+        [-virtualdirectories] [-CSV] [-UseCurrentSession]
 
         3) Install-ExchangeOnline: Will install and configure Exchange Online PowerShell requirements to run Connect-ExchangeOnline
 
@@ -84,35 +84,53 @@ function Get-FrankensteinHelp {
 function Get-FrankensteinVirtualDirectories {    
     [CmdletBinding()]
     Param (
+    [Switch]$CSV
     )
       
        
         Get-Linebreak
-
-        Write-Host "Get-VirtualDirectories"
-       
+        "Get-VirtualDirectories"
+        if($CSV){       
         $ClientAccess = Get-ClientAccessService
-        $ClientAccess | ForEach-Object{Get-AutoDiscoverVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation
-        $ClientAccess | ForEach-Object{Get-OwaVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-ECPVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-MAPIVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-ActiveSyncVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-WebServicesVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        $ClientAccess | ForEach-Object{Get-OutlookAnywhere | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories.csv -NoTypeInformation -Append
-        
-
+        $ClientAccess | ForEach-Object{Get-AutoDiscoverVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        $ClientAccess | ForEach-Object{Get-OwaVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-ECPVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-MAPIVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-ActiveSyncVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-WebServicesVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation -Append
+        $ClientAccess | ForEach-Object{Get-OutlookAnywhere | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} | Export-Csv .\VirtualDirectories$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation -Append
         }
+        else {
+            $ClientAccess | ForEach-Object{Get-AutoDiscoverVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod}
+            $ClientAccess | ForEach-Object{Get-OwaVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} 
+            $ClientAccess | ForEach-Object{Get-ECPVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} 
+            $ClientAccess | ForEach-Object{Get-MAPIVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} 
+            $ClientAccess | ForEach-Object{Get-ActiveSyncVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} 
+            $ClientAccess | ForEach-Object{Get-WebServicesVirtualDirectory | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} 
+            $ClientAccess | ForEach-Object{Get-OutlookAnywhere | Select-Object server,name,internalurl,externalurl,internalauthenticationmethods,externalauthenticationmethods,IISauthenticationmethods,internalhostname,externalhostname,InternalClientAuthenticationMethod,ExternalClientAuthenticationMethod} 
+                
+        }
+
+    }
 
 
 function Get-FrankensteinExchangeDiscovery {    
     [CmdletBinding()]
     Param (
-    [Switch]$virtualDirectories
+    [Switch]$virtualDirectories,
+    [Switch]$CSV,
+    [Switch]$UseCurrentSession
     
     )
-   
+
+    if($UseCurrentSession){
+
+    }
+   else {
+       Connect-ExchangeOnPremServer
+   }
         
-        Start-Transcript -Path .\ExchangeDiscoveryTranscript.txt
+        Start-Transcript -Path .\ExchangeDiscoveryTranscript_$((Get-Date).ToString('MMddyy')).txt
         
         Write-Host Exchange Recipient Count
         
@@ -192,86 +210,169 @@ function Get-FrankensteinExchangeDiscovery {
                 
 
         Get-Linebreak
-        "Get-ExchangeServer" 
+        "Get-ExchangeServer"
+        if($CSV){
         $ExchangeServers
         $ExchangeServers|Format-List
+        $ExchangeServers|Format-List | Export-Csv .\ExchangeServers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            $ExchangeServers
+            $ExchangeServers|Format-List  
+        }
 
         Get-Linebreak
         "Get-ExchangeServerDatabase" 
+        if($CSV){
         Get-MailboxDatabase
         Get-MailboxDatabase | Format-List
         Get-MailboxDatabase | Select-Object Name,Server,MailboxRetention,ProhibitSendReceiveQuota,ProhibitSendQuota,RecoverableItemsQuota,RecoverableItemsWarningQuota,IsExcludedFromProvisioning,ReplicationType,DeletedItemRetention,
-        CircularLoggingEnabled, AdminDisplayVersion | Export-Csv .\Databases.csv -NoTypeInformation
+        CircularLoggingEnabled, AdminDisplayVersion | Export-Csv .\Databases_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-MailboxDatabase
+            Get-MailboxDatabase | Format-List
+            
+        }
         
         Get-Linebreak
         "Get-DatabaseAvailabilityGroup"
+        if($CSV){
         Get-DatabaseAvailabilityGroup
         Get-DatabaseAvailabilityGroup | Format-List
+        Get-DatabaseAvailabilityGroup | Format-List | Export-Csv .\DAG__$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-DatabaseAvailabilityGroup
+            Get-DatabaseAvailabilityGroup | Format-List 
+        }
         
         Get-Linebreak
         "Get-RetentionPolicy"
+        if($CSV){
         Get-RetentionPolicy
         Get-RetentionPolicy | Format-List
-        Get-RetentionPolicy | Select-Object name,@{Name="RetentionPolicyTagLinks";Expression={$_.RetentionPolicyTagLinks -join “;”}} | Export-Csv .\RetentionPolicies.csv -NoTypeInformation
-        
+        Get-RetentionPolicy | Select-Object name,@{Name="RetentionPolicyTagLinks";Expression={$_.RetentionPolicyTagLinks -join “;”}} | Export-Csv .\RetentionPolicies_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-RetentionPolicy
+            Get-RetentionPolicy | Format-List
+        }
+
         Get-Linebreak
         "Get-RetentionPolicyTag"
+        if($CSV) {
         Get-RetentionPolicyTag
         Get-RetentionPolicyTag | Format-List
-        Get-RetentionPolicyTag | Select-Object name,type,agelimitforretention,retentionaction | Export-Csv .\RetentionPoliciesTag.csv -NoTypeInformation
+        Get-RetentionPolicyTag | Select-Object name,type,agelimitforretention,retentionaction | Export-Csv .\RetentionPoliciesTag_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-RetentionPolicyTag
+            Get-RetentionPolicyTag | Format-List  
+        }
 
         Get-Linebreak
         "Get-JournalRule"
+        if($CSV){
         Get-JournalRule
         Get-JournalRule | Format-List
+        Get-JournalRule | Format-List | Export-Csv .\JournalRules_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-JournalRule
+            Get-JournalRule | Format-List 
+        }
 
         Get-Linebreak
         "Get-AcceptedDomain"
+        if($CSV){
         $AcceptedDomain = Get-AcceptedDomain
         $AcceptedDomain
         $AcceptedDomain | Format-List
-        $AcceptedDomain | Select-Object name,domainname,domaintype,default | Export-Csv -Path .\AcceptedDomains.csv -NoTypeInformation
+        $AcceptedDomain | Select-Object name,domainname,domaintype,default | Export-Csv -Path .\AcceptedDomains_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
         foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type MX}
         foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type TXT}
-        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME} 
+        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME}
+        }
+        else {
+            $AcceptedDomain = Get-AcceptedDomain
+            $AcceptedDomain
+            $AcceptedDomain | Format-List
+            foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type MX}
+            foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type TXT}
+            foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME}
+        } 
 
         Get-Linebreak
         "Get-EmailAddressPolicy"
+        if($CSV){
         Get-EmailAddressPolicy
         Get-EmailAddressPolicy | Format-List
-        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,@{Name="EnabledEmailAddressTemplates";Expression={$_.EnabledEmailAddressTemplates -join “;”}},RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies.csv -NoTypeInformation
-        
+        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,@{Name="EnabledEmailAddressTemplates";Expression={$_.EnabledEmailAddressTemplates -join “;”}},RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-EmailAddressPolicy
+            Get-EmailAddressPolicy | Format-List   
+        }
       
         Get-Linebreak
         "Get-TransportRule"
+        if($CSV){
         Get-TransportRule
         Get-TransportRule | Format-List
-        Get-TransportRule | Select-Object Name,Description, State, Priority | Export-Csv -Path .\TransportRules.csv -NoTypeInformation
+        Get-TransportRule | Select-Object Name,Description, State, Priority | Export-Csv -Path .\TransportRules_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
         $file = Export-TransportRuleCollection
         Set-Content -Path ".\Rules.xml" -Value $file.FileData -Encoding Byte
+        }
+        else {
+            Get-TransportRule
+            Get-TransportRule | Format-List
+            
+        }
 
         Get-Linebreak
         "Get-SendConnector"
+        if($CSV) {
         Get-SendConnector
         Get-SendConnector | Format-List
-        Get-SendConnector | Select-Object name,@{Name="SmartHosts";Expression={$_.SmartHosts -join “;”}},Enabled,@{Name="AddressSpaces";Expression={$_.AddressSpaces -join “;”}},@{Name="SourceTransportServers";Expression={$_.SourceTransportServers -join “;”}},FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\SendConnectors.csv -NoTypeInformation
+        Get-SendConnector | Select-Object name,@{Name="SmartHosts";Expression={$_.SmartHosts -join “;”}},Enabled,@{Name="AddressSpaces";Expression={$_.AddressSpaces -join “;”}},@{Name="SourceTransportServers";Expression={$_.SourceTransportServers -join “;”}},FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\SendConnectors_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-SendConnector
+            Get-SendConnector | Format-List
+        }
 
         Get-Linebreak
         "Get-ReceiveConnector"
+        if($CSV){
         Get-ReceiveConnector
         Get-ReceiveConnector | Format-List
-        Get-ReceiveConnector | Select-Object name,authmechanism,@{Name="Bindings";Expression={$_.Bindings -join “;”}},enabled,@{Name="RemoteIPRanges";Expression={$_.RemoteIPRanges -join “;”}},requireTLS,originatingserver | Export-Csv -Path .\ReceiveConnectors.csv -NoTypeInformation
-
+        Get-ReceiveConnector | Select-Object name,authmechanism,@{Name="Bindings";Expression={$_.Bindings -join “;”}},enabled,@{Name="RemoteIPRanges";Expression={$_.RemoteIPRanges -join “;”}},requireTLS,originatingserver | Export-Csv -Path .\ReceiveConnectors_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-ReceiveConnector
+            Get-ReceiveConnector | Format-List
+        }
+            
         Get-Linebreak
         "Get-TransportAgent"
         Get-TransportAgent
         Get-TransportAgent | Format-List
+       
 
         Get-Linebreak
         "Get-AddressList"
+        if($CSV){
         Get-AddressList
         Get-AddressBookPolicy
+        Get-AddressBookPolicy | Format-List | Export-Csv .\AddressList_$((Get-Date).ToString('MMddyy')) -NoTypeInformation
         Start-Sleep -s 5
+        }
+        else {
+            Get-AddressList
+            Get-AddressBookPolicy
+            Start-Sleep -s 5 
+        }
 
         Get-Linebreak
         "Get-PublicFolder"
@@ -297,21 +398,39 @@ function Get-FrankensteinExchangeDiscovery {
         Get-Linebreak
 
         "Get-OrganizationRelationship"
+        if($CSV){
         Get-OrganizationRelationship
         Get-OrganizationRelationship | Format-List
-        Get-OrganizationRelationship | Select-Object name,@{Name="DomainNames";Expression={$_.DomainNames -join “;”}},targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\OrganizationRelationships.csv -NoTypeInformation
+        Get-OrganizationRelationship | Select-Object name,@{Name="DomainNames";Expression={$_.DomainNames -join “;”}},targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\OrganizationRelationships_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-OrganizationRelationship
+            Get-OrganizationRelationship | Format-List 
+        }
 
         Get-Linebreak
         "Get-RemoteDomain"
+        if($CSV){
         Get-RemoteDomain
         Get-RemoteDomain | Format-List
-        Get-RemoteDomain | Select-Object name,domainname,allowedooftype | Export-Csv -Path .\RemoteDomains.csv -NoTypeInformation
+        Get-RemoteDomain | Select-Object name,domainname,allowedooftype | Export-Csv -Path .\RemoteDomains_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-RemoteDomain
+            Get-RemoteDomain | Format-List   
+        }
 
         Get-Linebreak
         "Get-ExchangeCertificate"
+        if($CSV){
         Get-ExchangeCertificate
         Get-ExchangeCertificate | Format-List
-        Get-ExchangeCertificate | Select-Object subject,Issuer,Thumbprint,FriendlyName,NotAfter | Export-Csv .\ExchangeCertificates.csv -NoTypeInformation
+        Get-ExchangeCertificate | Select-Object subject,Issuer,Thumbprint,FriendlyName,NotAfter | Export-Csv .\ExchangeCertificates_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-ExchangeCertificate
+            Get-ExchangeCertificate | Format-List
+        }
 
         Get-Linebreak
         "Get-HybridConfiguration"
@@ -364,36 +483,39 @@ function Install-ExchangeOnline {
 function Get-FrankensteinExchangeOnlineDiscovery {    
     [CmdletBinding()]
     Param (
-    
+    [Switch]$CSV,
+    [Switch]$UseCurrentSession
     )
    
+        if($UseCurrentSession){
+
+        }
+        else {
+            Connect-ExchangeOnline
+        }
+        
+
+        Start-Transcript -Path .\ExchangeOnlineDiscoveryTranscript_$((Get-Date).ToString('MMddyy')).txt
+
         #Define Variables
         $AllMailboxes = Get-Mailbox -ResultSize Unlimited
         $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited
         $CASMailbox = Get-CASMailbox
         
-        Connect-ExchangeOnline
-
-        Start-Transcript -Path .\ExchangeOnlineDiscoveryTranscript.txt
-        
-        Write-Host Exchange Recipient Count
-        
-
-        
-        #Get Recipient Types
+        "Exchange Recipient Count"  
         $TotalMBXCount = ($AllMailboxes).count 
         Write-Host "$TotalMBXCount Total Mailboxes"
 
-        $UserMBXCount = (Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox).count 
-        Write-Host "$UserMBXCount User Mailboxes"        
+        $UserMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "UserMailbox"}).count
+        Write-Host "$UserMBXCount User Mailboxes"    
         
-        $SharedMBXCount = (Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails SharedMailbox).count 
+        $SharedMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "SharedMailbox"}).count
         Write-Host "$SharedMBXCount Shared Mailboxes"
         
-        $RoomMBXCount = (Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails RoomMailbox).count 
+        $RoomMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "RoomMailbox"}).count
         Write-Host "$RoomMBXCount Room Mailboxes"
       
-        $EquipmentMBXCount = (Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails equipmentmailbox).count
+        $EquipmentMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "EquipmentMailbox"}).count
         Write-Host "$EquipmentMBXCount Equipment Mailboxes"
 
         $MailUserCount = (Get-MailUser -ResultSize Unlimited).count 
@@ -444,56 +566,105 @@ function Get-FrankensteinExchangeOnlineDiscovery {
 
         Get-Linebreak
         "Get-RetentionPolicy"
+        if($CSV){
         Get-RetentionPolicy
         Get-RetentionPolicy | Format-List
-        Get-RetentionPolicy | Select-Object name,@{Name="RetentionPolicyTagLinks";Expression={$_.RetentionPolicyTagLinks -join “;”}} | Export-Csv .\RetentionPolicies.csv -NoTypeInformation
-        
+        Get-RetentionPolicy | Select-Object name,@{Name="RetentionPolicyTagLinks";Expression={$_.RetentionPolicyTagLinks -join “;”}} | Export-Csv .\EXORetentionPolicies_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-RetentionPolicy
+            Get-RetentionPolicy | Format-List  
+        }
+
         Get-Linebreak
         "Get-RetentionPolicyTag"
+        if($CSV){
         Get-RetentionPolicyTag
         Get-RetentionPolicyTag | Format-List
         Get-RetentionPolicyTag | Select-Object
-        Get-RetentionPolicyTag | Select-Object name,type,agelimitforretention,retentionaction | Export-Csv .\EXORetentionPoliciesTag.csv -NoTypeInformation
+        Get-RetentionPolicyTag | Select-Object name,type,agelimitforretention,retentionaction | Export-Csv .\EXORetentionPoliciesTag_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-RetentionPolicyTag
+            Get-RetentionPolicyTag | Format-List
+            Get-RetentionPolicyTag | Select-Object 
+        }
 
         Get-Linebreak
         "Get-JournalRule"
+        if($CSV){
         Get-JournalRule
         Get-JournalRule | Format-List
+        Get-JournalRule | Format-List | Export-Csv .\EXOJournalRules_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-JournalRule
+            Get-JournalRule | Format-List
+        }
 
         Get-Linebreak
         "Get-AcceptedDomain"
+        if($CSV){
         $AcceptedDomain = Get-AcceptedDomain
         $AcceptedDomain | Format-List
-        $AcceptedDomain | Select-Object name,domainname,domaintype,default | Export-Csv -Path .\EXOAcceptedDomains.csv -NoTypeInformation
+        $AcceptedDomain | Select-Object name,domainname,domaintype,default | Export-Csv -Path .\EXOAcceptedDomains_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
         foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type MX}
         foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type TXT}
-        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME} 
+        foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME}
+        }
+        else {
+            $AcceptedDomain = Get-AcceptedDomain
+            $AcceptedDomain | Format-List
+            foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type MX}
+            foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type TXT}
+            foreach($domain in $AcceptedDomain) {Resolve-DnsName -Name  $domain -type CNAME}
+        } 
 
         Get-Linebreak
         "Get-EmailAddressPolicy"
+        if($CSV){
         Get-EmailAddressPolicy
         Get-EmailAddressPolicy | Format-List
-        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,@{Name="EnabledEmailAddressTemplates";Expression={$_.EnabledEmailAddressTemplates -join “;”}},RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies.csv -NoTypeInformation
-       
+        Get-EmailAddressPolicy | Select-Object Name,Priority,IncludedRecipients,@{Name="EnabledEmailAddressTemplates";Expression={$_.EnabledEmailAddressTemplates -join “;”}},RecipientFilterApplied | Export-Csv -Path .\EmailAddressPolicies_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-EmailAddressPolicy
+            Get-EmailAddressPolicy | Format-List 
+        }
+
         Get-Linebreak
         "Get-TransportRule"
+        if($CSV){
         Get-TransportRule
         Get-TransportRule | Format-List
-        Get-TransportRule | Select-Object Name,Description, State, Priority | Export-Csv -Path .\EXOTransportRules.csv -NoTypeInformation
+        Get-TransportRule | Select-Object Name,Description, State, Priority | Export-Csv -Path .\EXOTransportRules_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
         $file = Export-TransportRuleCollection
         Set-Content -Path ".\EXORules.xml" -Value $file.FileData -Encoding Byte
+        }
+        else {
+            Get-TransportRule
+            Get-TransportRule | Format-List
+           
+        }
 
         Get-Linebreak
         "Get-OutboundConnector"
+        if($CSV){
         Get-OutboundConnector
         Get-OutboundConnector | Format-List
-        Get-OutboundConnector | Select-Object name,@{Name="SmartHosts";Expression={$_.SmartHosts -join “;”}},Enabled,@{Name="AddressSpaces";Expression={$_.AddressSpaces -join “;”}},@{Name="SourceTransportServers";Expression={$_.SourceTransportServers -join “;”}},FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\SendConnectors.csv -NoTypeInformation
+        Get-OutboundConnector | Select-Object name,@{Name="SmartHosts";Expression={$_.SmartHosts -join “;”}},Enabled,@{Name="AddressSpaces";Expression={$_.AddressSpaces -join “;”}},@{Name="SourceTransportServers";Expression={$_.SourceTransportServers -join “;”}},FQDN,MaxMessageSize,ProtocolLoggingLevel,RequireTLS |Export-Csv -Path .\EXOInboundConnectors_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
 
         Get-Linebreak
         "Get-InboundConnector"
+        if($CSV){
         Get-InboundConnector
         Get-InboundConnector | Format-List
-        Get-InboundConnector | Select-Object name,authmechanism,@{Name="Bindings";Expression={$_.Bindings -join “;”}},enabled,@{Name="RemoteIPRanges";Expression={$_.RemoteIPRanges -join “;”}},requireTLS,originatingserver | Export-Csv -Path .\ReceiveConnectors.csv -NoTypeInformation
+        Get-InboundConnector | Select-Object name,authmechanism,@{Name="Bindings";Expression={$_.Bindings -join “;”}},enabled,@{Name="RemoteIPRanges";Expression={$_.RemoteIPRanges -join “;”}},requireTLS,originatingserver | Export-Csv -Path .\EXOOutboundConnectors_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-InboundConnector
+            Get-InboundConnector | Format-List 
+        }
 
         Get-Linebreak
         "Get-AddressBookPolicy"
@@ -504,9 +675,6 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         Get-PublicFolder -Recurse -
         "Get-MailPublicFolder"
         Get-MailPublicFolder -ResultSize unlimited
-        "Get-PublicFolderMailbox"
-        Get-Mailbox -PublicFolder -ResultSize unlimited
-
 
         Get-Linebreak
         "Get-OrganizationConfig"
@@ -516,21 +684,33 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         "Get-FederationTrust"
         Get-FederationTrust
         Get-FederationTrust | Format-List
+
+        Get-Linebreak
         "Get-OrganizationRelationship"
+        if($CSV){
         Get-OrganizationRelationship
         Get-OrganizationRelationship | Format-List
-        Get-OrganizationRelationship | Select-Object name,@{Name="DomainNames";Expression={$_.DomainNames -join “;”}},targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\OrganizationRelationships.csv -NoTypeInformation
+        Get-OrganizationRelationship | Select-Object name,@{Name="DomainNames";Expression={$_.DomainNames -join “;”}},targetautodiscoverepr,targetowaurl,targetsharingepr,targetapplicationuri,enabled |Export-Csv -Path .\EXOOrganizationRelationships_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        }
+        else {
+            Get-OrganizationRelationship
+            Get-OrganizationRelationship | Format-List
+        }
 
         Get-Linebreak
         "Get-RemoteDomain"
+        if($CSV){
         Get-RemoteDomain
         Get-RemoteDomain | Format-List
-        Get-RemoteDomain | Select-Object name,domainname,allowedooftype | Export-Csv -Path .\EXORemoteDomains.csv -NoTypeInformation
-
-      
-
+        Get-RemoteDomain | Select-Object name,domainname,allowedooftype | Export-Csv -Path .\EXORemoteDomains_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation     
+        }
+        else {
+            Get-RemoteDomain
+            Get-RemoteDomain | Format-List
+        }
   
         Stop-Transcript
+    }
 }
 
 
@@ -561,33 +741,58 @@ function Connect-All {
 function Get-FrankensteinAzureDiscovery {    
     [CmdletBinding()]
     Param (
-    
+    [Switch]$CSV,
+    [Switch]$UseCurrentSession
     )
    
+    if($UseCurrentSession){
+
+    }
+    else {
     Connect-AzureAD
     Connect-MsolService
+    }
         
     #Define Variables
     $MSOLUser = Get-MsolUser -All
     $Device = Get-MSOLDevice -all
     $Licenses = Get-MsolAccountSku
 
-    Start-Transcript .\Get-FrankensteinAzureDiscovery.txt
+    Start-Transcript .\Get-FrankensteinAzureDiscovery_$((Get-Date).ToString('MMddyy')).txt
 
+    Get-Linebreak
     "Get-MsolUser"
+    if($CSV)    {
     Write-Host $MSOLUser.count "user's discovered"
-    $MsolUser | Select-Object @{Name="AlternateEmailAddresses";Expression={$_.AlternateEmailAddresses -join “;”}},@{Name="AlternateMobilePhones";Expression={$_.AlternateMobilePhones -join “;”}},@{Name="AlternativeSecurityIds";Expression={$_.AlternativeSecurityIds -join “;”}},BlockCredential,City,CloudExchangeRecipientType,Country,Department,@{Name="DirSyncProvisioningErrors";Expression={$_.DirSyncProvisioningErrors -join “;”}},DisplayName,Errors,Fax,FirstName,ImmutableID,@{Name="IndirectLicenseErrors";Expression={$_.IndirectLicenseErrors -join “;”}},IsBlackberryUser,IsLicensed,LastDirSynced,LastName,LastPasswordChangeTimestamp,@{Name="LicenseAssignmentDetails";Expression={$_.LicenseAssignmentDetails -join “;”}},LicenseReconciliationNeeded,@{Name="Licenses";Expression={$_.Licenses -join “;”}},LiveId,MSExchRecipientTypeDetails,MSRtcSipDeploymentLocator,MSRtcSipPrimaryUserAddress,MobilePhone,ObjectId,Office,OverallProvisioningStatus,PasswordNeverExpires,PasswordResetNotRequiredDuringActivate,PhoneNumber,PortalSettings,PostalCode,PreferredDataLocation,PreferredLanguage,@{Name="ProxyAddresses";Expression={$_.ProxyAddresses -join “;”}},ReleaseTrack,@{Name="ServiceInformation";Expression={$_.ServiceInformation -join “;”}},SignInName,SoftDeletionTimestamp,State,StreetAddress,@{Name="StrongAuthenticationMethods";Expression={$_.StrongAuthenticationMethods -join “;”}},@{Name="StrongAuthenticationPhoneAppDetails";Expression={$_.StrongAuthenticationPhoneAppDetails -join “;”}},@{Name="StrongAuthenticationProofupTime";Expression={$_.StrongAuthenticationProofupTime -join “;”}},@{Name="StrongAuthenticationRequirements";Expression={$_.StrongAuthenticationRequirements -join “;”}},@{Name="StrongAuthenticationUserDetails";Expression={$_.StrongAuthenticationUserDetails -join “;”}},StrongPasswordRequired,StsRefreshTokensValidFrom,Title,UsageLocation,UserLandingPageIdentifierForO365Shell,UserPrincipalName,UserThemeIdentifierForO365Shell,UserType,ValidationStatus,WhenCreated  | Export-Csv .\MSOLUsers.csv -NoTypeInformation
+    $MsolUser | Select-Object @{Name="AlternateEmailAddresses";Expression={$_.AlternateEmailAddresses -join “;”}},@{Name="AlternateMobilePhones";Expression={$_.AlternateMobilePhones -join “;”}},@{Name="AlternativeSecurityIds";Expression={$_.AlternativeSecurityIds -join “;”}},BlockCredential,City,CloudExchangeRecipientType,Country,Department,@{Name="DirSyncProvisioningErrors";Expression={$_.DirSyncProvisioningErrors -join “;”}},DisplayName,Errors,Fax,FirstName,ImmutableID,@{Name="IndirectLicenseErrors";Expression={$_.IndirectLicenseErrors -join “;”}},IsBlackberryUser,IsLicensed,LastDirSynced,LastName,LastPasswordChangeTimestamp,@{Name="LicenseAssignmentDetails";Expression={$_.LicenseAssignmentDetails -join “;”}},LicenseReconciliationNeeded,@{Name="Licenses";Expression={$_.Licenses -join “;”}},LiveId,MSExchRecipientTypeDetails,MSRtcSipDeploymentLocator,MSRtcSipPrimaryUserAddress,MobilePhone,ObjectId,Office,OverallProvisioningStatus,PasswordNeverExpires,PasswordResetNotRequiredDuringActivate,PhoneNumber,PortalSettings,PostalCode,PreferredDataLocation,PreferredLanguage,@{Name="ProxyAddresses";Expression={$_.ProxyAddresses -join “;”}},ReleaseTrack,@{Name="ServiceInformation";Expression={$_.ServiceInformation -join “;”}},SignInName,SoftDeletionTimestamp,State,StreetAddress,@{Name="StrongAuthenticationMethods";Expression={$_.StrongAuthenticationMethods -join “;”}},@{Name="StrongAuthenticationPhoneAppDetails";Expression={$_.StrongAuthenticationPhoneAppDetails -join “;”}},@{Name="StrongAuthenticationProofupTime";Expression={$_.StrongAuthenticationProofupTime -join “;”}},@{Name="StrongAuthenticationRequirements";Expression={$_.StrongAuthenticationRequirements -join “;”}},@{Name="StrongAuthenticationUserDetails";Expression={$_.StrongAuthenticationUserDetails -join “;”}},StrongPasswordRequired,StsRefreshTokensValidFrom,Title,UsageLocation,UserLandingPageIdentifierForO365Shell,UserPrincipalName,UserThemeIdentifierForO365Shell,UserType,ValidationStatus,WhenCreated  | Export-Csv .\MSOLUsers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    }
+    else {
+        Write-Host $MSOLUser.count "user's discovered"    
+    }
 
+    Get-Linebreak
     "Get-MsolCompanyInformation"
     Get-MsolCompanyInformation
-    
-    "Get-MsolAccountSku"
-    $Licenses
-    $Licenses | Select-Object AccountName,AccountSkuID,ActiveUnits,ConsumedUnits,LockedOutUnits,SKUID,SkuPartNumber,TargetClass,SuspendedUnits,WarningUnits | Export-Csv .\MSOLLicenses.csv -NoTypeInformation
-        
-    "Get-MsolDevice"
-    Write-Host $Device.count "device's discovered"
-    $Device |Select-Object Enabled,ObjectID,DeviceID,DisplayName,DeviceObjectVersion,DeviceOSType,DeviceOSVersion,DeviceTrustType,DeviceTrustLevel,@{Name="DevicePhysicalIds";Expression={$_.DevicePhysicalIds -join “;”}},ApproximateLastLogonTimestamp,@{Name="AlternativeSecurityIds";Expression={$_.AlternativeSecurityIds -join “;”}},DirSyncEnabled,LastDirSyncTime,RegisteredOwners,@{Name="GraphDeviceObject";Expression={$_.GraphDeviceObject -join “;”}}  | Export-Csv -NoTypeInformation .\MSOLDevices.csv
 
+    Get-Linebreak
+    "Get-MsolAccountSku"
+    if($CSV) {
+    $Licenses | Select-Object AccountSkuID,ActiveUnits,WarningUnits,ConsumedUnits
+    $Licenses | Select-Object AccountName,AccountSkuID,ActiveUnits,ConsumedUnits,LockedOutUnits,SKUID,SkuPartNumber,TargetClass,SuspendedUnits,WarningUnits | Export-Csv .\MSOLLicenses_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    }
+    else {
+        $Licenses | Select-Object AccountSkuID,ActiveUnits,WarningUnits,ConsumedUnits 
+    }
+
+    Get-Linebreak
+    "Get-MsolDevice"
+    if($CSV){    
+    Write-Host $Device.count "device's discovered"
+    $Device |Select-Object Enabled,ObjectID,DeviceID,DisplayName,DeviceObjectVersion,DeviceOSType,DeviceOSVersion,DeviceTrustType,DeviceTrustLevel,@{Name="DevicePhysicalIds";Expression={$_.DevicePhysicalIds -join “;”}},ApproximateLastLogonTimestamp,@{Name="AlternativeSecurityIds";Expression={$_.AlternativeSecurityIds -join “;”}},DirSyncEnabled,LastDirSyncTime,RegisteredOwners,@{Name="GraphDeviceObject";Expression={$_.GraphDeviceObject -join “;”}}  | Export-Csv -NoTypeInformation .\MSOLDevices_$((Get-Date).ToString('MMddyy')).csv
+    }
+    else {
+        Write-Host $Device.count "device's discovered"
+    }
+    Stop-Transcript
 }
 

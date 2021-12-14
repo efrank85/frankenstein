@@ -76,6 +76,8 @@ function Get-FrankensteinHelp {
         [-noMFA]
 
         5) Connect-OnPremServer: Connects to on-premises Exchange server using FQDN
+
+        6) Get-FrankesnteinRecipientCounts: Displays summary of all recipient types
                 
                 "
         }
@@ -113,7 +115,6 @@ function Get-FrankensteinVirtualDirectories {
 
     }
 
-
 function Get-FrankensteinExchangeDiscovery {    
     [CmdletBinding()]
     Param (
@@ -132,81 +133,9 @@ function Get-FrankensteinExchangeDiscovery {
         
         Start-Transcript -Path .\ExchangeDiscoveryTranscript_$((Get-Date).ToString('MMddyy')).txt
         
-        Write-Host Exchange Recipient Count
-        
-        #Define Variables
-        $AllMailboxes = Get-Mailbox -ResultSize Unlimited -IgnoreDefaultScope
-        $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited -IgnoreDefaultScope 
-        $ExchangeServers = Get-ExchangeServer
-        #$ClientAccess = Get-ClientAccessService
-   
-        
-        #Get Recipient Types
-        $TotalMBXCount = ($AllMailboxes).count 
-        Write-Host "$TotalMBXCount Total Mailboxes"
-
-        $UserMBXCount = (Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox).count 
-        Write-Host "$UserMBXCount User Mailboxes"        
-        
-        $SharedMBXCount = (Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails SharedMailbox).count 
-        Write-Host "$SharedMBXCount Shared Mailboxes"
-        
-        $RoomMBXCount = (Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails RoomMailbox).count 
-        Write-Host "$RoomMBXCount Room Mailboxes"
-      
-        $EquipmentMBXCount = (Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails equipmentmailbox).count
-        Write-Host "$EquipmentMBXCount Equipment Mailboxes"
-
-        $LinkedMbxCount = (Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails LinkedMailbox).count 
-        Write-Host "$LinkedMbxCount Linked Mailboxes"
-
-        $RemoteMbxCount = (Get-RemoteMailbox -ResultSize Unlimited).count 
-        Write-Host "$RemoteMbxCount Remote Mailboxes"
-
-        $MailUserCount = (Get-MailUser -ResultSize Unlimited).count 
-        Write-Host "$MailUserCount MailUsers"
-
-        $MailContactCount = (Get-MailContact -ResultSize Unlimited).count 
-        Write-Host "$MailContactCount Mail Contacts"
-
-        $DistributionGroupCount = ($AllDistGroups).count 
-        Write-Host "$DistributionGroupCount Distribution Groups"
-
-        $DynamicDistributionGroup = (Get-DynamicDistributionGroup -ResultSize Unlimited).count 
-        Write-Host "$DynamicDistributionGroup DynamicDistribution Groups"
-
-        $LitHoldCount = ($AllMailboxes | Where-Object{$_.LitigationHoldEnabled -eq $TRUE}).count 
-        Write-Host "$LitHoldCount Mailboxes on Litigation Hold"
-
-        $RetentionHoldCount = ($AllMailboxes | Where-Object{$_.RetentionHoldEnabled -eq $TRUE}).count
-        Write-Host "$RetentionHoldCount Mailboxes on Retention Hold"
-
-        $GetPublicFolder = (Get-PublicFolder -recurse).count
-        Write-Host "$GetPublicFolder Public Folders"
-
-        $GetMailPublicFolder = (Get-MailPublicFolder).count
-        Write-Host "$GetMailPublicFolder Mail Public Folders"
-
-        $GetPublicFolderMailbox = (Get-Mailbox -ResultSize unlimited -PublicFolder -IgnoreDefaultScope).count
-        Write-Host "$GetPublicFolderMailbox Public Folder Mailboxes"
-
-        $POP = ($CASMailbox | Where-Object{$_.popenabled -eq $true}).count 
-        Write-Host "$POP Mailboxes with POP3 Enabled"
-        
-        $IMAP = ($CASMailbox | Where-Object{$_.imapenabled -eq $true}).count 
-        Write-Host "$IMAP Mailboxes with IMAP Enabled"
-        
-        $MAPI = ($CASMailbox | Where-Object{$_.mapienabled -eq $true}).count 
-        Write-Host "$MAPI Mailboxes with MAPI Enabled"
-        
-        $ActiveSync = ($CASMailbox | Where-Object{$_.activesyncenabled -eq $true}).count 
-        Write-Host "$ActiveSync Mailboxes with ActiveSync Enabled"
-        
-        $OWA = ($CASMailbox | Where-Object{$_.owaenabled -eq $true}).count 
-        Write-Host "$OWA Mailboxes with OWA Enabled" 
-        
-        $ADPDisabled = ($AllMailboxes | Where-Object{$_.EmailAddressPolicyEnabled -eq $false}).count 
-        Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"     
+        Get-Linebreak
+        "RecipientCounts"
+        Get-FrankensteinRecipientCounts     
                 
 
         Get-Linebreak
@@ -460,7 +389,6 @@ function Get-FrankensteinExchangeDiscovery {
         Stop-Transcript
 }
 
-
 function Install-ExchangeOnline {    
     [CmdletBinding()]
     Param (
@@ -479,6 +407,77 @@ function Install-ExchangeOnline {
 
         }
 
+function Get-FrankensteinRecipientCounts {
+    [CmdletBinding()]
+    Param (
+    )   
+
+      #Define Variables
+      $AllMailboxes = Get-Mailbox -ResultSize Unlimited
+      $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited
+      $CASMailbox = Get-CASMailbox
+      
+      "Exchange Recipient Count"  
+      $TotalMBXCount = ($AllMailboxes).count 
+      Write-Host "$TotalMBXCount Total Mailboxes"
+
+      $UserMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "UserMailbox"} | Measure-Object).count
+      Write-Host "$UserMBXCount User Mailboxes"    
+      
+      $SharedMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "SharedMailbox"}| Measure-Object).count
+      Write-Host "$SharedMBXCount Shared Mailboxes"
+      
+      $RoomMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "RoomMailbox"} | Measure-Object).count
+      Write-Host "$RoomMBXCount Room Mailboxes"
+    
+      $EquipmentMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "EquipmentMailbox"} | Measure-Object).count
+      Write-Host "$EquipmentMBXCount Equipment Mailboxes"
+
+      $MailUserCount = (Get-MailUser -ResultSize Unlimited | Measure-Object).count 
+      Write-Host "$MailUserCount MailUsers"
+
+      $MailContactCount = (Get-MailContact -ResultSize Unlimited | Measure-Object).count 
+      Write-Host "$MailContactCount Mail Contacts"
+
+      $DistributionGroupCount = ($AllDistGroups | Measure-Object).count 
+      Write-Host "$DistributionGroupCount Distribution Groups"
+
+      $DynamicDistributionGroup = (Get-DynamicDistributionGroup -ResultSize Unlimited | Measure-Object).count 
+      Write-Host "$DynamicDistributionGroup DynamicDistribution Groups"
+
+      $LitHoldCount = ($AllMailboxes | Where-Object{$_.LitigationHoldEnabled -eq $TRUE} | Measure-Object).count 
+      Write-Host "$LitHoldCount Mailboxes on Litigation Hold"
+
+      $RetentionHoldCount = ($AllMailboxes | Where-Object{$_.RetentionHoldEnabled -eq $TRUE} | Measure-Object).count
+      Write-Host "$RetentionHoldCount Mailboxes on Retention Hold"
+
+      $GetPublicFolder = (Get-PublicFolder -recurse | Measure-Object).count
+      Write-Host "$GetPublicFolder Public Folders"
+
+      $GetMailPublicFolder = (Get-MailPublicFolder | Measure-Object).count
+      Write-Host "$GetMailPublicFolder Mail Public Folders"
+
+      $GetPublicFolderMailbox = (Get-Mailbox -ResultSize unlimited -PublicFolder | Measure-Object).count
+      Write-Host "$GetPublicFolderMailbox Public Folder Mailboxes"
+
+      $POP = ($CASMailbox | Where-Object{$_.popenabled -eq $true} | Measure-Object).count 
+      Write-Host "$POP Mailboxes with POP3 Enabled"
+      
+      $IMAP = ($CASMailbox | Where-Object{$_.imapenabled -eq $true} | Measure-Object).count 
+      Write-Host "$IMAP Mailboxes with IMAP Enabled"
+      
+      $MAPI = ($CASMailbox | Where-Object{$_.mapienabled -eq $true} | Measure-Object).count 
+      Write-Host "$MAPI Mailboxes with MAPI Enabled"
+      
+      $ActiveSync = ($CASMailbox | Where-Object{$_.activesyncenabled -eq $true} | Measure-Object).count 
+      Write-Host "$ActiveSync Mailboxes with ActiveSync Enabled"
+      
+      $OWA = ($CASMailbox | Where-Object{$_.owaenabled -eq $true} | Measure-Object).count 
+      Write-Host "$OWA Mailboxes with OWA Enabled" 
+      
+      $ADPDisabled = ($AllMailboxes | Where-Object{$_.EmailAddressPolicyEnabled -eq $false} | Measure-Object).count 
+      Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"     
+}
 
 function Get-FrankensteinExchangeOnlineDiscovery {    
     [CmdletBinding()]
@@ -497,72 +496,9 @@ function Get-FrankensteinExchangeOnlineDiscovery {
 
         Start-Transcript -Path .\ExchangeOnlineDiscoveryTranscript_$((Get-Date).ToString('MMddyy')).txt
 
-        #Define Variables
-        $AllMailboxes = Get-Mailbox -ResultSize Unlimited
-        $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited
-        $CASMailbox = Get-CASMailbox
-        
-        "Exchange Recipient Count"  
-        $TotalMBXCount = ($AllMailboxes).count 
-        Write-Host "$TotalMBXCount Total Mailboxes"
-
-        $UserMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "UserMailbox"}).count
-        Write-Host "$UserMBXCount User Mailboxes"    
-        
-        $SharedMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "SharedMailbox"}).count
-        Write-Host "$SharedMBXCount Shared Mailboxes"
-        
-        $RoomMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "RoomMailbox"}).count
-        Write-Host "$RoomMBXCount Room Mailboxes"
-      
-        $EquipmentMBXCount = ($AllMailboxes | Where-Object{$_.recipienttypedetails -eq "EquipmentMailbox"}).count
-        Write-Host "$EquipmentMBXCount Equipment Mailboxes"
-
-        $MailUserCount = (Get-MailUser -ResultSize Unlimited).count 
-        Write-Host "$MailUserCount MailUsers"
-
-        $MailContactCount = (Get-MailContact -ResultSize Unlimited).count 
-        Write-Host "$MailContactCount Mail Contacts"
-
-        $DistributionGroupCount = ($AllDistGroups).count 
-        Write-Host "$DistributionGroupCount Distribution Groups"
-
-        $DynamicDistributionGroup = (Get-DynamicDistributionGroup -ResultSize Unlimited).count 
-        Write-Host "$DynamicDistributionGroup DynamicDistribution Groups"
-
-        $LitHoldCount = ($AllMailboxes | Where-Object{$_.LitigationHoldEnabled -eq $TRUE}).count 
-        Write-Host "$LitHoldCount Mailboxes on Litigation Hold"
-
-        $RetentionHoldCount = ($AllMailboxes | Where-Object{$_.RetentionHoldEnabled -eq $TRUE}).count
-        Write-Host "$RetentionHoldCount Mailboxes on Retention Hold"
-
-        $GetPublicFolder = (Get-PublicFolder -recurse).count
-        Write-Host "$GetPublicFolder Public Folders"
-
-        $GetMailPublicFolder = (Get-MailPublicFolder).count
-        Write-Host "$GetMailPublicFolder Mail Public Folders"
-
-        $GetPublicFolderMailbox = (Get-Mailbox -ResultSize unlimited -PublicFolder).count
-        Write-Host "$GetPublicFolderMailbox Public Folder Mailboxes"
-
-        $POP = ($CASMailbox | Where-Object{$_.popenabled -eq $true}).count 
-        Write-Host "$POP Mailboxes with POP3 Enabled"
-        
-        $IMAP = ($CASMailbox | Where-Object{$_.imapenabled -eq $true}).count 
-        Write-Host "$IMAP Mailboxes with IMAP Enabled"
-        
-        $MAPI = ($CASMailbox | Where-Object{$_.mapienabled -eq $true}).count 
-        Write-Host "$MAPI Mailboxes with MAPI Enabled"
-        
-        $ActiveSync = ($CASMailbox | Where-Object{$_.activesyncenabled -eq $true}).count 
-        Write-Host "$ActiveSync Mailboxes with ActiveSync Enabled"
-        
-        $OWA = ($CASMailbox | Where-Object{$_.owaenabled -eq $true}).count 
-        Write-Host "$OWA Mailboxes with OWA Enabled" 
-        
-        $ADPDisabled = ($AllMailboxes | Where-Object{$_.EmailAddressPolicyEnabled -eq $false}).count 
-        Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"     
-                
+        Get-Linebreak
+        "RecipientCounts"
+        Get-FrankensteinRecipientCounts                
 
         Get-Linebreak
         "Get-RetentionPolicy"
@@ -713,7 +649,6 @@ function Get-FrankensteinExchangeOnlineDiscovery {
     }
 }
 
-
 function Connect-All {    
     [CmdletBinding()]
     Param (
@@ -736,7 +671,6 @@ function Connect-All {
         Connect-ExchangeOnline 
     }
 }
-
     
 function Get-FrankensteinAzureDiscovery {    
     [CmdletBinding()]

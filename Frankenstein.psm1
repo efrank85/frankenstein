@@ -514,13 +514,11 @@ function Get-FrankensteinExchangeOnlineDiscovery {
         if($CSV){
         Get-RetentionPolicyTag
         Get-RetentionPolicyTag | Format-List
-        Get-RetentionPolicyTag | Select-Object
         Get-RetentionPolicyTag | Select-Object name,type,agelimitforretention,retentionaction | Export-Csv .\EXORetentionPoliciesTag_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
         }
         else {
             Get-RetentionPolicyTag
             Get-RetentionPolicyTag | Format-List
-            Get-RetentionPolicyTag | Select-Object 
         }
 
         Get-Linebreak
@@ -721,6 +719,52 @@ function Get-FrankensteinAzureDiscovery {
     else {
         Write-Host $Device.count "device's discovered"
     }
+
+    Get-Linebreak
+    "Get-MSOLDirSyncFeatures"
+    Get-MSOLDirSyncFeatures
+
+    Get-Linebreak
+    if($CSV) {
+    "Get-AzureADExtensionProperty"
+    Get-AzureADExtensionProperty | Format-List
+    Get-AzureADExtensionProperty | Select-Object Name,ObjectID,AppDisplayName,DataType,IsSyncedFromOnPremises,@{Name="TargetObjects";Expression={$_.TargetObjects -join “;”}} | Export-Csv .\AzureADExtensions_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    }
+    else {
+        "Get-AzureADExtensionProperty"
+        Get-AzureADExtensionProperty | Format-List
+    }
+
     Stop-Transcript
+}
+
+function Get-FrankensteinGSuiteDiscovery {
+    [CmdletBinding()]
+    Param (
+    [Switch]$CSV
+    )
+
+    if (Get-InstalledModule -Name PSGsuite -ErrorAction SilentlyContinue ) {
+        Write-Host "G Suite Module detected, continuing with discovery"
+        
+    } 
+    else {        
+        Write-Host "Foolish human. You must install the PSGsuite PowerShell Module to continue: https://psgsuite.io/"
+        exit
+    }
+
+    $filePath = ".\GSuiteInput.csv"
+    if (test-$filepath) {Import-csv $filepath 
+        Write-Host "G Suite input file detected, continuing with discovery"
+    }
+    else 
+    {
+    Write-Output "$filePath doesn't exist. Export users from the G Suite Admin console https://accounts.google.com/ and save it as GSuiteInput.csv to your working PowerShell directory. Aborting G Suite discovery."
+        exit
+    }
+
+        Get-mailbox -Resultsize 1
+
+
 }
 

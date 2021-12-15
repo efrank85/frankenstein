@@ -745,7 +745,10 @@ function Get-FrankensteinGSuiteDiscovery {
     )
 
     if (Get-InstalledModule -Name PSGsuite -ErrorAction SilentlyContinue ) {
-        Write-Host "G Suite Module detected, continuing with discovery"
+        Write-Host "PSGSuite Module detected, continuing with discovery"
+        Start-Sleep -s 2
+        Show-PSGSuiteConfig
+        Start-Sleep -s 2
         
     } 
     else {        
@@ -753,18 +756,39 @@ function Get-FrankensteinGSuiteDiscovery {
         exit
     }
 
-    $filePath = ".\GSuiteInput.csv"
-    if (test-$filepath) {Import-csv $filepath 
+    Get-Linebreak
+    
+    $GSuiteInput = ".\GSuiteInput.csv"
+    if (test-path $GSuiteInput) {
         Write-Host "G Suite input file detected, continuing with discovery"
+        Start-Sleep -s 2
     }
     else 
     {
-    Write-Output "$filePath doesn't exist. Export users from the G Suite Admin console https://accounts.google.com/ and save it as GSuiteInput.csv to your working PowerShell directory. Aborting G Suite discovery."
+    Write-Output "GSuite Input File doesn't exist. Export users from the G Suite Admin console https://accounts.google.com/ and save it as GSuiteInput.csv to your working PowerShell directory. Aborting G Suite discovery."
         exit
     }
 
-        Get-mailbox -Resultsize 1
+    Get-Linebreak
+    "Processing GSUser user report....."
+    $GSUserImport = Import-csv  $GSuiteInput 
 
+    mkdir .\GSuiteDiscovery_$((Get-Date).ToString('MMddyy'))
+    Set-Location  .\GSuiteDiscovery_$((Get-Date).ToString('MMddyy'))
+    
+    $GSUserImport | ForEach-Object{Get-GSUser -User $_."Email Address [Required]"} | Select-object User,PrimaryEmail,AgreedToTerms,@{Name="Aliases";Expression={$_.Aliases -join “;”}},Archived,ChangePasswordAtNextLogin,CreationTime,DeletionTime,Id,IncludeInGlobalAddressList,IpWhitelisted,IsAdmin,IsDelegate,IsEnforced,IsEnrolledIn2Sv,IsMailboxSetup,LastLoginTime,@{Name="NonEditableAliases";Expression={$_.NonEditableAliases -join “;”}},OrgUnitPath,@{Name="Organizations";Expression={$_.Organizations -join “;”}},@{Name="Phones";Expression={$_.Phones -join “;”}},RecoveryEmail,Suspended,SuspensionReason | Export-csv .\PSGsuiteUsers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+
+    Get-Linebreak
+    "Processing GSUser alias report....."
+    $GSUserImport | ForEach-Object{Get-GSUserAlias -user $_."Email Address [Required]"} | Select-object AliasValue,PrimaryEmail | Export-CSV .\PSGsuiteAlias_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+
+    Get-Linebreak
+    "Processing GSUser delegates....."
+    $GSUserImport | ForEach-Object{Get-GSGmailDelegates -user $_."Email Address [Required]" -WarningAction SilentlyContinue} | Export-CSV .\PSGsuiteDelegates_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation   
+
+    Get-Linebreak
+    "Processing GSUser SendAS settings....."
+    $GSUserImport | ForEach-Object{Get-GSGmailSendAsSettings -user $_."Email Address [Required]" -WarningAction SilentlyContinue} | Where-Object{$_.ISPrimary -ne $true} | Select-object User,DisplayName,IsDefault,IsPrimary,SendAsEmail,ReplyToAddress | Export-CSV .\PSGsuiteSendAs_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation   
 
 }
 

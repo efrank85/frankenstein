@@ -78,6 +78,11 @@ function Get-FrankensteinHelp {
         5) Connect-OnPremServer: Connects to on-premises Exchange server using FQDN
 
         6) Get-FrankesnteinRecipientCounts: Displays summary of all recipient types
+
+        7) Get-FrankensteinGSuiteDiscovery: Outputs G Suite discovery CSV files. 
+                
+                Prerequisites: PSGsuite https://psgsuite.io/
+                Input File: Export users from the G Suite Admin console https://accounts.google.com/ and save it as GSuiteInput.csv to your working PowerShell directory. Aborting G Suite discovery.
                 
                 "
         }
@@ -757,7 +762,7 @@ function Get-FrankensteinGSuiteDiscovery {
     }
 
     Get-Linebreak
-    
+
     $GSuiteInput = ".\GSuiteInput.csv"
     if (test-path $GSuiteInput) {
         Write-Host "G Suite input file detected, continuing with discovery"

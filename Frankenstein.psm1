@@ -12,7 +12,8 @@
     Get-FrankensteinHelp: View all Functions in this module
 
 .EXAMPLE
-    Get-FrankensteinExchangeOnlineDiscovery -VirtualDirectories 
+    Get-FrankensteinExchangeDiscovery -Online -CSV -UseCurrentSession
+    Get-FrankensteinGSuiteDiscovery -CSV
 
 
 .INPUTS

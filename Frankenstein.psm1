@@ -201,13 +201,11 @@ function Get-FrankensteinRecipientCounts {
       Write-Host "$OWA Mailboxes with OWA Enabled" 
       
       $ADPDisabled = ($AllMailboxes | Where-Object{$_.EmailAddressPolicyEnabled -eq $false} | Measure-Object).count 
-      Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"  
-      
-      if($online){
-        $UnifiedGroup = (Get-UnifiedGroup -ResultSize unlimited).count
-        Write-Host "$UnifiedGroup User Mailboxes"      
-      }
-}
+      Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"        
+    
+    $UnifiedGroup = (Get-UnifiedGroup -ResultSize unlimited).count
+    Write-Host "$UnifiedGroup User Mailboxes"      
+
 function Connect-All {    
     [CmdletBinding()]
     Param (

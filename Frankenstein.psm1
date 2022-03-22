@@ -112,7 +112,6 @@ function Get-FrankensteinVirtualDirectories {
         }
 
 }
-
 function Install-ExchangeOnline {    
     [CmdletBinding()]
     Param (
@@ -202,9 +201,13 @@ function Get-FrankensteinRecipientCounts {
       Write-Host "$OWA Mailboxes with OWA Enabled" 
       
       $ADPDisabled = ($AllMailboxes | Where-Object{$_.EmailAddressPolicyEnabled -eq $false} | Measure-Object).count 
-      Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"     
+      Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"  
+      
+      if($online){
+        $UnifiedGroup = (Get-UnifiedGroup -ResultSize unlimited).count
+        Write-Host "$UnifiedGroup User Mailboxes"      
+      }
 }
-
 function Connect-All {    
     [CmdletBinding()]
     Param (
@@ -388,7 +391,8 @@ function Get-FrankensteinExchangeDiscovery {
         Get-Linebreak
         "Get-ExchangeServer"
         $ExchangeServers = Get-ExchangeServer
-        $ExchangeServers|Format-List$ExchangeServers|Select-Object Name,Domain,Edition,FQDN,IsHubTransportServer,IsClientAccessServer,IsEdgeServer,IsMailboxServer,IsUnifiedMessagingServer,IsFrontendTransportServer,OrganizationalUnit,AdminDisplayVersion,Site,ServerRole | Export-Csv .\ExchangeServers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+        $ExchangeServers|Format-List  
+        $ExchangeServers|Select-Object Name,Domain,Edition,FQDN,IsHubTransportServer,IsClientAccessServer,IsEdgeServer,IsMailboxServer,IsUnifiedMessagingServer,IsFrontendTransportServer,OrganizationalUnit,AdminDisplayVersion,Site,ServerRole | Export-Csv .\ExchangeServers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
         }        
         else {
             "Get-ExchangeServer"
@@ -624,6 +628,10 @@ function Get-FrankensteinExchangeDiscovery {
             Get-OrganizationRelationship
             Get-OrganizationRelationship | Format-List 
         }
+
+        "Get-IntraOrganizationConnector"
+        Get-IntraOrganizationConnector | Format-List
+        Get-IntraOrganizationConfiguration
                
         if($Online){
 

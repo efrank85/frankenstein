@@ -132,6 +132,7 @@ function Install-ExchangeOnline {
 function Get-FrankensteinRecipientCounts {
     [CmdletBinding()]
     Param (
+        [Switch]$Online
     )   
 
       #Define Variables
@@ -170,6 +171,11 @@ function Get-FrankensteinRecipientCounts {
       $DynamicDistributionGroup = (Get-DynamicDistributionGroup -ResultSize Unlimited | Measure-Object).count 
       Write-Host "$DynamicDistributionGroup DynamicDistribution Groups"
 
+      if($online){
+        $UnifiedGroup = (Get-UnifiedGroup -ResultSize unlimited).count
+        Write-Host "$UnifiedGroup Unified Groups"
+      }
+
       $LitHoldCount = ($AllMailboxes | Where-Object{$_.LitigationHoldEnabled -eq $TRUE} | Measure-Object).count 
       Write-Host "$LitHoldCount Mailboxes on Litigation Hold"
 
@@ -201,12 +207,9 @@ function Get-FrankensteinRecipientCounts {
       Write-Host "$OWA Mailboxes with OWA Enabled" 
       
       $ADPDisabled = ($AllMailboxes | Where-Object{$_.EmailAddressPolicyEnabled -eq $false} | Measure-Object).count 
-      Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"        
-    
-    $UnifiedGroup = (Get-UnifiedGroup -ResultSize unlimited).count
-    Write-Host "$UnifiedGroup User Mailboxes"      
+      Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"       
+            
 }
-
 function Connect-All {    
     [CmdletBinding()]
     Param (

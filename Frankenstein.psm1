@@ -205,6 +205,7 @@ function Get-FrankensteinRecipientCounts {
     
     $UnifiedGroup = (Get-UnifiedGroup -ResultSize unlimited).count
     Write-Host "$UnifiedGroup User Mailboxes"      
+}
 
 function Connect-All {    
     [CmdletBinding()]

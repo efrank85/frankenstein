@@ -628,8 +628,10 @@ function Get-FrankensteinExchangeDiscovery {
             Get-OrganizationRelationship | Format-List 
         }
 
+        Get-Linebreak
         "Get-IntraOrganizationConnector"
         Get-IntraOrganizationConnector | Format-List
+        "Get-IntraOrganizationConfiguration"
         Get-IntraOrganizationConfiguration
                
         if($Online){

@@ -125,9 +125,18 @@ function Install-ExchangeOnline {
         Install-Module -Name PowerShellGet -Force
         Update-Module -Name PowerShellGet
         Install-Module -Name ExchangeOnlineManagement -Confirm:$false
-        Import-Module ExchangeOnlineManagement
-        
+        Import-Module ExchangeOnlineManagement       
 
+}
+
+function Install-All {
+    [CmdletBinding()]
+    Param (
+    
+    )
+        Install-ExchangeOnline
+        Install-Module msonline
+        Install-Module azureAD -AllowClobber
 }
 function Get-FrankensteinRecipientCounts {
     [CmdletBinding()]

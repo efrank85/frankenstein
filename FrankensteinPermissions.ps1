@@ -1,3 +1,32 @@
+<#
+.SYNOPSIS
+    Retreives Full Access, SendAS and SendOnBehalf permissions.
+
+.DESCRIPTION
+    Retreives Full Access, SendAS and SendOnBehalf permissions.
+    Requires minimum of Exchange Reader. Global Reader will not work.
+
+.PARAMETER 
+    
+
+.EXAMPLE
+    .\FrankensteinPermissions.ps1 -UseCurrentSession -FullAccess -SendAs -SendOnBehalf 
+
+
+.INPUTS
+    CSV - Must Include "DisplayName" header
+
+.OUTPUTS
+    CSV
+    
+
+.NOTES
+    Author:  Eric D. Frank
+    09/13/23 - Updated to use GitHub as repository
+  
+#>
+ 
+
 #Accept input paramenters
 param(
 [switch]$FullAccess,
@@ -154,7 +183,7 @@ function main{
   $MBs=Import-Csv -Header "DisplayName" $MBNamesFile
   foreach($item in $MBs)
   {
-   Get-Mailbox -Identity $item.displayname | Foreach{
+   Get-Mailbox -Identity $item.displayname | ForEach-Object{
    $MBUserCount++
    Get_MBPermission
    }
@@ -163,7 +192,7 @@ function main{
  #Getting all User mailbox
  else
  {
-  Get-mailbox -ResultSize Unlimited | Where{$_.DisplayName -notlike "Discovery Search Mailbox"} | foreach{
+  Get-mailbox -ResultSize Unlimited | Where{$_.DisplayName -notlike "Discovery Search Mailbox"} | ForEach-Object{
    $MBUserCount++
    Get_MBPermission}
  }
@@ -175,7 +204,7 @@ if((Test-Path -Path $ExportCSV) -eq "True")
 {
  Write-Host "Detailed report available in: $ExportCSV" 
  $Prompt = New-Object -ComObject wscript.shell  
- $UserInput = $Prompt.popup("YA WANT THIS TASTY OUTPUT?",`  
+ $UserInput = $Prompt.popup("YA WANT THIS TASTY OUTPUT?",`
  0,"Open Output File",4)  
  If ($UserInput -eq 6)  
  {  
@@ -186,8 +215,7 @@ Else
 {
   Write-Host No mailbox found that matches your criteria.
 }
-#Clean up session 
-#Get-PSSession | Remove-PSSession
+
 }
  . main
  

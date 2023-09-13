@@ -6,34 +6,21 @@ param(
 [switch]$UserMailboxOnly,
 [switch]$AdminsOnly,
 [string]$MBNamesFile,
-[string]$UserName,
-[string]$Password,
-[switch]$MFA
+[Switch]$UseCurrentSession
 )
 
 
 function Print_Output
 {
- #Get admin roles assigned to user 
-<# if($RolesAssigned -eq "")
- {
-   $Roles=(Get-MsolUserRole -UserPrincipalName $upn).Name 
-   if($Roles.count -eq 0) 
-   { 
-     $RolesAssigned="No roles" 
-   } 
-   else 
-   { 
-     foreach($Role in $Roles) 
-    { 
-      $RolesAssigned=$RolesAssigned+$Role 
-      if($Roles.indexof($role) -lt (($Roles.count)-1)) 
-      { 
-        $RolesAssigned=$RolesAssigned+"," 
-      } 
-    } 
-  } 
- }#>
+
+#Connect to Exchange Online
+ if($UseCurrentSession){
+}
+
+else {
+   Connect-ExchangeOnline
+}
+
  #Mailbox type based filter
  if(($UserMailboxOnly.IsPresent) -and ($MBType -ne "UserMailbox"))
  { 
@@ -144,73 +131,6 @@ function main{
   Exit
  }
  
- #Authentication using MFA
-<# if($MFA.IsPresent)
- {
-  $MFAExchangeModule = ((Get-ChildItem -Path $($env:LOCALAPPDATA+"\Apps\2.0\") -Filter CreateExoPSSession.ps1 -Recurse ).FullName | Select-Object -Last 1)
-  If ($MFAExchangeModule -eq $null)
-  {
-   Write-Host  `nPlease install Exchange Online MFA Module.  -ForegroundColor yellow
-   
-   Write-Host You can install module using below blog : `nLink `nOR you can install module directly by entering "Y"`n
-   $Confirm= Read-Host Are you sure you want to install module directly? [Y] Yes [N] No
-   if($Confirm -match "[yY]")
-   {
-     Write-Host Yes
-     Start-Process "iexplore.exe" "https://cmdletpswmodule.blob.core.windows.net/exopsmodule/Microsoft.Online.CSE.PSModule.Client.application"
-   }
-   else
-   {
-    Start-Process 'https://http://o365reports.com/2019/04/17/connect-exchange-online-using-mfa/'
-    Exit
-   }
-   $Confirmation= Read-Host Have you installed Exchange Online MFA Module? [Y] Yes [N] No
-   
-    if($Confirmation -match "[yY]")
-    {
-     $MFAExchangeModule = ((Get-ChildItem -Path $($env:LOCALAPPDATA+"\Apps\2.0\") -Filter CreateExoPSSession.ps1 -Recurse ).FullName | Select-Object -Last 1)
-     If ($MFAExchangeModule -eq $null)
-     {
-      Write-Host Exchange Online MFA module is not available -ForegroundColor red
-      Exit
-     }
-    }
-    else
-    { 
-     Write-Host Exchange Online PowerShell Module is required
-     Start-Process 'https://http://o365reports.com/2019/04/17/connect-exchange-online-using-mfa/'
-     Exit
-    }    
-   }
- 
-  #Importing Exchange MFA Module
-  . "$MFAExchangeModule"
-  Write-Host Enter credential in prompt to connect to Exchange Online
-  Connect-EXOPSSession -WarningAction SilentlyContinue
-  Write-Host Connected to Exchange Online
-  Write-Host `nEnter credential in prompt to connect to MSOnline
-  #Importing MSOnline Module
-  Connect-MsolService | Out-Null
-  Write-Host Connected to MSOnline `n`nReport generation in progress...
- }
- #Authentication using non-MFA
- else
- {
-  #Storing credential in script for scheduling purpose/ Passing credential as parameter
-  if(($UserName -ne "") -and ($Password -ne ""))
-  {
-   $SecuredPassword = ConvertTo-SecureString -AsPlainText $Password -Force
-   $Credential  = New-Object System.Management.Automation.PSCredential $UserName,$SecuredPassword
-  }
-  else
-  {
-   $Credential=Get-Credential -Credential $null
-  }
-  Connect-MsolService -Credential $credential 
-  $Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri https://outlook.office365.com/powershell-liveid/ -Credential $Credential -Authentication Basic -AllowRedirection
-  Import-PSSession $Session -CommandName Get-Mailbox,Get-MailboxPermission,Get-RecipientPermission -FormatTypeName * -AllowClobber | Out-Null
- }
- #>
  #Set output file
  $ExportCSV=".\MBPermission_$((Get-Date -format yyyy-MMM-dd-ddd` hh-mm` tt).ToString()).csv"
  $Result="" 

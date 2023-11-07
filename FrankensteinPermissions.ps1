@@ -83,7 +83,7 @@ function Get_MBPermission
   #Getting delegated Fullaccess permission for mailbox
   if(($FilterPresent -eq 'False') -or ($FullAccess.IsPresent))
   {
-   $FullAccessPermissions=(Get-MailboxPermission -Identity $upn | where { ($_.AccessRights -contains "FullAccess") -and ($_.IsInherited -eq $false) -and -not ($_.User -match "NT AUTHORITY" -or $_.User -match "S-1-5-21") }).User
+   $FullAccessPermissions=(Get-MailboxPermission -Identity $upn | Where-Object{ ($_.AccessRights -contains "FullAccess") -and ($_.IsInherited -eq $false) -and -not ($_.User -match "NT AUTHORITY" -or $_.User -match "S-1-5-21") }).User
    if([string]$FullAccessPermissions -ne "")
    {
     $Print=1
@@ -104,7 +104,7 @@ function Get_MBPermission
   #Getting delegated SendAs permission for mailbox
   if(($FilterPresent -eq 'False') -or ($SendAs.IsPresent))
   {
-   $SendAsPermissions=(Get-RecipientPermission -Identity $upn | where{ -not (($_.Trustee -match "NT AUTHORITY") -or ($_.Trustee -match "S-1-5-21"))}).Trustee
+   $SendAsPermissions=(Get-RecipientPermission -Identity $upn | Where-Object{ -not (($_.Trustee -match "NT AUTHORITY") -or ($_.Trustee -match "S-1-5-21"))}).Trustee
    if([string]$SendAsPermissions -ne "")
    {
     $Print=1
@@ -144,7 +144,6 @@ function Get_MBPermission
     }
    }
  }
-
 
 
 function main{
@@ -192,7 +191,7 @@ function main{
  #Getting all User mailbox
  else
  {
-  Get-mailbox -ResultSize Unlimited | Where{$_.DisplayName -notlike "Discovery Search Mailbox"} | ForEach-Object{
+  Get-mailbox -ResultSize Unlimited | Where-Object{$_.DisplayName -notlike "Discovery Search Mailbox"} | ForEach-Object{
    $MBUserCount++
    Get_MBPermission}
  }
@@ -204,7 +203,7 @@ if((Test-Path -Path $ExportCSV) -eq "True")
 {
  Write-Host "Detailed report available in: $ExportCSV" 
  $Prompt = New-Object -ComObject wscript.shell  
- $UserInput = $Prompt.popup("YA WANT THIS TASTY OUTPUT?",`
+ $UserInput = $Prompt.popup("Do you want to export results to .CSV?",`
  0,"Open Output File",4)  
  If ($UserInput -eq 6)  
  {  

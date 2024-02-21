@@ -721,34 +721,7 @@ function Get-FrankensteinPublicFolderDiscovery {
 
 }
 
-<#
-.SYNOPSIS
-    Retreives Full Access, SendAS and SendOnBehalf permissions.
 
-.DESCRIPTION
-    Retreives Full Access, SendAS and SendOnBehalf permissions.
-    Requires minimum of Exchange Reader. Global Reader will not work.
-
-.PARAMETER 
-    
-
-.EXAMPLE
-    .\FrankensteinPermissions.ps1 -UseCurrentSession -FullAccess -SendAs -SendOnBehalf 
-
-
-.INPUTS
-    CSV - Must Include "DisplayName" header
-
-.OUTPUTS
-    CSV
-    
-
-.NOTES
-    Author:  Eric D. Frank
-    09/13/23 - Updated to use GitHub as repository
-  
-#>
- 
 
 #Accept input paramenters
 
@@ -761,7 +734,8 @@ function Get-FrankensteinMailboxPermissions {
         [switch]$UserMailboxOnly,
         [switch]$AdminsOnly,
         [string]$MBNamesFile,
-        [Switch]$UseCurrentSession
+        [Switch]$UseCurrentSession,
+        [Switch]$Help
         )
         
         
@@ -795,6 +769,39 @@ function Get-FrankensteinMailboxPermissions {
             $Results = New-Object PSObject -Property $Result 
             $Results |select-object DisplayName,UserPrinciPalName,MailboxType,AccessType,UserWithAccess,Roles | Export-Csv -Path $ExportCSV -Notype -Append 
             }
+        }
+
+        if($Help)
+        {Write-Host
+        
+        "
+        .SYNOPSIS
+            Retreives Full Access, SendAS and SendOnBehalf permissions.
+        
+        .DESCRIPTION
+            Retreives Full Access, SendAS and SendOnBehalf permissions.
+            Requires minimum of Exchange Reader. Global Reader will not work.
+        
+        .PARAMETER 
+            
+        
+        .EXAMPLE
+            .\FrankensteinPermissions.ps1 -UseCurrentSession -FullAccess -SendAs -SendOnBehalf 
+        
+        
+        .INPUTS
+            CSV - Must Include DisplayName header
+        
+        .OUTPUTS
+            CSV
+            
+        
+        .NOTES
+            Author:  Eric D. Frank
+            09/13/23 - Updated to use GitHub as repository
+          
+        "
+
         }
         
         #Getting Mailbox permission

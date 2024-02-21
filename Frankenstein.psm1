@@ -801,7 +801,7 @@ function Get-FrankensteinMailboxPermissions {
             09/13/23 - Updated to use GitHub as repository
           
         "
-        Exit
+        {Exit}
 
         }
         

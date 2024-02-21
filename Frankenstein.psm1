@@ -749,7 +749,13 @@ function Get-FrankensteinMailboxPermissions {
             Retreives Full Access, SendAS and SendOnBehalf permissions.
             Requires minimum of Exchange Reader. Global Reader will not work.
         
-        .PARAMETER 
+        .PARAMETER
+            -Help - Provides Help information
+            -UserMailboxOnly - Retreives only mailboxes of type UserMailbox.
+            -UserCurrentSession - Will use current session. Otherwise will prompt to connect to Exchange Online.
+            -MBDNamesFile - Input file to scope permissions you are gathering, otherwise will default to all. CSV must contain DisplayName header.
+            -FullAccess, -SendAs, -SendOnBehalf - Scope permissions to a specific delegation type. Otherwise it will default to all.
+            -AdminsOnly - Will scope permission gathering to just Exchange Administrators.
             
         
         .EXAMPLE

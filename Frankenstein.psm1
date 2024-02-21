@@ -738,6 +738,39 @@ function Get-FrankensteinMailboxPermissions {
         [Switch]$Help
         )
         
+        if($Help)
+        {Write-Host
+        
+        "
+        .SYNOPSIS
+            Retreives Full Access, SendAS and SendOnBehalf permissions.
+        
+        .DESCRIPTION
+            Retreives Full Access, SendAS and SendOnBehalf permissions.
+            Requires minimum of Exchange Reader. Global Reader will not work.
+        
+        .PARAMETER 
+            
+        
+        .EXAMPLE
+            .\FrankensteinPermissions.ps1 -UseCurrentSession -FullAccess -SendAs -SendOnBehalf 
+        
+        
+        .INPUTS
+            CSV - Must Include DisplayName header
+        
+        .OUTPUTS
+            CSV
+            
+        
+        .NOTES
+            Author:  Eric D. Frank
+            09/13/23 - Updated to use GitHub as repository
+          
+        "
+        }
+        else
+        {
         
         function Print_Output
         {
@@ -771,39 +804,7 @@ function Get-FrankensteinMailboxPermissions {
             }
         }
 
-        if($Help)
-        {Write-Host
-        
-        "
-        .SYNOPSIS
-            Retreives Full Access, SendAS and SendOnBehalf permissions.
-        
-        .DESCRIPTION
-            Retreives Full Access, SendAS and SendOnBehalf permissions.
-            Requires minimum of Exchange Reader. Global Reader will not work.
-        
-        .PARAMETER 
-            
-        
-        .EXAMPLE
-            .\FrankensteinPermissions.ps1 -UseCurrentSession -FullAccess -SendAs -SendOnBehalf 
-        
-        
-        .INPUTS
-            CSV - Must Include DisplayName header
-        
-        .OUTPUTS
-            CSV
-            
-        
-        .NOTES
-            Author:  Eric D. Frank
-            09/13/23 - Updated to use GitHub as repository
-          
-        "
-        {Exit}
-
-        }
+   
         
         #Getting Mailbox permission
         function Get_MBPermission
@@ -952,3 +953,4 @@ function Get-FrankensteinMailboxPermissions {
         }
             . main
 }            
+        }

@@ -320,11 +320,11 @@ function Get-FrankensteinGSuiteDiscovery {
     [CmdletBinding()]
     Param (
     [Switch]$CSV,
-    [Swithc]$IncludeGroupSettings,
+    [Switch]$IncludeGroupSettings,
     [Switch]$IncludeGroupMembership,
     [Switch]$IncludeDelegates,
     [Switch]$IncludeSendAsSettings,
-    [switch]$IncludeAutoForwardSettings
+    [Switch]$IncludeAutoForwardSettings
     )
 
     if (Get-InstalledModule -Name PSGsuite -ErrorAction SilentlyContinue ) {
@@ -422,7 +422,7 @@ function Get-FrankensteinGSuiteDiscovery {
     Get-Linebreak
     if($IncludeAutoForwardSettings){
     "Collecting Auto Forward Settings"
-    $GSUser | Get-GSGmailAutoForwardingSettings | ?{$_.Enabled -eq $True} | Select-object User,Disposition,EmailAddress,Enabled | Export-CSV .\PSGsuiteAutoForwardSettings_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    $GSUser | Get-GSGmailAutoForwardingSettings | Where-Object{$_.Enabled -eq $True} | Select-object User,Disposition,EmailAddress,Enabled | Export-CSV .\PSGsuiteAutoForwardSettings_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
     }
 
     Get-Linebreak
@@ -814,10 +814,6 @@ function Get-FrankensteinPublicFolderDiscovery {
 
 }
 
-
-
-#Accept input paramenters
-
 function Get-FrankensteinMailboxPermissions {    
     [CmdletBinding()]
     Param (
@@ -1052,4 +1048,4 @@ function Get-FrankensteinMailboxPermissions {
         }
             . main
 }            
-        }
+}

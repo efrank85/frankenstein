@@ -377,13 +377,7 @@ function Get-FrankensteinGSuiteDiscovery {
     $GSUser | Select-object User,PrimaryEmail,AgreedToTerms,@{Name="Aliases";Expression={$_.Aliases -join “;”}},Archived,ChangePasswordAtNextLogin,CreationTime,DeletionTime,Id,IncludeInGlobalAddressList,IpWhitelisted,IsAdmin,IsDelegate,IsEnforced,IsEnrolledIn2Sv,IsMailboxSetup,LastLoginTime,@{Name="NonEditableAliases";Expression={$_.NonEditableAliases -join “;”}},OrgUnitPath,@{Name="Organizations";Expression={$_.Organizations -join “;”}},@{Name="Phones";Expression={$_.Phones -join “;”}},RecoveryEmail,Suspended,SuspensionReason | Export-csv .\GSUsers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
     $GSUser | Get-GSUserAlias | Select-object AliasValue,PrimaryEmail | Export-CSV .\GSUserAlias_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
     }
-    Get-Linebreak
-    "Creating GSDelegates Report"
-    if($IncludeDelegates){
-    $GSUser | Get-GSGmailDelegates | 
-
-    }
-
+ 
     Get-Linebreak
     "Processing GSUser delegates....."
     if($IncludeDelegates){    

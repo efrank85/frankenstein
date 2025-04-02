@@ -335,7 +335,7 @@ function Get-FrankensteinGSuiteDiscovery {
         
     } 
     else {        
-        Write-Host "Foolish human. You must install the PSGsuite PowerShell Module to continue: https://psgsuite.io/"
+        Write-Host "You must install the PSGsuite PowerShell Module to continue: https://psgsuite.io/"
         exit
     }
 

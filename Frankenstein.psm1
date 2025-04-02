@@ -319,7 +319,12 @@ function Get-FrankensteinAzureDiscovery {
 function Get-FrankensteinGSuiteDiscovery {
     [CmdletBinding()]
     Param (
-    [Switch]$CSV
+    [Switch]$CSV,
+    [Swithc]$IncludeGroupSettings,
+    [Switch]$IncludeGroupMembership,
+    [Switch]$IncludeDelegates,
+    [Switch]$IncludeSendAsSettings,
+    [switch]$IncludeAutoForwardSettings
     )
 
     if (Get-InstalledModule -Name PSGsuite -ErrorAction SilentlyContinue ) {
@@ -335,29 +340,123 @@ function Get-FrankensteinGSuiteDiscovery {
     }
 
     Get-Linebreak
-    "Processing GSUser user report....."
-    $GSUserImport = Get-GSUserList
+
 
     mkdir .\GSuiteDiscovery_$((Get-Date).ToString('MMddyy')) 
     Set-Location  .\GSuiteDiscovery_$((Get-Date).ToString('MMddyy'))
-    
-    $GSUserImport | ForEach-Object{Get-GSUser -User $_.User} | Select-object User,PrimaryEmail,AgreedToTerms,@{Name="Aliases";Expression={$_.Aliases -join “;”}},Archived,ChangePasswordAtNextLogin,CreationTime,DeletionTime,Id,IncludeInGlobalAddressList,IpWhitelisted,IsAdmin,IsDelegate,IsEnforced,IsEnrolledIn2Sv,IsMailboxSetup,LastLoginTime,@{Name="NonEditableAliases";Expression={$_.NonEditableAliases -join “;”}},OrgUnitPath,@{Name="Organizations";Expression={$_.Organizations -join “;”}},@{Name="Phones";Expression={$_.Phones -join “;”}},RecoveryEmail,Suspended,SuspensionReason | Export-csv .\PSGsuiteUsers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
 
+
+    Start-Transcript .\GSuiteDiscoveryTranscript__$((Get-Date).ToString('MMddyy')).txt
+
+    "Building Variables....."
+    $GSUser = Get-GSUser -Filter *
+    $GSGroup = Get-GSGroup
+    $GSDomain = Get-GSDomain
+    $GSResource = Get-GSResource -Filter *
+    $GSOrganizationalUnitList = Get-GSOrganizationalUnitList
+    $GSUserLicenseInfo = Get-GSUserLicenseInfo
+    
+    $GSUserCount = $GSUser.count
+    $GSGroupCount = $GSGroup.count
+    $GSDomainCount = $GSDomain.count
+    $GSResourceCount = $GSResource.count
+    $GSOrganizationalUnitListCount = $GSOrganizationalUnitList.count
+    $GSUserLicenseInfoCount = $GSUserLicenseInfo.count
+
+    Write-Host "$GSUserCount Total Users"
+    Write-Host "$GSGroupCount Total Groups"
+    Write-Host "$GSDomainCount Total Domains"
+    Write-Host "$GSResourceCount Total Resources"
+    Write-Host "$GSOrganizationalUnitListCount Total Org Units"
+    Write-Host "$GSUserLicenseInfoCount Licenses Applied accross $GSUserCount Users"
+   
+    
     Get-Linebreak
-    "Processing GSUser alias report....."
-    $GSUserImport | ForEach-Object{Get-GSUserAlias -user $_.User} | Select-object AliasValue,PrimaryEmail | Export-CSV .\PSGsuiteAlias_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    "Creating GSUser Report"
+    if($CSV){
+    $GSUser | Select-object User,PrimaryEmail,AgreedToTerms,@{Name="Aliases";Expression={$_.Aliases -join “;”}},Archived,ChangePasswordAtNextLogin,CreationTime,DeletionTime,Id,IncludeInGlobalAddressList,IpWhitelisted,IsAdmin,IsDelegate,IsEnforced,IsEnrolledIn2Sv,IsMailboxSetup,LastLoginTime,@{Name="NonEditableAliases";Expression={$_.NonEditableAliases -join “;”}},OrgUnitPath,@{Name="Organizations";Expression={$_.Organizations -join “;”}},@{Name="Phones";Expression={$_.Phones -join “;”}},RecoveryEmail,Suspended,SuspensionReason | Export-csv .\GSUsers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    $GSUser | Get-GSUserAlias | Select-object AliasValue,PrimaryEmail | Export-CSV .\GSUserAlias_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    }
+    Get-Linebreak
+    "Creating GSDelegates Report"
+    if($IncludeDelegates){
+    $GSUser | Get-GSGmailDelegates | 
+
+    }
 
     Get-Linebreak
     "Processing GSUser delegates....."
-    $GSUserImport | ForEach-Object{Get-GSGmailDelegates -user $_.User -WarningAction SilentlyContinue} | Export-CSV .\PSGsuiteDelegates_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation   
+    if($IncludeDelegates){    
+    $DelegationList = foreach ($User in $GSUsers) {
+        $Delegates = Get-GSGmailDelegate -User $User.PrimaryEmail
+        
+        if ($Delegates) {
+            $Delegates | ForEach-Object {
+                [PSCustomObject]@{
+                    User           = $User.PrimaryEmail
+                    DelegateEmail  = $_.DelegateEmail
+                    VerificationStatus = $_.VerificationStatus
+                }
+            }
+        }
+    }
+    
+    $DelegationList | Export-Csv .\GSDelegates_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    }
 
     Get-Linebreak
-    "Processing GSUser SendAS settings....."
-    $GSUserImport | ForEach-Object{Get-GSGmailSendAsSettings -user $_.User -WarningAction SilentlyContinue} | Where-Object{$_.ISPrimary -ne $true} | Select-object User,DisplayName,IsDefault,IsPrimary,SendAsEmail,ReplyToAddress | Export-CSV .\PSGsuiteSendAs_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation   
+    "Processing GSUser Send As Settings....."
+    if($IncludeSendAsSettings){    
+    $SendAsSettings = foreach ($User in $GSUsers) {
+        $SendAs = Get-GSGmailSendAsSettings -User $User.PrimaryEmail
+        
+        if ($SendAs) {
+            $SendAs | ForEach-Object {
+                [PSCustomObject]@{
+                    User           = $User.PrimaryEmail
+                    SendAsEmail  = $_.SendAsEmail
+                    IsDefault = $_.IsDefault
+                    IsPrimary = $_.IsPrimary
+                }
+            }
+        }
+    }
+    
+    $SendAsSettings | Export-Csv .\GSSendAsSettings_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    }
 
     Get-Linebreak
-    "Processing GSUser Auto Forwarding report....."
-    $GSUserImport | ForEach-Object{Get-GSGmailAutoForwardingSettings -user $_.User} | Where-Object{$_.EmailAddress -ne $null} | Select-object User,Disposition,EmailAddress,Enabled | Export-CSV .\PSGsuiteAutoForwardSettings_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    if($IncludeAutoForwardSettings){
+    "Collecting Auto Forward Settings"
+    $GSUser | Get-GSGmailAutoForwardingSettings | ?{$_.Enabled -eq $True} | Select-object User,Disposition,EmailAddress,Enabled | Export-CSV .\PSGsuiteAutoForwardSettings_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    }
+
+    Get-Linebreak
+    if($IncludeGroupSettings) {
+    "Collecting Group Information"
+    $GSGroupSettings = $GSGroup | Get-GSGroupSettings 
+    $GSGroupSettings | Export-Csv .\GSGroupSettings_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation   
+    }
+
+    Get-Linebreak
+    if($IncludeGroupMembership) {
+    "Collecting Group Information"
+    $GSGroupMember = $GSGroup | Get-GSGroupMember
+    $GSGroupMember | Export-Csv .\GSGroupMembers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation   
+    }
+
+    Get-Linkebreak
+    if($CSV){
+    "Collecting Org Units"
+    $GSOrganizationalUnitList | Select-Object BlockInheritance,Description,Name,OrgUnitId,OrgUnitPath,ParentOrgUnitId,ParentOrgUnitPath | Export-Csv .\GSOrganizationalUnitList_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    }
+
+    Get-Linebreak
+    if($CSV){
+    $GSUserLicenseInfo | Select-Object UserId,ProductId,ProductName,SkuId,SkuName | Export-Csv .\GSUserLicenseInfo_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    }
+
+    Stop-Transcript
 
 }
 function Get-FrankensteinExchangeDiscovery {    

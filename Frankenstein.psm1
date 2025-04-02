@@ -346,7 +346,10 @@ function Get-FrankensteinGSuiteDiscovery {
 
     Start-Transcript .\GSuiteDiscoveryTranscript__$((Get-Date).ToString('MMddyy')).txt
 
-    "Building Variables"
+    Get-Linebreak
+
+    "Building Variables
+    "
     $GSUser = Get-GSUser -Filter *
     $GSGroup = Get-GSGroup
     $GSDomain = Get-GSDomain
@@ -380,7 +383,7 @@ function Get-FrankensteinGSuiteDiscovery {
     "Processing GSUser delegates....."
     if($IncludeDelegates){    
     $DelegationList = foreach ($User in $GSUser) {
-        $Delegates = Get-GSGmailDelegate -User $User.PrimaryEmail
+        $Delegates = Get-GSGmailDelegate -User $User.PrimaryEmail -ErrorAction SilentlyContinue
         
         if ($Delegates) {
             $Delegates | ForEach-Object {

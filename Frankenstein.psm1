@@ -379,7 +379,7 @@ function Get-FrankensteinGSuiteDiscovery {
     Get-Linebreak
     "Processing GSUser delegates....."
     if($IncludeDelegates){    
-    $DelegationList = foreach ($User in $GSUsers) {
+    $DelegationList = foreach ($User in $GSUser) {
         $Delegates = Get-GSGmailDelegate -User $User.PrimaryEmail
         
         if ($Delegates) {
@@ -399,7 +399,7 @@ function Get-FrankensteinGSuiteDiscovery {
     Get-Linebreak
     "Processing GSUser Send As Settings....."
     if($IncludeSendAsSettings){    
-    $SendAsSettings = foreach ($User in $GSUsers) {
+    $SendAsSettings = foreach ($User in $GSUser) {
         $SendAs = Get-GSGmailSendAsSettings -User $User.PrimaryEmail
         
         if ($SendAs) {

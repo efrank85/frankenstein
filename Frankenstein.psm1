@@ -327,7 +327,7 @@ function Get-FrankensteinGSuiteDiscovery {
     [Switch]$IncludeAutoForwardSettings
     )
 
-    if (Get-InstalledModule -Name PSGsuite -ErrorAction SilentlyContinue ) {
+ <#   if (Get-InstalledModule -Name PSGsuite -ErrorAction SilentlyContinue ) {
         Write-Host "PSGSuite Module detected, continuing with discovery"
         Start-Sleep -s 2
         Show-PSGSuiteConfig
@@ -336,11 +336,9 @@ function Get-FrankensteinGSuiteDiscovery {
     } 
     else {        
         Write-Host "You must install the PSGsuite PowerShell Module to continue: https://psgsuite.io/"
-        exit
-    }
-
+        
+    }#>
     Get-Linebreak
-
 
     mkdir .\GSuiteDiscovery_$((Get-Date).ToString('MMddyy')) 
     Set-Location  .\GSuiteDiscovery_$((Get-Date).ToString('MMddyy'))

@@ -372,8 +372,7 @@ function Get-FrankensteinGSuiteDiscovery {
     Write-Host "$GSUserLicenseInfoCount Licenses Applied accross $GSUserCount Users"
    
     
-    Get-Linebreak
-    
+    Get-Linebreak    
     if($CSV){
     "Creating GSUser Report"
     $GSUser | Select-object User,PrimaryEmail,AgreedToTerms,@{Name="Aliases";Expression={$_.Aliases -join “;”}},Archived,ChangePasswordAtNextLogin,CreationTime,DeletionTime,Id,IncludeInGlobalAddressList,IpWhitelisted,IsAdmin,IsDelegate,IsEnforced,IsEnrolledIn2Sv,IsMailboxSetup,LastLoginTime,@{Name="NonEditableAliases";Expression={$_.NonEditableAliases -join “;”}},OrgUnitPath,@{Name="Organizations";Expression={$_.Organizations -join “;”}},@{Name="Phones";Expression={$_.Phones -join “;”}},RecoveryEmail,Suspended,SuspensionReason | Export-csv .\GSUsers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
@@ -381,9 +380,8 @@ function Get-FrankensteinGSuiteDiscovery {
     }
  
     Get-Linebreak
-
     if($IncludeDelegates){  
-    "Processing GSUser delegates....."
+    "Processing GSUser Delegates....."
     $WarningPreference = "SilentlyContinue"  
     $DelegationList = foreach ($User in $GSUser) {
         $Delegates = Get-GSGmailDelegate -User $User.PrimaryEmail -ErrorAction SilentlyContinue
@@ -403,8 +401,7 @@ function Get-FrankensteinGSuiteDiscovery {
     $WarningPreference = "Continue"  # Reset to default behavior
     }
 
-    Get-Linebreak
-    
+    Get-Linebreak    
     if($IncludeSendAsSettings){    
     "Processing GSUser Send As Settings....."
     $SendAsSettings = foreach ($User in $GSUser) {

@@ -430,14 +430,14 @@ function Get-FrankensteinGSuiteDiscovery {
 
     Get-Linebreak
     if($IncludeGroupSettings) {
-    "Collecting Group Information"
+    "Collecting Group Settings"
     $GSGroupSettings = $GSGroup | Get-GSGroupSettings 
     $GSGroupSettings | Export-Csv .\GSGroupSettings_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation   
     }
 
     Get-Linebreak
     if($IncludeGroupMembership) {
-    "Collecting Group Information"
+    "Collecting Group Membership"
     $GSGroupMember = $GSGroup | Get-GSGroupMember
     $GSGroupMember | Export-Csv .\GSGroupMembers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation   
     }

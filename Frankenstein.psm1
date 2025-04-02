@@ -381,7 +381,7 @@ function Get-FrankensteinGSuiteDiscovery {
  
     Get-Linebreak
     if($IncludeDelegates){  
-    "Processing GSUser Delegates....."
+    "Processing GSUser Delegates"
     $WarningPreference = "SilentlyContinue"  
     $DelegationList = foreach ($User in $GSUser) {
         $Delegates = Get-GSGmailDelegate -User $User.PrimaryEmail -ErrorAction SilentlyContinue
@@ -403,7 +403,7 @@ function Get-FrankensteinGSuiteDiscovery {
 
     Get-Linebreak    
     if($IncludeSendAsSettings){    
-    "Processing GSUser Send As Settings....."
+    "Processing GSUser Send As Settings"
     $SendAsSettings = foreach ($User in $GSUser) {
         $SendAs = Get-GSGmailSendAsSettings -User $User.PrimaryEmail
         

@@ -437,7 +437,7 @@ function Get-FrankensteinGSuiteDiscovery {
     $GSGroupMember | Export-Csv .\GSGroupMembers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation   
     }
 
-    Get-Linkebreak
+    Get-Linebreak
     if($CSV){
     "Collecting Org Units"
     $GSOrganizationalUnitList | Select-Object BlockInheritance,Description,Name,OrgUnitId,OrgUnitPath,ParentOrgUnitId,ParentOrgUnitPath | Export-Csv .\GSOrganizationalUnitList_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation

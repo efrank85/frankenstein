@@ -373,15 +373,18 @@ function Get-FrankensteinGSuiteDiscovery {
    
     
     Get-Linebreak
-    "Creating GSUser Report"
+    
     if($CSV){
+    "Creating GSUser Report"
     $GSUser | Select-object User,PrimaryEmail,AgreedToTerms,@{Name="Aliases";Expression={$_.Aliases -join “;”}},Archived,ChangePasswordAtNextLogin,CreationTime,DeletionTime,Id,IncludeInGlobalAddressList,IpWhitelisted,IsAdmin,IsDelegate,IsEnforced,IsEnrolledIn2Sv,IsMailboxSetup,LastLoginTime,@{Name="NonEditableAliases";Expression={$_.NonEditableAliases -join “;”}},OrgUnitPath,@{Name="Organizations";Expression={$_.Organizations -join “;”}},@{Name="Phones";Expression={$_.Phones -join “;”}},RecoveryEmail,Suspended,SuspensionReason | Export-csv .\GSUsers_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
     $GSUser | Get-GSUserAlias | Select-object AliasValue,PrimaryEmail | Export-CSV .\GSUserAlias_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
     }
  
     Get-Linebreak
+
+    if($IncludeDelegates){  
     "Processing GSUser delegates....."
-    if($IncludeDelegates){    
+    $WarningPreference = "SilentlyContinue"  
     $DelegationList = foreach ($User in $GSUser) {
         $Delegates = Get-GSGmailDelegate -User $User.PrimaryEmail -ErrorAction SilentlyContinue
         
@@ -397,11 +400,13 @@ function Get-FrankensteinGSuiteDiscovery {
     }
     
     $DelegationList | Export-Csv .\GSDelegates_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
+    $WarningPreference = "Continue"  # Reset to default behavior
     }
 
     Get-Linebreak
-    "Processing GSUser Send As Settings....."
+    
     if($IncludeSendAsSettings){    
+    "Processing GSUser Send As Settings....."
     $SendAsSettings = foreach ($User in $GSUser) {
         $SendAs = Get-GSGmailSendAsSettings -User $User.PrimaryEmail
         
@@ -448,6 +453,7 @@ function Get-FrankensteinGSuiteDiscovery {
 
     Get-Linebreak
     if($CSV){
+    "Collecting User License Information"
     $GSUserLicenseInfo | Select-Object UserId,ProductId,ProductName,SkuId,SkuName | Export-Csv .\GSUserLicenseInfo_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation
     }
 

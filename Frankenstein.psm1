@@ -348,7 +348,7 @@ function Get-FrankensteinGSuiteDiscovery {
 
     Start-Transcript .\GSuiteDiscoveryTranscript__$((Get-Date).ToString('MMddyy')).txt
 
-    "Building Variables....."
+    "Building Variables.....test"
     $GSUser = Get-GSUser -Filter *
     $GSGroup = Get-GSGroup
     $GSDomain = Get-GSDomain

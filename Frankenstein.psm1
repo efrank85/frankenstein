@@ -824,8 +824,8 @@ function Get-FrankensteinMailboxPermissions {
         [switch]$FullAccess,
         [switch]$SendAs,
         [switch]$SendOnBehalf,
-        [switch]$UserMailboxOnly,
         [Switch]$UseCurrentSession,
+        [Switch]$CSV,
         [Switch]$Help
         )
         
@@ -877,6 +877,74 @@ function Get-FrankensteinMailboxPermissions {
         else {
             Connect-ExchangeOnline
         }        
+       $Results = @() 
+       Write-Host "Gathering mailbox information"
+       $Mailbox = Get-Mailbox -ResultSize Unlimited 
+
+       # --- Full Access ---
+       if($FullAccess){ 
+        Write-Host "Gathering Full Access Permissions"
+       $Mailbox | ForEach-Object {
+            $mbx = $_
+            $perms = Get-MailboxPermission -Identity $mbx.Identity -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.IsInherited -and $_.User -notlike "NT AUTHORITY\SELF" }
+            foreach ($perm in $perms) {
+                $Results += [PSCustomObject]@{
+                    DisplayName      = $mbx.DisplayName
+                    UserPrincipalName= $mbx.UserPrincipalName
+                    RecipientType    = $mbx.RecipientTypeDetails
+                    AccessType       = "FullAccess"
+                    UserWithAccess   = $perm.User
+                }
+            }
+        }
+    }
+
+        # --- Send As ---
+        if($SendAs){ 
+        Write-Host "Gathering Send As Permissions"
+        $Mailbox | ForEach-Object {
+            $mbx = $_
+            $perms = Get-RecipientPermission -Identity $mbx.Identity -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Trustee -ne "NT AUTHORITY\SELF" }
+            foreach ($perm in $perms) {
+                $Results += [PSCustomObject]@{
+                    DisplayName      = $mbx.DisplayName
+                    UserPrincipalName= $mbx.UserPrincipalName
+                    RecipientType    = $mbx.RecipientTypeDetails
+                    AccessType       = "SendAs"
+                    UserWithAccess   = $perm.Trustee
+                }
+            }
+        }
+    }
+
+
+        # --- Send on Behalf ---
+        if($SendOnBehalf){ 
+        Write-Host "Gathering Send On Behalf Permissions"
+        $Mailbox | ForEach-Object {
+            $mbx = $_
+            foreach ($delegate in $mbx.GrantSendOnBehalfTo) {
+                $Results += [PSCustomObject]@{
+                    DisplayName      = $mbx.DisplayName
+                    UserPrincipalName= $mbx.UserPrincipalName
+                    RecipientType    = $mbx.RecipientTypeDetails
+                    AccessType       = "SendOnBehalf"
+                    UserWithAccess   = $delegate
+                }
+            }
+        }
+    }
+
+        # Export to CSV
+        if($CSV){ 
+        Write-Host "Gathering Full Access Permissions"
+        $Results | Export-Csv .\MailboxPermissions_$((Get-Date).ToString('MMddyy')).csv -NoTypeInformation -Encoding UTF8
+        Write-Host "Export complete: .\MailboxPermissions_$((Get-Date).ToString('MMddyy')).csv" -ForegroundColor Green
+        }
+
+
 
 }
 

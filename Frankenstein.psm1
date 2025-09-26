@@ -219,7 +219,7 @@ function Get-FrankensteinRecipientCounts {
             
 }
 
-function Get-FrankensteinRecipientCountsV3 {
+function Get-FrankensteinRecipientCountsV4 {
     [CmdletBinding()]
     Param ()
 
@@ -258,8 +258,14 @@ function Get-FrankensteinRecipientCountsV3 {
         return
     }
 
-    Write-Host "Gathering mailbox statistics for $Environment..." -ForegroundColor Cyan
+    Write-Host "Building CASMailbox lookup table..." -ForegroundColor Cyan
+    # Create hashtable keyed by Identity for fast CASMailbox lookup
+    $CASLookup = @{}
+    foreach ($cas in $CASMailbox) {
+        $CASLookup[$cas.Identity.ToString()] = $cas
+    }
 
+    Write-Host "Gathering mailbox statistics for $Environment..." -ForegroundColor Cyan
     $total = $AllMailboxes.Count
     $count = 0
 
@@ -281,9 +287,9 @@ function Get-FrankensteinRecipientCountsV3 {
         if ($mbx.RetentionHoldEnabled) { $RetentionHoldCount++ }
         if ($mbx.EmailAddressPolicyEnabled -eq $false) { $ADPDisabledCount++ }
 
-        # Protocols: match CASMailbox by Identity
-        $cas = $CASMailbox | Where-Object { $_.Identity -eq $mbx.Identity }
-        if ($cas) {
+        # Protocols: fast lookup via hashtable
+        if ($CASLookup.ContainsKey($mbx.Identity.ToString())) {
+            $cas = $CASLookup[$mbx.Identity.ToString()]
             if ($cas.PopEnabled) { $POPCount++ }
             if ($cas.ImapEnabled) { $IMAPCount++ }
             if ($cas.MAPIEnabled) { $MAPICount++ }
@@ -324,6 +330,18 @@ function Get-FrankensteinRecipientCountsV3 {
         ActiveSyncEnabled          = $ActiveSyncCount
         OWAEnabled                 = $OWACount
         EmailAddressPolicyDisabled = $ADPDisabledCount
+    }
+
+    # Optional: Print to console with green highlight for non-zero
+    Write-Host "`nExchange Recipient Counts:" -ForegroundColor Cyan
+    foreach ($key in $Stats.Keys) {
+        $value = $Stats[$key]
+        if ($value -gt 0) {
+            Write-Host ("{0,-30} : {1}" -f $key, $value) -ForegroundColor Green
+        }
+        else {
+            Write-Host ("{0,-30} : {1}" -f $key, $value)
+        }
     }
 
     return [PSCustomObject]$Stats

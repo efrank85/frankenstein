@@ -818,6 +818,7 @@ function Get-FrankensteinPublicFolderDiscovery {
 
 }
 
+
 function Get-FrankensteinMailboxPermissions {    
     [CmdletBinding()]
     Param (
@@ -950,5 +951,134 @@ function Get-FrankensteinMailboxPermissions {
 
 
    
-        
+function Get-FrankensteinMailboxPermissionsV2 {
+    [CmdletBinding()]
+    Param (
+        [switch]$FullAccess,
+        [switch]$SendAs,
+        [switch]$SendOnBehalf,
+        [switch]$UseCurrentSession,
+        [switch]$CSV,
+        [switch]$Help
+    )
+
+    if ($Help) {
+        Write-Host @"
+.SYNOPSIS
+    Retrieves Full Access, SendAs, and SendOnBehalf permissions.
+
+.DESCRIPTION
+    Retrieves Full Access, SendAs, and SendOnBehalf permissions.
+    Requires minimum of Exchange Reader. Global Reader will not work.
+
+.PARAMETER Help
+    Provides Help information.
+
+.PARAMETER UseCurrentSession
+    Uses current session. Otherwise prompts to connect to Exchange Online.
+
+.PARAMETER FullAccess
+    Scope to FullAccess permissions only.
+
+.PARAMETER SendAs
+    Scope to SendAs permissions only.
+
+.PARAMETER SendOnBehalf
+    Scope to SendOnBehalf permissions only.
+
+.PARAMETER CSV
+    Export results to CSV.
+
+.EXAMPLE
+    .\FrankensteinPermissions.ps1 -UseCurrentSession -FullAccess -SendAs -SendOnBehalf 
+
+.NOTES
+    Author:  Eric D. Frank
+    09/26/25 - Updated to include RecipientType resolution.
+"@
+        return
+    }
+
+    # Connect to Exchange Online
+    if (-not $UseCurrentSession) {
+        Connect-ExchangeOnline
+    }
+
+    $Results = @()
+    Write-Host "Gathering mailbox information"
+
+    # Exclude system & discovery mailboxes
+    $Mailboxes = Get-Mailbox -RecipientTypeDetails UserMailbox,SharedMailbox,RoomMailbox,EquipmentMailbox
+
+    # --- Full Access ---
+    if ($FullAccess) {
+        Write-Host "Gathering Full Access Permissions"
+        foreach ($mbx in $Mailboxes) {
+            $perms = Get-MailboxPermission -Identity $mbx.Identity -ErrorAction SilentlyContinue |
+                Where-Object { -not $_.IsInherited -and $_.User -notlike "NT AUTHORITY\SELF" }
+
+            foreach ($perm in $perms) {
+                $recipient = Get-Recipient -Identity $perm.User -ErrorAction SilentlyContinue
+                $Results += [PSCustomObject]@{
+                    DisplayName          = $mbx.DisplayName
+                    UserPrincipalName    = $mbx.UserPrincipalName
+                    MailboxType          = $mbx.RecipientTypeDetails
+                    AccessType           = "FullAccess"
+                    UserWithAccess       = $perm.User
+                    UserWithAccessType   = if ($recipient) { $recipient.RecipientTypeDetails } else { "Unknown/External" }
+                }
+            }
+        }
+    }
+
+    # --- Send As ---
+    if ($SendAs) {
+        Write-Host "Gathering Send As Permissions"
+        foreach ($mbx in $Mailboxes) {
+            $perms = Get-RecipientPermission -Identity $mbx.Identity -ErrorAction SilentlyContinue |
+                Where-Object { $_.Trustee -ne "NT AUTHORITY\SELF" }
+
+            foreach ($perm in $perms) {
+                $recipient = Get-Recipient -Identity $perm.Trustee -ErrorAction SilentlyContinue
+                $Results += [PSCustomObject]@{
+                    DisplayName          = $mbx.DisplayName
+                    UserPrincipalName    = $mbx.UserPrincipalName
+                    MailboxType          = $mbx.RecipientTypeDetails
+                    AccessType           = "SendAs"
+                    UserWithAccess       = $perm.Trustee
+                    UserWithAccessType   = if ($recipient) { $recipient.RecipientTypeDetails } else { "Unknown/External" }
+                }
+            }
+        }
+    }
+
+    # --- Send on Behalf ---
+    if ($SendOnBehalf) {
+        Write-Host "Gathering Send On Behalf Permissions"
+        foreach ($mbx in $Mailboxes) {
+            foreach ($delegate in $mbx.GrantSendOnBehalfTo) {
+                $recipient = Get-Recipient -Identity $delegate -ErrorAction SilentlyContinue
+                $Results += [PSCustomObject]@{
+                    DisplayName          = $mbx.DisplayName
+                    UserPrincipalName    = $mbx.UserPrincipalName
+                    MailboxType          = $mbx.RecipientTypeDetails
+                    AccessType           = "SendOnBehalf"
+                    UserWithAccess       = $delegate
+                    UserWithAccessType   = if ($recipient) { $recipient.RecipientTypeDetails } else { "Unknown/External" }
+                }
+            }
+        }
+    }
+
+    # Export to CSV
+    if ($CSV) {
+        $FileName = ".\MailboxPermissions_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+        $Results | Export-Csv $FileName -NoTypeInformation -Encoding UTF8
+        Write-Host "Export complete: $FileName" -ForegroundColor Green
+    }
+    else {
+        $Results
+    }
+}
+ 
      

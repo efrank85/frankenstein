@@ -219,7 +219,7 @@ function Get-FrankensteinRecipientCounts {
             
 }
 
-function Get-FrankensteinRecipientCountsV4 {
+function Get-FrankensteinRecipientCountsV5 {
     [CmdletBinding()]
     Param ()
 
@@ -283,9 +283,12 @@ function Get-FrankensteinRecipientCountsV4 {
             "PublicFolderMailbox" { $PublicFolderMailboxCount++ }
         }
 
-        if ($mbx.LitigationHoldEnabled) { $LitHoldCount++ }
-        if ($mbx.RetentionHoldEnabled) { $RetentionHoldCount++ }
-        if ($mbx.EmailAddressPolicyEnabled -eq $false) { $ADPDisabledCount++ }
+        # LitigationHold & RetentionHold (only applicable mailbox types)
+        if ($mbx.RecipientTypeDetails -in @("UserMailbox","SharedMailbox")) {
+            if ($mbx.LitigationHoldEnabled -eq $true) { $LitHoldCount++ }
+            if ($mbx.RetentionHoldEnabled -eq $true) { $RetentionHoldCount++ }
+            if ($mbx.EmailAddressPolicyEnabled -eq $false) { $ADPDisabledCount++ }
+        }
 
         # Protocols: fast lookup via hashtable
         if ($CASLookup.ContainsKey($mbx.Identity.ToString())) {
@@ -332,12 +335,12 @@ function Get-FrankensteinRecipientCountsV4 {
         EmailAddressPolicyDisabled = $ADPDisabledCount
     }
 
-    # Optional: Print to console with green highlight for non-zero
+    # Print counts with “bar-style” highlight for non-zero values
     Write-Host "`nExchange Recipient Counts:" -ForegroundColor Cyan
     foreach ($key in $Stats.Keys) {
         $value = $Stats[$key]
         if ($value -gt 0) {
-            Write-Host ("{0,-30} : {1}" -f $key, $value) -ForegroundColor Green
+            Write-Host ("{0,-30} : {1}" -f $key, $value) -ForegroundColor White -BackgroundColor DarkGreen
         }
         else {
             Write-Host ("{0,-30} : {1}" -f $key, $value)
@@ -346,6 +349,7 @@ function Get-FrankensteinRecipientCountsV4 {
 
     return [PSCustomObject]$Stats
 }
+
 
 
 function Connect-All {    

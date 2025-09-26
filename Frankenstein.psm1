@@ -951,7 +951,7 @@ function Get-FrankensteinMailboxPermissions {
 
 
    
-function Get-FrankensteinMailboxPermissionsV3 {
+function Get-FrankensteinMailboxPermissionsV4 {
     [CmdletBinding()]
     Param (
         [switch]$FullAccess,
@@ -994,12 +994,11 @@ function Get-FrankensteinMailboxPermissionsV3 {
 
 .NOTES
     Author:  Eric D. Frank
-    09/26/25 - Updated to include RecipientType resolution + PrimarySMTPAddress.
+    09/26/25 - Added UserWithAccess/Mailbox ExchangeGUID and caching for recipients.
 "@
         return
     }
 
-    # Connect to Exchange Online
     if (-not $UseCurrentSession) {
         Connect-ExchangeOnline
     }
@@ -1010,14 +1009,21 @@ function Get-FrankensteinMailboxPermissionsV3 {
     # Exclude system & discovery mailboxes
     $Mailboxes = Get-Mailbox -RecipientTypeDetails UserMailbox,SharedMailbox,RoomMailbox,EquipmentMailbox
 
-    # Counter for progress bar
+    # Progress bar
     $total = $Mailboxes.Count
     $count = 0
+
+    # Cache for recipients to reduce repeated Get-Recipient calls
+    $RecipientCache = @{}
 
     foreach ($mbx in $Mailboxes) {
         $count++
         $percent = [math]::Round(($count / $total) * 100, 0)
         Write-Progress -Activity "Gathering Permissions" -Status "Processing $($mbx.DisplayName)" -PercentComplete $percent
+
+        $MailboxExchangeGuid = $mbx.ExchangeGuid
+        $MailboxSMTP        = $mbx.PrimarySmtpAddress
+        $MailboxType        = $mbx.RecipientTypeDetails
 
         # --- Full Access ---
         if ($FullAccess) {
@@ -1025,17 +1031,25 @@ function Get-FrankensteinMailboxPermissionsV3 {
                 Where-Object { -not $_.IsInherited -and $_.User -notlike "NT AUTHORITY\SELF" }
 
             foreach ($perm in $perms) {
-                $recipient = Get-Recipient -Identity $perm.User -ErrorAction SilentlyContinue
+                $userKey = $perm.User
+                if (-not $RecipientCache.ContainsKey($userKey)) {
+                    $RecipientCache[$userKey] = Get-Recipient -Identity $userKey -ErrorAction SilentlyContinue
+                }
+                $recipient = $RecipientCache[$userKey]
+
                 $UserWithAccess = if ($recipient) { $recipient.PrimarySmtpAddress } else { $perm.User }
                 $UserWithAccessType = if ($recipient) { $recipient.RecipientTypeDetails } else { "Unknown/External" }
+                $UserWithAccessExchangeGuid = if ($recipient) { $recipient.ExchangeGuid } else { $null }
 
                 $Results += [PSCustomObject]@{
-                    DisplayName          = $mbx.DisplayName
-                    UserPrincipalName    = $mbx.UserPrincipalName
-                    MailboxType          = $mbx.RecipientTypeDetails
-                    AccessType           = "FullAccess"
-                    UserWithAccess       = $UserWithAccess
-                    UserWithAccessType   = $UserWithAccessType
+                    DisplayName                 = $mbx.DisplayName
+                    UserPrincipalName           = $MailboxSMTP
+                    MailboxType                 = $MailboxType
+                    MailboxExchangeGuid         = $MailboxExchangeGuid
+                    AccessType                  = "FullAccess"
+                    UserWithAccess              = $UserWithAccess
+                    UserWithAccessType          = $UserWithAccessType
+                    UserWithAccessExchangeGuid  = $UserWithAccessExchangeGuid
                 }
             }
         }
@@ -1046,17 +1060,25 @@ function Get-FrankensteinMailboxPermissionsV3 {
                 Where-Object { $_.Trustee -ne "NT AUTHORITY\SELF" }
 
             foreach ($perm in $perms) {
-                $recipient = Get-Recipient -Identity $perm.Trustee -ErrorAction SilentlyContinue
+                $userKey = $perm.Trustee
+                if (-not $RecipientCache.ContainsKey($userKey)) {
+                    $RecipientCache[$userKey] = Get-Recipient -Identity $userKey -ErrorAction SilentlyContinue
+                }
+                $recipient = $RecipientCache[$userKey]
+
                 $UserWithAccess = if ($recipient) { $recipient.PrimarySmtpAddress } else { $perm.Trustee }
                 $UserWithAccessType = if ($recipient) { $recipient.RecipientTypeDetails } else { "Unknown/External" }
+                $UserWithAccessExchangeGuid = if ($recipient) { $recipient.ExchangeGuid } else { $null }
 
                 $Results += [PSCustomObject]@{
-                    DisplayName          = $mbx.DisplayName
-                    UserPrincipalName    = $mbx.UserPrincipalName
-                    MailboxType          = $mbx.RecipientTypeDetails
-                    AccessType           = "SendAs"
-                    UserWithAccess       = $UserWithAccess
-                    UserWithAccessType   = $UserWithAccessType
+                    DisplayName                 = $mbx.DisplayName
+                    UserPrincipalName           = $MailboxSMTP
+                    MailboxType                 = $MailboxType
+                    MailboxExchangeGuid         = $MailboxExchangeGuid
+                    AccessType                  = "SendAs"
+                    UserWithAccess              = $UserWithAccess
+                    UserWithAccessType          = $UserWithAccessType
+                    UserWithAccessExchangeGuid  = $UserWithAccessExchangeGuid
                 }
             }
         }
@@ -1064,17 +1086,25 @@ function Get-FrankensteinMailboxPermissionsV3 {
         # --- Send on Behalf ---
         if ($SendOnBehalf) {
             foreach ($delegate in $mbx.GrantSendOnBehalfTo) {
-                $recipient = Get-Recipient -Identity $delegate -ErrorAction SilentlyContinue
+                $userKey = $delegate
+                if (-not $RecipientCache.ContainsKey($userKey)) {
+                    $RecipientCache[$userKey] = Get-Recipient -Identity $userKey -ErrorAction SilentlyContinue
+                }
+                $recipient = $RecipientCache[$userKey]
+
                 $UserWithAccess = if ($recipient) { $recipient.PrimarySmtpAddress } else { $delegate }
                 $UserWithAccessType = if ($recipient) { $recipient.RecipientTypeDetails } else { "Unknown/External" }
+                $UserWithAccessExchangeGuid = if ($recipient) { $recipient.ExchangeGuid } else { $null }
 
                 $Results += [PSCustomObject]@{
-                    DisplayName          = $mbx.DisplayName
-                    UserPrincipalName    = $mbx.UserPrincipalName
-                    MailboxType          = $mbx.RecipientTypeDetails
-                    AccessType           = "SendOnBehalf"
-                    UserWithAccess       = $UserWithAccess
-                    UserWithAccessType   = $UserWithAccessType
+                    DisplayName                 = $mbx.DisplayName
+                    UserPrincipalName           = $MailboxSMTP
+                    MailboxType                 = $MailboxType
+                    MailboxExchangeGuid         = $MailboxExchangeGuid
+                    AccessType                  = "SendOnBehalf"
+                    UserWithAccess              = $UserWithAccess
+                    UserWithAccessType          = $UserWithAccessType
+                    UserWithAccessExchangeGuid  = $UserWithAccessExchangeGuid
                 }
             }
         }

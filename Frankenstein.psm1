@@ -219,7 +219,7 @@ function Get-FrankensteinRecipientCounts {
             
 }
 
-function Get-FrankensteinRecipientCountsV6 {
+function Get-FrankensteinRecipientCountsV5 {
     [CmdletBinding()]
     Param ()
 
@@ -243,7 +243,7 @@ function Get-FrankensteinRecipientCountsV6 {
     # Detect environment
     if (Get-Command Get-EXOMailbox -ErrorAction SilentlyContinue) {
         $Environment = "Exchange Online"
-        $AllMailboxes = Get-EXOMailbox -ResultSize Unlimited -Property LitigationHoldEnabled,RetentionHoldEnabled,EmailAddressPolicyEnabled
+        $AllMailboxes = Get-EXOMailbox -ResultSize Unlimited
         $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited
         $CASMailbox = Get-CASMailbox -ResultSize Unlimited
     }
@@ -336,7 +336,7 @@ function Get-FrankensteinRecipientCountsV6 {
     }
 
     # Print counts with “bar-style” highlight for non-zero values
-    Write-Host "`nExchange Recipient Counts:" -ForegroundColor Cyan
+   Write-Host "`nExchange Recipient Counts:" -ForegroundColor Cyan
     foreach ($key in $Stats.Keys) {
         $value = $Stats[$key]
         if ($value -gt 0) {
@@ -347,9 +347,11 @@ function Get-FrankensteinRecipientCountsV6 {
         }
     }
 
-    # Return structured object without auto-printing duplicate
+    # Prevent duplicate output by suppressing automatic return
     $null
 }
+
+
 
 function Connect-All {    
     [CmdletBinding()]

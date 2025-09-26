@@ -218,6 +218,101 @@ function Get-FrankensteinRecipientCounts {
       Write-Host "$ADPDisabled Mailboxes with Email Address Policy Disabled"       
             
 }
+
+function Get-FrankensteinRecipientCountsV2 {
+    [CmdletBinding()]
+    Param ()
+
+    # Detect environment
+    if (Get-Command Get-EXOMailbox -ErrorAction SilentlyContinue) {
+        $Environment = "Exchange Online"
+        $AllMailboxes = Get-EXOMailbox -ResultSize Unlimited
+        $AllDistGroups = Get-EXODistributionGroup -ResultSize Unlimited
+        $CASMailbox = $AllMailboxes
+    }
+    elseif (Get-Command Get-Mailbox -ErrorAction SilentlyContinue) {
+        $Environment = "Exchange On-Premises"
+        $AllMailboxes = Get-Mailbox -ResultSize Unlimited
+        $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited
+        $CASMailbox = Get-CASMailbox -ResultSize Unlimited
+    }
+    else {
+        Write-Error "No Exchange environment detected. Load Exchange module first."
+        return
+    }
+
+    Write-Host "Gathering mailbox statistics for $Environment..."
+    $total = $AllMailboxes.Count
+    $count = 0
+
+    # Initialize counts
+    $Stats = @{
+        Environment                  = $Environment
+        TotalMailboxes               = 0
+        UserMailboxes                = 0
+        SharedMailboxes              = 0
+        RoomMailboxes                = 0
+        EquipmentMailboxes           = 0
+        MailUsers                    = 0
+        MailContacts                 = 0
+        DistributionGroups           = 0
+        DynamicDistributionGroups    = 0
+        UnifiedGroups                = 0
+        LitigationHoldMailboxes      = 0
+        RetentionHoldMailboxes       = 0
+        PublicFolders                = 0
+        MailPublicFolders            = 0
+        PublicFolderMailboxes        = 0
+        POPEnabled                   = 0
+        IMAPEnabled                  = 0
+        MAPIEnabled                  = 0
+        ActiveSyncEnabled            = 0
+        OWAEnabled                   = 0
+        EmailAddressPolicyDisabled   = 0
+    }
+
+    # Loop through mailboxes for progress bar and protocol counts
+    foreach ($mbx in $AllMailboxes) {
+        $count++
+        $percent = [math]::Round(($count / $total) * 100, 0)
+        Write-Progress -Activity "Processing Mailboxes" -Status "Mailbox $count of $total ($($mbx.DisplayName))" -PercentComplete $percent
+
+        switch ($mbx.RecipientTypeDetails) {
+            "UserMailbox" { $Stats.UserMailboxes++ }
+            "SharedMailbox" { $Stats.SharedMailboxes++ }
+            "RoomMailbox" { $Stats.RoomMailboxes++ }
+            "EquipmentMailbox" { $Stats.EquipmentMailboxes++ }
+            "PublicFolderMailbox" { $Stats.PublicFolderMailboxes++ }
+        }
+
+        if ($mbx.LitigationHoldEnabled) { $Stats.LitigationHoldMailboxes++ }
+        if ($mbx.RetentionHoldEnabled) { $Stats.RetentionHoldMailboxes++ }
+        if ($mbx.EmailAddressPolicyEnabled -eq $false) { $Stats.EmailAddressPolicyDisabled++ }
+
+        # Protocols (CASMailbox)
+        if ($CASMailbox -and $CASMailbox -contains $mbx) {
+            if ($mbx.PopEnabled) { $Stats.POPEnabled++ }
+            if ($mbx.ImapEnabled) { $Stats.IMAPEnabled++ }
+            if ($mbx.MAPIEnabled) { $Stats.MAPIEnabled++ }
+            if ($mbx.ActiveSyncEnabled) { $Stats.ActiveSyncEnabled++ }
+            if ($mbx.OWAEnabled) { $Stats.OWAEnabled++ }
+        }
+    }
+
+    # Other counts
+    $Stats.TotalMailboxes = $AllMailboxes.Count
+    $Stats.MailUsers = (Get-MailUser -ResultSize Unlimited -ErrorAction SilentlyContinue).Count
+    $Stats.MailContacts = (Get-MailContact -ResultSize Unlimited -ErrorAction SilentlyContinue).Count
+    $Stats.DistributionGroups = $AllDistGroups.Count
+    $Stats.DynamicDistributionGroups = (Get-DynamicDistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue).Count
+    $Stats.UnifiedGroups = (Get-UnifiedGroup -ResultSize Unlimited -ErrorAction SilentlyContinue).Count
+    $Stats.PublicFolders = (Get-PublicFolder -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count
+    $Stats.MailPublicFolders = (Get-MailPublicFolder -ResultSize Unlimited -ErrorAction SilentlyContinue | Measure-Object).Count
+
+    # Return structured object
+    return [PSCustomObject]$Stats
+}
+
 function Connect-All {    
     [CmdletBinding()]
     Param (

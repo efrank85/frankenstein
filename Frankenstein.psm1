@@ -228,7 +228,7 @@ function Get-FrankensteinRecipientCountsV2 {
         $Environment = "Exchange Online"
         $AllMailboxes = Get-EXOMailbox -ResultSize Unlimited
         $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited
-        $CASMailbox = $AllMailboxes
+        $CASMailbox = Get-CASMAilbox -ResultSize Unlimited
     }
     elseif (Get-Command Get-Mailbox -ErrorAction SilentlyContinue) {
         $Environment = "Exchange On-Premises"
@@ -246,30 +246,30 @@ function Get-FrankensteinRecipientCountsV2 {
     $count = 0
 
     # Initialize counts
-    $Stats = @{
-        Environment                  = $Environment
-        TotalMailboxes               = 0
-        UserMailboxes                = 0
-        SharedMailboxes              = 0
-        RoomMailboxes                = 0
-        EquipmentMailboxes           = 0
-        MailUsers                    = 0
-        MailContacts                 = 0
-        DistributionGroups           = 0
-        DynamicDistributionGroups    = 0
-        UnifiedGroups                = 0
-        LitigationHoldMailboxes      = 0
-        RetentionHoldMailboxes       = 0
-        PublicFolders                = 0
-        MailPublicFolders            = 0
-        PublicFolderMailboxes        = 0
-        POPEnabled                   = 0
-        IMAPEnabled                  = 0
-        MAPIEnabled                  = 0
-        ActiveSyncEnabled            = 0
-        OWAEnabled                   = 0
-        EmailAddressPolicyDisabled   = 0
-    }
+    $Stats = [PSCustomObject]@{
+        Environment = $Environment
+        TotalMailboxes = $AllMailboxes.Count
+        UserMailboxes = $UserMBXCount
+        SharedMailboxes = $SharedMBXCount
+        RoomMailboxes = $RoomMBXCount
+        EquipmentMailboxes = $EquipmentMBXCount
+        MailUsers = $MailUserCount
+        MailContacts = $MailContactCount
+        DistributionGroups = $DistributionGroupCount
+        DynamicDistributionGroups = $DynamicDistributionGroupCount
+        UnifiedGroups = $UnifiedGroupCount
+        LitigationHoldMailboxes = $LitHoldCount
+        RetentionHoldMailboxes = $RetentionHoldCount
+        PublicFolders = $PublicFolderCount
+        MailPublicFolders = $MailPublicFolderCount
+        PublicFolderMailboxes = $PublicFolderMailboxCount
+        POPEnabled = $POPCount
+        IMAPEnabled = $IMAPCount
+        MAPIEnabled = $MAPICount
+        ActiveSyncEnabled = $ActiveSyncCount
+        OWAEnabled = $OWACount
+        EmailAddressPolicyDisabled = $ADPDisabledCount
+}
 
     # Loop through mailboxes for progress bar and protocol counts
     foreach ($mbx in $AllMailboxes) {

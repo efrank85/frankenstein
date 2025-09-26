@@ -336,7 +336,7 @@ function Get-FrankensteinRecipientCountsV5 {
     }
 
     # Print counts with “bar-style” highlight for non-zero values
-    Write-Host "`nExchange Recipient Counts:" -ForegroundColor Cyan
+   Write-Host "`nExchange Recipient Counts:" -ForegroundColor Cyan
     foreach ($key in $Stats.Keys) {
         $value = $Stats[$key]
         if ($value -gt 0) {
@@ -347,7 +347,8 @@ function Get-FrankensteinRecipientCountsV5 {
         }
     }
 
-    return [PSCustomObject]$Stats
+    # Prevent duplicate output by suppressing automatic return
+    $null
 }
 
 

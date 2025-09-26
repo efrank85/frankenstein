@@ -879,7 +879,7 @@ function Get-FrankensteinMailboxPermissions {
         }        
        $Results = @() 
        Write-Host "Gathering mailbox information"
-       $Mailbox = Get-Mailbox -ResultSize Unlimited 
+       $Mailbox = Get-Mailbox | Where-Object { $_.Name -notlike "DiscoverySearchMailbox*" }
 
        # --- Full Access ---
        if($FullAccess){ 

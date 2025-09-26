@@ -866,9 +866,8 @@ function Get-FrankensteinMailboxPermissions {
             09/26/25 - Updated to use GitHub as repository
           
         "
-        }
-        else {
-           
+        Return
+                 
         }    
             
         #Connect to Exchange Online

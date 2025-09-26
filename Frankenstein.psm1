@@ -830,7 +830,7 @@ function Get-FrankensteinMailboxPermissions {
         )
         
         if($Help)
-        {$UseCurrentSession
+        {
         Write-Host
         
         "
@@ -863,7 +863,7 @@ function Get-FrankensteinMailboxPermissions {
         
         .NOTES
             Author:  Eric D. Frank
-            09/13/23 - Updated to use GitHub as repository
+            09/26/25 - Updated to use GitHub as repository
           
         "
         }

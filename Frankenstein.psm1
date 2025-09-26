@@ -988,3 +988,12 @@ function Get-FrankensteinMailboxPermissions {
         $Results
     }
 }
+
+function Set-FrankensteinPSWindowTitle {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Title
+    )
+
+    $host.UI.RawUI.WindowTitle = $Title
+}

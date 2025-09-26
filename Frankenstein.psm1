@@ -227,7 +227,7 @@ function Get-FrankensteinRecipientCountsV2 {
     if (Get-Command Get-EXOMailbox -ErrorAction SilentlyContinue) {
         $Environment = "Exchange Online"
         $AllMailboxes = Get-EXOMailbox -ResultSize Unlimited
-        $AllDistGroups = Get-EXODistributionGroup -ResultSize Unlimited
+        $AllDistGroups = Get-DistributionGroup -ResultSize Unlimited
         $CASMailbox = $AllMailboxes
     }
     elseif (Get-Command Get-Mailbox -ErrorAction SilentlyContinue) {

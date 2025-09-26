@@ -140,7 +140,7 @@ function Install-All {
         Install-Module msonline
         Install-Module azureAD -AllowClobber
 }
-function Get-FrankensteinRecipientCounts {
+function Get-FrankensteinRecipientCountsOLD {
     [CmdletBinding()]
     Param (
     )   
@@ -219,7 +219,7 @@ function Get-FrankensteinRecipientCounts {
             
 }
 
-function Get-FrankensteinRecipientCountsV5 {
+function Get-FrankensteinRecipientCounts {
     [CmdletBinding()]
     Param ()
 

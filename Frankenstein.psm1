@@ -830,6 +830,7 @@ function Get-FrankensteinMailboxPermissions {
         )
         
         if($Help)
+        $UseCurrentSession
         {Write-Host
         
         "

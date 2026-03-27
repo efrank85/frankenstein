@@ -40,13 +40,14 @@ function Get-FrankensteinHelp {
        Prerequisites: PSGsuite - https://psgsuite.io/
        Switches: [-CSV] [-IncludeGroupSettings] [-IncludeGroupMembership] [-IncludeDelegates] [-IncludeSendAsSettings] [-IncludeAutoForwardSettings]
 
-    4) Install-ExchangeOnline
-       Installs and configures Exchange Online PowerShell requirements.
+    4) Install-M365Modules
+       Installs M365 PowerShell modules. Use -All to install everything, or pick workloads individually.
+       Switches: [-All] [-ExchangeOnline] [-Graph] [-SharePoint] [-PnP] [-Teams] [-Compliance] [-PowerPlatform]
 
-    5) Connect-All
-       Connects to AzureAD and Exchange Online PS Sessions.
-       Switches: [-NoMFA]
-       Note: AzureAD/MSOnline modules are deprecated. Migrate to Microsoft Graph where possible.
+    5) Connect-M365
+       Connects to one or more M365 services using modern authentication.
+       Switches: [-All] [-ExchangeOnline] [-Graph] [-SharePoint] [-PnP] [-Teams] [-Compliance] [-PowerPlatform]
+       Parameters: [-SharePointAdminUrl <url>] [-GraphScopes <string[]>]
 
     6) Connect-ExchangeOnPremServer
        Connects to an on-premises Exchange server using FQDN.
@@ -92,55 +93,166 @@ function Connect-ExchangeOnPremServer {
     Import-PSSession $Session -DisableNameChecking
 }
 
-function Connect-All {
+function Connect-M365 {
     [CmdletBinding()]
     Param (
-        [Switch]$NoMFA
+        [Switch]$All,
+        [Switch]$ExchangeOnline,
+        [Switch]$Graph,
+        [Switch]$SharePoint,
+        [Switch]$PnP,
+        [Switch]$Teams,
+        [Switch]$Compliance,
+        [Switch]$PowerPlatform,
+
+        # Required for SharePoint and PnP connections
+        [string]$SharePointAdminUrl,
+
+        # Optional — defaults to a broad read/write admin scope set
+        [string[]]$GraphScopes = @(
+            "Directory.ReadWrite.All",
+            "User.ReadWrite.All",
+            "Group.ReadWrite.All",
+            "Organization.Read.All",
+            "Reports.Read.All",
+            "RoleManagement.Read.Directory",
+            "Policy.Read.All",
+            "AuditLog.Read.All"
+        )
     )
 
-    Write-Warning "AzureAD and MSOnline modules are deprecated. Consider migrating to Microsoft Graph (Connect-MgGraph)."
-
-    if ($NoMFA) {
-        $AdminUsername    = Read-Host -Prompt "Azure/Office 365 Admin User Account"
-        $AdminPassword    = Read-Host -Prompt "Password" -AsSecureString
-        $adminCredentials = New-Object System.Management.Automation.PSCredential($AdminUsername, $AdminPassword)
-
-        Connect-AzureAD         -Credential $adminCredentials
-        Connect-MSOLService     -Credential $adminCredentials
-        Connect-ExchangeOnline  -Credential $adminCredentials
+    if ($All) {
+        $ExchangeOnline = $Graph = $SharePoint = $PnP = $Teams = $Compliance = $PowerPlatform = $true
     }
-    else {
-        Connect-AzureAD
-        Connect-MSOLService
+
+    if ((-not $ExchangeOnline) -and (-not $Graph) -and (-not $SharePoint) -and
+        (-not $PnP) -and (-not $Teams) -and (-not $Compliance) -and (-not $PowerPlatform)) {
+        Write-Warning "No workload specified. Use -All or one of: -ExchangeOnline, -Graph, -SharePoint, -PnP, -Teams, -Compliance, -PowerPlatform"
+        return
+    }
+
+    if (($SharePoint -or $PnP) -and -not $SharePointAdminUrl) {
+        $SharePointAdminUrl = Read-Host "SharePoint Admin URL (e.g. https://contoso-admin.sharepoint.com)"
+    }
+
+    if ($ExchangeOnline) {
+        Write-Host "Connecting to Exchange Online..." -ForegroundColor Cyan
         Connect-ExchangeOnline
     }
+
+    if ($Graph) {
+        Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
+        Connect-MgGraph -Scopes $GraphScopes
+    }
+
+    if ($SharePoint) {
+        Write-Host "Connecting to SharePoint Online..." -ForegroundColor Cyan
+        Connect-SPOService -Url $SharePointAdminUrl
+    }
+
+    if ($PnP) {
+        Write-Host "Connecting to PnP PowerShell..." -ForegroundColor Cyan
+        Connect-PnPOnline -Url $SharePointAdminUrl -Interactive
+    }
+
+    if ($Teams) {
+        Write-Host "Connecting to Microsoft Teams..." -ForegroundColor Cyan
+        Connect-MicrosoftTeams
+    }
+
+    if ($Compliance) {
+        Write-Host "Connecting to Security & Compliance / Purview..." -ForegroundColor Cyan
+        Connect-IPPSSession
+    }
+
+    if ($PowerPlatform) {
+        Write-Host "Connecting to Power Platform..." -ForegroundColor Cyan
+        Add-PowerAppsAccount
+    }
+
+    Write-Host "`nConnections complete." -ForegroundColor Green
 }
 
 #endregion
 
 #region Installation
 
-function Install-ExchangeOnline {
+function Install-M365Modules {
     [CmdletBinding()]
-    Param()
+    Param (
+        [Switch]$All,
+        [Switch]$ExchangeOnline,
+        [Switch]$Graph,
+        [Switch]$SharePoint,
+        [Switch]$PnP,
+        [Switch]$Teams,
+        [Switch]$Compliance,     # Included in ExchangeOnlineManagement; listed for clarity
+        [Switch]$PowerPlatform
+    )
 
+    if ($All) {
+        $ExchangeOnline = $Graph = $SharePoint = $PnP = $Teams = $PowerPlatform = $true
+    }
+
+    if ((-not $ExchangeOnline) -and (-not $Graph) -and (-not $SharePoint) -and
+        (-not $PnP) -and (-not $Teams) -and (-not $Compliance) -and (-not $PowerPlatform)) {
+        Write-Warning "No workload specified. Use -All or one of: -ExchangeOnline, -Graph, -SharePoint, -PnP, -Teams, -Compliance, -PowerPlatform"
+        return
+    }
+
+    # Ensure NuGet and PowerShellGet are up to date
+    Write-Host "Bootstrapping NuGet and PowerShellGet..." -ForegroundColor Cyan
     Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Install-PackageProvider -Name NuGet -Force
-    Install-Module -Name PowerShellGet -Force
-    Update-Module  -Name PowerShellGet
-    Install-Module -Name ExchangeOnlineManagement -Confirm:$false
-    Import-Module ExchangeOnlineManagement
-}
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+    Install-Module -Name PowerShellGet -Force -Scope CurrentUser -AllowClobber | Out-Null
 
-function Install-All {
-    [CmdletBinding()]
-    Param()
+    $modules = [ordered]@{}
 
-    Write-Warning "MSOnline and AzureAD modules are deprecated. Consider using the Microsoft Graph PowerShell SDK (Install-Module Microsoft.Graph) instead."
-    Install-ExchangeOnline
-    Install-Module MSOnline -Scope CurrentUser
-    Install-Module AzureAD  -AllowClobber -Scope CurrentUser
+    if ($ExchangeOnline -or $Compliance) {
+        # ExchangeOnlineManagement covers both EXO (Connect-ExchangeOnline)
+        # and Security & Compliance / Purview (Connect-IPPSSession)
+        $modules["ExchangeOnlineManagement"] = "Exchange Online + Security & Compliance / Purview"
+    }
+
+    if ($Graph) {
+        # Microsoft.Graph is the modern replacement for both AzureAD and MSOnline
+        $modules["Microsoft.Graph"] = "Microsoft Graph (replaces AzureAD + MSOnline)"
+    }
+
+    if ($SharePoint) {
+        $modules["Microsoft.Online.SharePoint.PowerShell"] = "SharePoint Online Administration"
+    }
+
+    if ($PnP) {
+        # PnP.PowerShell is the recommended module for SharePoint and Teams site-level management
+        $modules["PnP.PowerShell"] = "PnP PowerShell (SharePoint + Teams site management)"
+    }
+
+    if ($Teams) {
+        $modules["MicrosoftTeams"] = "Microsoft Teams Administration"
+    }
+
+    if ($PowerPlatform) {
+        $modules["Microsoft.PowerApps.Administration.PowerShell"] = "Power Platform Administration"
+        $modules["Microsoft.PowerApps.PowerShell"]                = "Power Apps PowerShell"
+    }
+
+    foreach ($moduleName in $modules.Keys) {
+        Write-Host "Installing $moduleName  ($($modules[$moduleName]))..." -ForegroundColor Cyan
+        $existing = Get-Module -Name $moduleName -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+        $gallery  = Find-Module -Name $moduleName -ErrorAction SilentlyContinue
+
+        if ($existing -and $gallery -and ($existing.Version -ge $gallery.Version)) {
+            Write-Host "  $moduleName is already up to date (v$($existing.Version))." -ForegroundColor Gray
+        }
+        else {
+            Install-Module -Name $moduleName -Scope CurrentUser -Force -AllowClobber -Confirm:$false
+            Write-Host "  Installed $moduleName." -ForegroundColor Green
+        }
+    }
+
+    Write-Host "`nInstallation complete. Run Connect-M365 to authenticate." -ForegroundColor Green
 }
 
 #endregion

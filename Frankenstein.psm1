@@ -493,37 +493,55 @@ function Get-FrankensteinEntraDiscovery {
         [Switch]$UseCurrentSession
     )
 
-    if (-not $UseCurrentSession) {
-        Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
-        Connect-MgGraph -Scopes @(
-            "Organization.Read.All",
-            "Domain.Read.All",
-            "User.Read.All",
-            "Group.Read.All",
-            "Device.Read.All",
-            "Policy.Read.All",
-            "Application.Read.All",
-            "RoleManagement.Read.Directory",
-            "UserAuthenticationMethod.Read.All",
-            "Reports.Read.All",
-            "AuditLog.Read.All",
-            "Directory.Read.All"
-        )
-    }
-
-    # Import required Graph sub-modules — Connect-MgGraph authenticates but does not auto-import cmdlets
+    # Verify required Graph sub-modules are installed before doing anything else
     $GraphSubModules = @(
         "Microsoft.Graph.Identity.DirectoryManagement",  # Get-MgOrganization, Get-MgDomain, Get-MgDevice, Get-MgSubscribedSku, Get-MgDirectoryRole
         "Microsoft.Graph.Users",                         # Get-MgUser
         "Microsoft.Graph.Groups",                        # Get-MgGroup
-        "Microsoft.Graph.Identity.SignIns",              # Get-MgIdentityConditionalAccessPolicy, Get-MgPolicyIdentitySecurityDefaultEnforcementPolicy
+        "Microsoft.Graph.Identity.SignIns",              # Get-MgIdentityConditionalAccessPolicy, security defaults, auth method policy
         "Microsoft.Graph.Applications",                  # Get-MgApplication, Get-MgServicePrincipal
         "Microsoft.Graph.Reports"                        # Get-MgReportAuthenticationMethodUserRegistrationDetail
     )
+    $missing = $GraphSubModules | Where-Object { -not (Get-Module -Name $_ -ListAvailable -ErrorAction SilentlyContinue) }
+    if ($missing) {
+        Write-Error "The following required Graph sub-modules are not installed:`n  $($missing -join "`n  ")`n`nRun: Install-M365Modules -Graph"
+        return
+    }
+
+    # Import any sub-modules not yet loaded in this session
     foreach ($mod in $GraphSubModules) {
         if (-not (Get-Module -Name $mod -ErrorAction SilentlyContinue)) {
             Write-Host "Importing $mod..." -ForegroundColor Gray
             Import-Module $mod -ErrorAction Stop
+        }
+    }
+
+    if (-not $UseCurrentSession) {
+        Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
+        try {
+            Connect-MgGraph -Scopes @(
+                "Organization.Read.All",
+                "Domain.Read.All",
+                "User.Read.All",
+                "Group.Read.All",
+                "Device.Read.All",
+                "Policy.Read.All",
+                "Application.Read.All",
+                "RoleManagement.Read.Directory",
+                "UserAuthenticationMethod.Read.All",
+                "Reports.Read.All",
+                "AuditLog.Read.All",
+                "Directory.Read.All"
+            ) -ErrorAction Stop
+        }
+        catch {
+            Write-Error "Microsoft Graph authentication failed: $_"
+            return
+        }
+        # Confirm connection was successful
+        if (-not (Get-MgContext -ErrorAction SilentlyContinue)) {
+            Write-Error "Graph connection could not be confirmed. Run Connect-M365 -Graph first."
+            return
         }
     }
 

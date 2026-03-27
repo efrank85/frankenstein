@@ -63,10 +63,10 @@ function Get-FrankensteinHelp {
        Reports on Exchange virtual directory URLs and authentication methods.
        Switches: [-CSV]
 
-    10) Get-FrankensteinAzureDiscovery
-        Outputs Azure/MSOL discovery information.
+    10) Get-FrankensteinEntraDiscovery
+        Comprehensive Entra ID (Azure AD) discovery via Microsoft Graph. Covers org info, users,
+        MFA registration, admin roles, groups, devices, Conditional Access, apps, and security posture.
         Switches: [-CSV] [-UseCurrentSession]
-        Note: Requires legacy AzureAD/MSOnline modules (deprecated).
 
 "@
 }
@@ -473,105 +473,385 @@ function Get-FrankensteinPublicFolderDiscovery {
         Export-Csv ".\Get_MailboxPF_$DateStamp.csv" -NoTypeInformation
 }
 
-function Get-FrankensteinAzureDiscovery {
+function Get-FrankensteinEntraDiscovery {
     [CmdletBinding()]
     Param (
         [Switch]$CSV,
         [Switch]$UseCurrentSession
     )
 
-    Write-Warning "This function uses the deprecated AzureAD and MSOnline modules. Consider migrating to Microsoft Graph."
-
     if (-not $UseCurrentSession) {
-        Connect-AzureAD
-        Connect-MsolService
+        Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
+        Connect-MgGraph -Scopes @(
+            "Organization.Read.All",
+            "Domain.Read.All",
+            "User.Read.All",
+            "Group.Read.All",
+            "Device.Read.All",
+            "Policy.Read.All",
+            "Application.Read.All",
+            "RoleManagement.Read.Directory",
+            "UserAuthenticationMethod.Read.All",
+            "Reports.Read.All",
+            "AuditLog.Read.All",
+            "Directory.Read.All"
+        )
     }
 
     $DateStamp = (Get-Date).ToString('MMddyy')
-    $OutputDir = ".\FrankensteinAzureDiscovery_$DateStamp"
+    $OutputDir = ".\Frankenstein_EntraDiscovery_$DateStamp"
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
     Push-Location $OutputDir
+    Start-Transcript ".\EntraDiscovery_Transcript_$DateStamp.txt"
 
-    Start-Transcript ".\Get-FrankensteinAzureDiscovery_$DateStamp.txt"
-
-    $MSOLUser = Get-MsolUser -All
-    $Device   = Get-MSOLDevice -All
-    $Licenses = Get-MsolAccountSku
-
+    # ── Organization ─────────────────────────────────────────────────────────
     Get-Linebreak
-    Write-Host "Get-MsolUser ($($MSOLUser.Count) users discovered)" -ForegroundColor Cyan
+    Write-Host "Organization Info" -ForegroundColor Cyan
+    $Org = Get-MgOrganization
+    $TenantName    = $Org.DisplayName
+    $TenantId      = $Org.Id
+    $CreatedDate   = $Org.CreatedDateTime
+    $TechEmail     = ($Org.TechnicalNotificationMails -join ";")
+    $OnPremSync    = $Org.OnPremisesSyncEnabled
+    $LastSync      = $Org.OnPremisesLastSyncDateTime
+
+    Write-Host ("{0,-30} : {1}" -f "Tenant Name",  $TenantName)
+    Write-Host ("{0,-30} : {1}" -f "Tenant ID",    $TenantId)
+    Write-Host ("{0,-30} : {1}" -f "Country",       $Org.CountryLetterCode)
+    Write-Host ("{0,-30} : {1}" -f "Created",       $CreatedDate)
+    Write-Host ("{0,-30} : {1}" -f "Tech Email",    $TechEmail)
+    Write-Host ("{0,-30} : {1}" -f "DirSync",       $(if ($OnPremSync) { "Enabled" } else { "Disabled / Cloud-Only" }))
+    Write-Host ("{0,-30} : {1}" -f "Last Sync",     $LastSync)
+
     if ($CSV) {
-        $MSOLUser | Select-Object `
-            @{Name="AlternateEmailAddresses";            Expression={$_.AlternateEmailAddresses -join ";"}},
-            @{Name="AlternateMobilePhones";              Expression={$_.AlternateMobilePhones -join ";"}},
-            @{Name="AlternativeSecurityIds";             Expression={$_.AlternativeSecurityIds -join ";"}},
-            BlockCredential, City, CloudExchangeRecipientType, Country, Department,
-            @{Name="DirSyncProvisioningErrors";          Expression={$_.DirSyncProvisioningErrors -join ";"}},
-            DisplayName, Errors, Fax, FirstName, ImmutableID,
-            @{Name="IndirectLicenseErrors";              Expression={$_.IndirectLicenseErrors -join ";"}},
-            IsBlackberryUser, IsLicensed, LastDirSynced, LastName, LastPasswordChangeTimestamp,
-            @{Name="LicenseAssignmentDetails";           Expression={$_.LicenseAssignmentDetails -join ";"}},
-            LicenseReconciliationNeeded,
-            @{Name="Licenses";                           Expression={$_.Licenses -join ";"}},
-            LiveId, MSExchRecipientTypeDetails, MSRtcSipDeploymentLocator,
-            MSRtcSipPrimaryUserAddress, MobilePhone, ObjectId, Office,
-            OverallProvisioningStatus, PasswordNeverExpires,
-            PasswordResetNotRequiredDuringActivate, PhoneNumber, PortalSettings,
-            PostalCode, PreferredDataLocation, PreferredLanguage,
-            @{Name="ProxyAddresses";                     Expression={$_.ProxyAddresses -join ";"}},
-            ReleaseTrack,
-            @{Name="ServiceInformation";                 Expression={$_.ServiceInformation -join ";"}},
-            SignInName, SoftDeletionTimestamp, State, StreetAddress,
-            @{Name="StrongAuthenticationMethods";        Expression={$_.StrongAuthenticationMethods -join ";"}},
-            @{Name="StrongAuthenticationPhoneAppDetails";Expression={$_.StrongAuthenticationPhoneAppDetails -join ";"}},
-            @{Name="StrongAuthenticationProofupTime";    Expression={$_.StrongAuthenticationProofupTime -join ";"}},
-            @{Name="StrongAuthenticationRequirements";   Expression={$_.StrongAuthenticationRequirements -join ";"}},
-            @{Name="StrongAuthenticationUserDetails";    Expression={$_.StrongAuthenticationUserDetails -join ";"}},
-            StrongPasswordRequired, StsRefreshTokensValidFrom, Title, UsageLocation,
-            UserLandingPageIdentifierForO365Shell, UserPrincipalName,
-            UserThemeIdentifierForO365Shell, UserType, ValidationStatus, WhenCreated |
-            Export-Csv ".\MSOLUsers_$DateStamp.csv" -NoTypeInformation
+        [PSCustomObject]@{
+            TenantName                 = $TenantName
+            TenantId                   = $TenantId
+            Country                    = $Org.CountryLetterCode
+            Created                    = $CreatedDate
+            TechnicalNotificationEmail = $TechEmail
+            OnPremisesSyncEnabled      = $OnPremSync
+            LastDirSync                = $LastSync
+        } | Export-Csv ".\Organization_$DateStamp.csv" -NoTypeInformation
     }
 
+    # ── Domains ──────────────────────────────────────────────────────────────
     Get-Linebreak
-    Write-Host "Get-MsolCompanyInformation" -ForegroundColor Cyan
-    Get-MsolCompanyInformation
-
-    Get-Linebreak
-    Write-Host "Get-MsolAccountSku" -ForegroundColor Cyan
-    $Licenses | Select-Object AccountSkuID, ActiveUnits, WarningUnits, ConsumedUnits
+    Write-Host "Domains" -ForegroundColor Cyan
+    $Domains = Get-MgDomain -All
+    $Domains | Format-Table Id, IsDefault, IsVerified, AuthenticationType -AutoSize
     if ($CSV) {
-        $Licenses | Select-Object AccountName, AccountSkuID, ActiveUnits, ConsumedUnits,
-            LockedOutUnits, SKUID, SkuPartNumber, TargetClass, SuspendedUnits, WarningUnits |
-            Export-Csv ".\MSOLLicenses_$DateStamp.csv" -NoTypeInformation
+        $Domains | Select-Object Id, IsDefault, IsInitial, IsVerified, AuthenticationType,
+            @{Name="SupportedServices"; Expression={$_.SupportedServices -join ";"}} |
+            Export-Csv ".\Domains_$DateStamp.csv" -NoTypeInformation
     }
 
+    # ── Licenses ─────────────────────────────────────────────────────────────
     Get-Linebreak
-    Write-Host "Get-MsolDevice ($($Device.Count) devices discovered)" -ForegroundColor Cyan
+    Write-Host "License Summary" -ForegroundColor Cyan
+    $Skus = Get-MgSubscribedSku -All
+    $Skus | ForEach-Object {
+        $avail = $_.PrepaidUnits.Enabled - $_.ConsumedUnits
+        $color = if ($avail -le 5) { "Yellow" } else { "White" }
+        Write-Host ("{0,-45} Assigned: {1,-6} Total: {2,-6} Available: {3}" -f `
+            $_.SkuPartNumber, $_.ConsumedUnits, $_.PrepaidUnits.Enabled, $avail) -ForegroundColor $color
+    }
     if ($CSV) {
-        $Device | Select-Object Enabled, ObjectID, DeviceID, DisplayName, DeviceObjectVersion,
-            DeviceOSType, DeviceOSVersion, DeviceTrustType, DeviceTrustLevel,
-            @{Name="DevicePhysicalIds";      Expression={$_.DevicePhysicalIds -join ";"}},
-            ApproximateLastLogonTimestamp,
-            @{Name="AlternativeSecurityIds"; Expression={$_.AlternativeSecurityIds -join ";"}},
-            DirSyncEnabled, LastDirSyncTime, RegisteredOwners,
-            @{Name="GraphDeviceObject";      Expression={$_.GraphDeviceObject -join ";"}} |
-            Export-Csv ".\MSOLDevices_$DateStamp.csv" -NoTypeInformation
+        $Skus | Select-Object SkuPartNumber, SkuId,
+            @{Name="TotalLicenses";     Expression={$_.PrepaidUnits.Enabled}},
+            @{Name="AssignedLicenses";  Expression={$_.ConsumedUnits}},
+            @{Name="AvailableLicenses"; Expression={$_.PrepaidUnits.Enabled - $_.ConsumedUnits}},
+            @{Name="SuspendedLicenses"; Expression={$_.PrepaidUnits.Suspended}},
+            @{Name="WarningLicenses";   Expression={$_.PrepaidUnits.Warning}},
+            CapabilityStatus |
+            Export-Csv ".\Licenses_$DateStamp.csv" -NoTypeInformation
     }
 
+    # ── Users ─────────────────────────────────────────────────────────────────
     Get-Linebreak
-    Write-Host "Get-MSOLDirSyncFeatures" -ForegroundColor Cyan
-    Get-MSOLDirSyncFeatures
+    Write-Host "Gathering Users..." -ForegroundColor Cyan
+    $AllUsers = Get-MgUser -All -Property `
+        Id, DisplayName, UserPrincipalName, UserType, AccountEnabled,
+        AssignedLicenses, OnPremisesSyncEnabled, CreatedDateTime,
+        LastPasswordChangeDateTime, JobTitle, Department, Mail,
+        UsageLocation, SignInActivity
 
-    Get-Linebreak
-    Write-Host "Get-AzureADExtensionProperty" -ForegroundColor Cyan
-    Get-AzureADExtensionProperty | Format-List
-    if ($CSV) {
-        Get-AzureADExtensionProperty | Select-Object Name, ObjectID, AppDisplayName, DataType,
-            IsSyncedFromOnPremises,
-            @{Name="TargetObjects"; Expression={$_.TargetObjects -join ";"}} |
-            Export-Csv ".\AzureADExtensions_$DateStamp.csv" -NoTypeInformation
+    $MemberUsers   = $AllUsers | Where-Object { $_.UserType -eq "Member" }
+    $GuestUsers    = $AllUsers | Where-Object { $_.UserType -eq "Guest" }
+    $Licensed      = $AllUsers | Where-Object { $_.AssignedLicenses.Count -gt 0 }
+    $Unlicensed    = $MemberUsers | Where-Object { $_.AssignedLicenses.Count -eq 0 }
+    $SyncedUsers   = $AllUsers | Where-Object { $_.OnPremisesSyncEnabled -eq $true }
+    $CloudOnly     = $MemberUsers | Where-Object { $_.OnPremisesSyncEnabled -ne $true }
+    $DisabledUsers = $AllUsers | Where-Object { $_.AccountEnabled -eq $false }
+
+    # Flag stale accounts (no sign-in in 90+ days)
+    $StaleThreshold = (Get-Date).AddDays(-90)
+    $StaleUsers = $MemberUsers | Where-Object {
+        $_.SignInActivity.LastSignInDateTime -and
+        [datetime]$_.SignInActivity.LastSignInDateTime -lt $StaleThreshold
     }
+
+    Write-Host "`nUser Summary" -ForegroundColor Cyan
+    $UserStats = [ordered]@{
+        "Total Users"             = $AllUsers.Count
+        "Member Users"            = $MemberUsers.Count
+        "Guest / External Users"  = $GuestUsers.Count
+        "Licensed Users"          = $Licensed.Count
+        "Unlicensed Members"      = $Unlicensed.Count
+        "Disabled Accounts"       = $DisabledUsers.Count
+        "Synced from On-Premises" = $SyncedUsers.Count
+        "Cloud-Only Members"      = $CloudOnly.Count
+        "Stale (90+ days)"        = $StaleUsers.Count
+    }
+    foreach ($k in $UserStats.Keys) {
+        $v = $UserStats[$k]
+        if ($v -gt 0) { Write-Host ("{0,-30} : {1}" -f $k, $v) -ForegroundColor White -BackgroundColor DarkGreen }
+        else          { Write-Host ("{0,-30} : {1}" -f $k, $v) }
+    }
+    if ($CSV) {
+        $AllUsers | Select-Object DisplayName, UserPrincipalName, UserType, AccountEnabled,
+            @{Name="Licensed";          Expression={$_.AssignedLicenses.Count -gt 0}},
+            @{Name="AssignedLicenses";  Expression={$_.AssignedLicenses.SkuId -join ";"}},
+            OnPremisesSyncEnabled, JobTitle, Department, Mail, UsageLocation,
+            CreatedDateTime, LastPasswordChangeDateTime,
+            @{Name="LastSignIn";        Expression={$_.SignInActivity.LastSignInDateTime}} |
+            Export-Csv ".\Users_$DateStamp.csv" -NoTypeInformation
+    }
+
+    # ── MFA & Authentication Registration ────────────────────────────────────
+    Get-Linebreak
+    Write-Host "MFA & Authentication Registration..." -ForegroundColor Cyan
+    try {
+        $AuthReg        = Get-MgReportAuthenticationMethodUserRegistrationDetail -All
+        $MfaRegistered  = ($AuthReg | Where-Object { $_.IsMfaRegistered }).Count
+        $MfaNotReg      = ($AuthReg | Where-Object { -not $_.IsMfaRegistered }).Count
+        $MfaCapable     = ($AuthReg | Where-Object { $_.IsMfaCapable }).Count
+        $SsprRegistered = ($AuthReg | Where-Object { $_.IsSsprRegistered }).Count
+        $Passwordless   = ($AuthReg | Where-Object { $_.IsPasswordlessCapable }).Count
+        $AdminCount     = ($AuthReg | Where-Object { $_.IsAdmin }).Count
+
+        $MfaStats = [ordered]@{
+            "MFA Registered"       = $MfaRegistered
+            "MFA Not Registered"   = $MfaNotReg
+            "MFA Capable"          = $MfaCapable
+            "SSPR Registered"      = $SsprRegistered
+            "Passwordless Capable" = $Passwordless
+            "Admin Accounts"       = $AdminCount
+        }
+        foreach ($k in $MfaStats.Keys) {
+            $v    = $MfaStats[$k]
+            $warn = ($k -eq "MFA Not Registered" -and $v -gt 0)
+            if ($warn)       { Write-Host ("{0,-30} : {1}" -f $k, $v) -ForegroundColor Yellow }
+            elseif ($v -gt 0){ Write-Host ("{0,-30} : {1}" -f $k, $v) -ForegroundColor White -BackgroundColor DarkGreen }
+            else              { Write-Host ("{0,-30} : {1}" -f $k, $v) }
+        }
+        if ($CSV) {
+            $AuthReg | Select-Object UserPrincipalName, DisplayName, IsAdmin,
+                IsMfaRegistered, IsMfaCapable, IsSsprRegistered, IsSsprCapable,
+                IsPasswordlessCapable,
+                @{Name="MethodsRegistered"; Expression={$_.MethodsRegistered -join ";"}} |
+                Export-Csv ".\MFARegistration_$DateStamp.csv" -NoTypeInformation
+        }
+    }
+    catch {
+        Write-Warning "Could not retrieve MFA registration data. Ensure UserAuthenticationMethod.Read.All or Reports.Read.All is consented."
+    }
+
+    # ── Admin Role Assignments ────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Admin Role Assignments..." -ForegroundColor Cyan
+    $Roles = Get-MgDirectoryRole -All
+    $RoleAssignments = foreach ($role in $Roles) {
+        $members = Get-MgDirectoryRoleMember -DirectoryRoleId $role.Id -All -ErrorAction SilentlyContinue
+        foreach ($member in $members) {
+            [PSCustomObject]@{
+                RoleName   = $role.DisplayName
+                RoleId     = $role.Id
+                MemberName = $member.AdditionalProperties["displayName"]
+                MemberUPN  = $member.AdditionalProperties["userPrincipalName"]
+                MemberType = $member.OdataType
+            }
+        }
+    }
+    $RoleAssignments | Sort-Object RoleName | Format-Table RoleName, MemberName, MemberUPN -AutoSize
+    $roleColor = if ($RoleAssignments.Count -gt 25) { "Yellow" } else { "White" }
+    Write-Host "Total privileged role assignments: $($RoleAssignments.Count)" -ForegroundColor $roleColor
+    if ($CSV) {
+        $RoleAssignments | Export-Csv ".\AdminRoleAssignments_$DateStamp.csv" -NoTypeInformation
+    }
+
+    # ── Groups ────────────────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Gathering Groups..." -ForegroundColor Cyan
+    $AllGroups = Get-MgGroup -All -Property `
+        Id, DisplayName, GroupTypes, SecurityEnabled, MailEnabled,
+        MembershipRule, OnPremisesSyncEnabled, AssignedLicenses, Visibility
+
+    $SecurityGroups      = $AllGroups | Where-Object { $_.SecurityEnabled -and -not $_.MailEnabled -and $_.GroupTypes -notcontains "Unified" }
+    $M365Groups          = $AllGroups | Where-Object { $_.GroupTypes -contains "Unified" }
+    $MailEnabledSecurity = $AllGroups | Where-Object { $_.SecurityEnabled -and $_.MailEnabled -and $_.GroupTypes -notcontains "Unified" }
+    $DynamicGroups       = $AllGroups | Where-Object { $_.GroupTypes -contains "DynamicMembership" }
+    $SyncedGroups        = $AllGroups | Where-Object { $_.OnPremisesSyncEnabled -eq $true }
+    $LicensedGroups      = $AllGroups | Where-Object { $_.AssignedLicenses.Count -gt 0 }
+    $PublicM365          = $M365Groups | Where-Object { $_.Visibility -eq "Public" }
+
+    $GroupStats = [ordered]@{
+        "Total Groups"            = $AllGroups.Count
+        "Security Groups"         = $SecurityGroups.Count
+        "Microsoft 365 Groups"    = $M365Groups.Count
+        "  Public M365 Groups"    = $PublicM365.Count
+        "Mail-Enabled Security"   = $MailEnabledSecurity.Count
+        "Dynamic Groups"          = $DynamicGroups.Count
+        "Synced from On-Premises" = $SyncedGroups.Count
+        "License-Assigned Groups" = $LicensedGroups.Count
+    }
+    foreach ($k in $GroupStats.Keys) {
+        $v = $GroupStats[$k]
+        if ($v -gt 0) { Write-Host ("{0,-30} : {1}" -f $k, $v) -ForegroundColor White -BackgroundColor DarkGreen }
+        else          { Write-Host ("{0,-30} : {1}" -f $k, $v) }
+    }
+    if ($CSV) {
+        $AllGroups | Select-Object DisplayName, Visibility,
+            @{Name="GroupTypes";        Expression={$_.GroupTypes -join ";"}},
+            SecurityEnabled, MailEnabled, OnPremisesSyncEnabled,
+            @{Name="IsDynamic";         Expression={$_.GroupTypes -contains "DynamicMembership"}},
+            MembershipRule,
+            @{Name="AssignedLicenses";  Expression={$_.AssignedLicenses.SkuId -join ";"}} |
+            Export-Csv ".\Groups_$DateStamp.csv" -NoTypeInformation
+    }
+
+    # ── Devices ───────────────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Gathering Devices..." -ForegroundColor Cyan
+    $Devices = Get-MgDevice -All -Property `
+        Id, DisplayName, OperatingSystem, OperatingSystemVersion,
+        TrustType, IsCompliant, IsManaged, AccountEnabled,
+        RegisteredDateTime, ApproximateLastSignInDateTime
+
+    $EntraJoined  = $Devices | Where-Object { $_.TrustType -eq "AzureAd" }
+    $HybridJoined = $Devices | Where-Object { $_.TrustType -eq "ServerAd" }
+    $Registered   = $Devices | Where-Object { $_.TrustType -eq "Workplace" }
+    $Compliant    = $Devices | Where-Object { $_.IsCompliant -eq $true }
+    $NonCompliant = $Devices | Where-Object { $_.IsCompliant -eq $false }
+    $Managed      = $Devices | Where-Object { $_.IsManaged -eq $true }
+    $EnabledDevs  = $Devices | Where-Object { $_.AccountEnabled -eq $true }
+
+    $DeviceStats = [ordered]@{
+        "Total Devices"       = $Devices.Count
+        "Entra Joined"        = $EntraJoined.Count
+        "Hybrid Joined"       = $HybridJoined.Count
+        "Registered (BYOD)"   = $Registered.Count
+        "Compliant"           = $Compliant.Count
+        "Non-Compliant"       = $NonCompliant.Count
+        "Managed (Intune)"    = $Managed.Count
+        "Enabled"             = $EnabledDevs.Count
+    }
+    foreach ($k in $DeviceStats.Keys) {
+        $v    = $DeviceStats[$k]
+        $warn = ($k -eq "Non-Compliant" -and $v -gt 0)
+        if ($warn)        { Write-Host ("{0,-30} : {1}" -f $k, $v) -ForegroundColor Yellow }
+        elseif ($v -gt 0) { Write-Host ("{0,-30} : {1}" -f $k, $v) -ForegroundColor White -BackgroundColor DarkGreen }
+        else              { Write-Host ("{0,-30} : {1}" -f $k, $v) }
+    }
+    Write-Host "`nOS Breakdown:" -ForegroundColor Cyan
+    $Devices | Group-Object OperatingSystem | Sort-Object Count -Descending |
+        ForEach-Object { Write-Host ("  {0,-25} : {1}" -f $_.Name, $_.Count) }
+
+    if ($CSV) {
+        $Devices | Select-Object DisplayName, OperatingSystem, OperatingSystemVersion,
+            TrustType, IsCompliant, IsManaged, AccountEnabled,
+            RegisteredDateTime, ApproximateLastSignInDateTime |
+            Export-Csv ".\Devices_$DateStamp.csv" -NoTypeInformation
+    }
+
+    # ── Conditional Access ────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Conditional Access Policies..." -ForegroundColor Cyan
+    $CAPolicies   = Get-MgIdentityConditionalAccessPolicy -All
+    $CAEnabled    = $CAPolicies | Where-Object { $_.State -eq "enabled" }
+    $CAReportOnly = $CAPolicies | Where-Object { $_.State -eq "enabledForReportingButNotEnforced" }
+    $CADisabled   = $CAPolicies | Where-Object { $_.State -eq "disabled" }
+
+    Write-Host ("{0,-30} : {1}" -f "Total CA Policies",  $CAPolicies.Count)
+    Write-Host ("{0,-30} : {1}" -f "  Enabled",          $CAEnabled.Count)
+    Write-Host ("{0,-30} : {1}" -f "  Report-Only",      $CAReportOnly.Count)
+    Write-Host ("{0,-30} : {1}" -f "  Disabled",         $CADisabled.Count)
+    $CAPolicies | Sort-Object State, DisplayName | Format-Table DisplayName, State -AutoSize
+
+    try {
+        $NamedLocations = Get-MgIdentityConditionalAccessNamedLocation -All
+        Write-Host ("{0,-30} : {1}" -f "Named Locations", $NamedLocations.Count)
+    } catch {}
+
+    if ($CSV) {
+        $CAPolicies | Select-Object DisplayName, State, Id,
+            @{Name="IncludeUsers";   Expression={$_.Conditions.Users.IncludeUsers -join ";"}},
+            @{Name="ExcludeUsers";   Expression={$_.Conditions.Users.ExcludeUsers -join ";"}},
+            @{Name="IncludeGroups";  Expression={$_.Conditions.Users.IncludeGroups -join ";"}},
+            @{Name="IncludeApps";    Expression={$_.Conditions.Applications.IncludeApplications -join ";"}},
+            @{Name="ExcludeApps";    Expression={$_.Conditions.Applications.ExcludeApplications -join ";"}},
+            @{Name="Platforms";      Expression={$_.Conditions.Platforms.IncludePlatforms -join ";"}},
+            @{Name="GrantControls";  Expression={$_.GrantControls.BuiltInControls -join ";"}} |
+            Export-Csv ".\ConditionalAccessPolicies_$DateStamp.csv" -NoTypeInformation
+    }
+
+    # ── Applications ─────────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Applications..." -ForegroundColor Cyan
+    $AppRegs = Get-MgApplication -All -Property Id, DisplayName, CreatedDateTime, SignInAudience, PublisherDomain
+    $EntApps = Get-MgServicePrincipal -All -Property Id, DisplayName, ServicePrincipalType, AccountEnabled, AppId, Tags |
+        Where-Object { $_.ServicePrincipalType -eq "Application" }
+    $EntAppsEnabled  = $EntApps | Where-Object { $_.AccountEnabled }
+    $EntAppsDisabled = $EntApps | Where-Object { -not $_.AccountEnabled }
+
+    Write-Host ("{0,-30} : {1}" -f "App Registrations",    $AppRegs.Count)
+    Write-Host ("{0,-30} : {1}" -f "Enterprise Apps",      $EntApps.Count)
+    Write-Host ("{0,-30} : {1}" -f "  Enabled",            $EntAppsEnabled.Count)
+    Write-Host ("{0,-30} : {1}" -f "  Disabled",           $EntAppsDisabled.Count)
+
+    if ($CSV) {
+        $AppRegs | Select-Object DisplayName, CreatedDateTime, SignInAudience, PublisherDomain, Id |
+            Export-Csv ".\AppRegistrations_$DateStamp.csv" -NoTypeInformation
+        $EntApps | Select-Object DisplayName, ServicePrincipalType, AccountEnabled, AppId, Id |
+            Export-Csv ".\EnterpriseApps_$DateStamp.csv" -NoTypeInformation
+    }
+
+    # ── Security Posture ─────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Security Posture..." -ForegroundColor Cyan
+
+    try {
+        $SecDefaults = Get-MgPolicyIdentitySecurityDefaultEnforcementPolicy
+        $secColor    = if ($SecDefaults.IsEnabled) { "Green" } else { "Yellow" }
+        Write-Host ("{0,-30} : {1}" -f "Security Defaults", $(if ($SecDefaults.IsEnabled) { "ENABLED" } else { "Disabled" })) -ForegroundColor $secColor
+    }
+    catch { Write-Warning "Could not retrieve Security Defaults policy." }
+
+    try {
+        $AuthMethodPolicy = Get-MgPolicyAuthenticationMethodPolicy
+        Write-Host ("{0,-30} : {1}" -f "Auth Method Policy", $AuthMethodPolicy.DisplayName)
+    }
+    catch { Write-Warning "Could not retrieve Authentication Method Policy." }
+
+    try {
+        $PasswordPolicy = Get-MgDomain | Where-Object { $_.IsDefault }
+        Write-Host ("{0,-30} : {1}" -f "Default Domain", $PasswordPolicy.Id)
+    }
+    catch {}
+
+    # ── Discovery Summary ─────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "ENTRA ID DISCOVERY SUMMARY" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Tenant  : $TenantName  ($TenantId)"
+    Write-Host "  Users   : $($AllUsers.Count) total  |  $($Licensed.Count) licensed  |  $($GuestUsers.Count) guests  |  $($DisabledUsers.Count) disabled"
+    Write-Host "  Groups  : $($AllGroups.Count) total  |  $($SecurityGroups.Count) security  |  $($M365Groups.Count) M365  |  $($DynamicGroups.Count) dynamic"
+    Write-Host "  Devices : $($Devices.Count) total  |  $($EntraJoined.Count) Entra joined  |  $($HybridJoined.Count) hybrid  |  $($Compliant.Count) compliant"
+    Write-Host "  CA      : $($CAPolicies.Count) policies  ($($CAEnabled.Count) enabled)"
+    Write-Host "  Apps    : $($AppRegs.Count) registrations  |  $($EntApps.Count) enterprise apps"
+    Write-Host "  DirSync : $(if($OnPremSync){'Enabled — Last sync: ' + $LastSync}else{'Cloud-Only'})"
+    Write-Host ""
+    Write-Host "Output saved to: $OutputDir" -ForegroundColor Gray
 
     Stop-Transcript
     Pop-Location

@@ -150,14 +150,12 @@ function main{
  #Connect AzureAD and Exchange Online from PowerShell
  #Get-PSSession | Remove-PSSession
 
- #Check for MSOnline module
- $Modules=Get-Module -Name MSOnline -ListAvailable 
- if($Modules.count -eq 0)
- {
-  Write-Host  Please install MSOnline module using below command: -ForegroundColor yellow 
-  Write-Host Install-Module MSOnline  
-  Exit
- }
+ # Check for Exchange Online module
+if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+    Write-Host "Please install ExchangeOnlineManagement module:" -ForegroundColor Yellow
+    Write-Host "Install-Module ExchangeOnlineManagement"
+    Exit
+}
  
  #Set output file
  $ExportCSV=".\MBPermission_$((Get-Date -format yyyy-MMM-dd-ddd` hh-mm` tt).ToString()).csv"

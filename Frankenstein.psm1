@@ -143,6 +143,19 @@ function Connect-M365 {
     if ($Graph) {
         Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
         Connect-MgGraph -Scopes $GraphScopes
+        # Import Graph sub-modules so cmdlets are available immediately
+        @(
+            "Microsoft.Graph.Identity.DirectoryManagement",
+            "Microsoft.Graph.Users",
+            "Microsoft.Graph.Groups",
+            "Microsoft.Graph.Identity.SignIns",
+            "Microsoft.Graph.Applications",
+            "Microsoft.Graph.Reports"
+        ) | ForEach-Object {
+            if (-not (Get-Module -Name $_ -ErrorAction SilentlyContinue)) {
+                Import-Module $_ -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     if ($SharePoint) {
@@ -496,6 +509,22 @@ function Get-FrankensteinEntraDiscovery {
             "AuditLog.Read.All",
             "Directory.Read.All"
         )
+    }
+
+    # Import required Graph sub-modules — Connect-MgGraph authenticates but does not auto-import cmdlets
+    $GraphSubModules = @(
+        "Microsoft.Graph.Identity.DirectoryManagement",  # Get-MgOrganization, Get-MgDomain, Get-MgDevice, Get-MgSubscribedSku, Get-MgDirectoryRole
+        "Microsoft.Graph.Users",                         # Get-MgUser
+        "Microsoft.Graph.Groups",                        # Get-MgGroup
+        "Microsoft.Graph.Identity.SignIns",              # Get-MgIdentityConditionalAccessPolicy, Get-MgPolicyIdentitySecurityDefaultEnforcementPolicy
+        "Microsoft.Graph.Applications",                  # Get-MgApplication, Get-MgServicePrincipal
+        "Microsoft.Graph.Reports"                        # Get-MgReportAuthenticationMethodUserRegistrationDetail
+    )
+    foreach ($mod in $GraphSubModules) {
+        if (-not (Get-Module -Name $mod -ErrorAction SilentlyContinue)) {
+            Write-Host "Importing $mod..." -ForegroundColor Gray
+            Import-Module $mod -ErrorAction Stop
+        }
     }
 
     $DateStamp = (Get-Date).ToString('MMddyy')

@@ -1472,7 +1472,7 @@ NOTES
 
     # --- File picker 1: Permissions export ---
     [System.Windows.Forms.MessageBox]::Show(
-        "Step 1 of 2: Select the permissions export CSV produced by Get-FrankensteinMailboxPermissions.`n`nExpected columns:`n  `u{2022} UserPrincipalName  — SMTP address of the mailbox`n  `u{2022} UserWithAccess     — SMTP address of the delegate`n  `u{2022} AccessType         — FullAccess, SendAs, or SendOnBehalf",
+        "Step 1 of 2: Select the permissions export CSV produced by Get-FrankensteinMailboxPermissions.`n`nExpected columns:`n  - UserPrincipalName  : SMTP address of the mailbox`n  - UserWithAccess     : SMTP address of the delegate`n  - AccessType         : FullAccess, SendAs, or SendOnBehalf",
         "Select Permissions Export File",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information
@@ -1490,7 +1490,7 @@ NOTES
 
     # --- File picker 2: Mapping file ---
     [System.Windows.Forms.MessageBox]::Show(
-        "Step 2 of 2: Select your migration mapping CSV.`n`nRequired columns:`n  `u{2022} Source — original SMTP address (must match values in the permissions export)`n  `u{2022} Target — destination SMTP address in the new environment`n`nBoth the mailbox AND the delegate must have entries in this file for a permission to be applied.`nDistribution groups are supported as delegate entries.",
+        "Step 2 of 2: Select your migration mapping CSV.`n`nRequired columns:`n  - Source : original SMTP address (must match values in the permissions export)`n  - Target : destination SMTP address in the new environment`n`nBoth the mailbox AND the delegate must have entries in this file for a permission to be applied.`nDistribution groups are supported as delegate entries.",
         "Select Mapping File",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information

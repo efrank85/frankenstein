@@ -1339,11 +1339,12 @@ NOTES
         Connect-ExchangeOnline
     }
 
-    $Mailboxes = Get-Mailbox -RecipientTypeDetails UserMailbox, SharedMailbox, RoomMailbox, EquipmentMailbox
-    $total     = $Mailboxes.Count
-    $count     = 0
-    $Results   = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $Mailboxes      = Get-Mailbox -RecipientTypeDetails UserMailbox, SharedMailbox, RoomMailbox, EquipmentMailbox
+    $total          = $Mailboxes.Count
+    $count          = 0
+    $Results        = [System.Collections.Generic.List[PSCustomObject]]::new()
     $RecipientCache = @{}
+    $SeenKeys       = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
     Write-Host "Gathering permissions for $total mailboxes..." -ForegroundColor Cyan
 
@@ -1368,17 +1369,20 @@ NOTES
             Get-MailboxPermission -Identity $mbx.Identity -ErrorAction SilentlyContinue |
                 Where-Object { -not $_.IsInherited -and $_.User -notlike "NT AUTHORITY\SELF" } |
                 ForEach-Object {
-                    $r = Resolve-Recipient $_.User
-                    $Results.Add([PSCustomObject]@{
-                        DisplayName                = $mbx.DisplayName
-                        UserPrincipalName          = $MailboxSMTP
-                        MailboxType                = $MailboxType
-                        MailboxExchangeGuid        = $MailboxExchangeGuid
-                        AccessType                 = "FullAccess"
-                        UserWithAccess             = if ($r) { $r.PrimarySmtpAddress }    else { $_.User }
-                        UserWithAccessType         = if ($r) { $r.RecipientTypeDetails }  else { "Unknown/External" }
-                        UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }          else { $null }
-                    })
+                    $r   = Resolve-Recipient $_.User
+                    $key = "$MailboxSMTP|$(if ($r) { $r.PrimarySmtpAddress } else { $_.User })|FullAccess"
+                    if ($SeenKeys.Add($key)) {
+                        $Results.Add([PSCustomObject]@{
+                            DisplayName                = $mbx.DisplayName
+                            UserPrincipalName          = $MailboxSMTP
+                            MailboxType                = $MailboxType
+                            MailboxExchangeGuid        = $MailboxExchangeGuid
+                            AccessType                 = "FullAccess"
+                            UserWithAccess             = if ($r) { $r.PrimarySmtpAddress }   else { $_.User }
+                            UserWithAccessType         = if ($r) { $r.RecipientTypeDetails } else { "Unknown/External" }
+                            UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }         else { $null }
+                        })
+                    }
                 }
         }
 
@@ -1386,33 +1390,39 @@ NOTES
             Get-RecipientPermission -Identity $mbx.Identity -ErrorAction SilentlyContinue |
                 Where-Object { $_.Trustee -ne "NT AUTHORITY\SELF" } |
                 ForEach-Object {
-                    $r = Resolve-Recipient $_.Trustee
-                    $Results.Add([PSCustomObject]@{
-                        DisplayName                = $mbx.DisplayName
-                        UserPrincipalName          = $MailboxSMTP
-                        MailboxType                = $MailboxType
-                        MailboxExchangeGuid        = $MailboxExchangeGuid
-                        AccessType                 = "SendAs"
-                        UserWithAccess             = if ($r) { $r.PrimarySmtpAddress }    else { $_.Trustee }
-                        UserWithAccessType         = if ($r) { $r.RecipientTypeDetails }  else { "Unknown/External" }
-                        UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }          else { $null }
-                    })
+                    $r   = Resolve-Recipient $_.Trustee
+                    $key = "$MailboxSMTP|$(if ($r) { $r.PrimarySmtpAddress } else { $_.Trustee })|SendAs"
+                    if ($SeenKeys.Add($key)) {
+                        $Results.Add([PSCustomObject]@{
+                            DisplayName                = $mbx.DisplayName
+                            UserPrincipalName          = $MailboxSMTP
+                            MailboxType                = $MailboxType
+                            MailboxExchangeGuid        = $MailboxExchangeGuid
+                            AccessType                 = "SendAs"
+                            UserWithAccess             = if ($r) { $r.PrimarySmtpAddress }   else { $_.Trustee }
+                            UserWithAccessType         = if ($r) { $r.RecipientTypeDetails } else { "Unknown/External" }
+                            UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }         else { $null }
+                        })
+                    }
                 }
         }
 
         if ($SendOnBehalf) {
             foreach ($delegate in $mbx.GrantSendOnBehalfTo) {
-                $r = Resolve-Recipient $delegate
-                $Results.Add([PSCustomObject]@{
-                    DisplayName                = $mbx.DisplayName
-                    UserPrincipalName          = $MailboxSMTP
-                    MailboxType                = $MailboxType
-                    MailboxExchangeGuid        = $MailboxExchangeGuid
-                    AccessType                 = "SendOnBehalf"
-                    UserWithAccess             = if ($r) { $r.PrimarySmtpAddress }    else { $delegate }
-                    UserWithAccessType         = if ($r) { $r.RecipientTypeDetails }  else { "Unknown/External" }
-                    UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }          else { $null }
-                })
+                $r   = Resolve-Recipient $delegate
+                $key = "$MailboxSMTP|$(if ($r) { $r.PrimarySmtpAddress } else { $delegate })|SendOnBehalf"
+                if ($SeenKeys.Add($key)) {
+                    $Results.Add([PSCustomObject]@{
+                        DisplayName                = $mbx.DisplayName
+                        UserPrincipalName          = $MailboxSMTP
+                        MailboxType                = $MailboxType
+                        MailboxExchangeGuid        = $MailboxExchangeGuid
+                        AccessType                 = "SendOnBehalf"
+                        UserWithAccess             = if ($r) { $r.PrimarySmtpAddress }   else { $delegate }
+                        UserWithAccessType         = if ($r) { $r.RecipientTypeDetails } else { "Unknown/External" }
+                        UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }         else { $null }
+                    })
+                }
             }
         }
     }
@@ -1528,10 +1538,11 @@ NOTES
         Connect-ExchangeOnline
     }
 
-    $Log           = [System.Collections.Generic.List[PSCustomObject]]::new()
-    $total         = $Permissions.Count
-    $count         = 0
+    $Log            = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $total          = $Permissions.Count
+    $count          = 0
     $RecipientCache = @{}
+    $SeenKeys       = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
     function Resolve-TargetRecipient ([string]$identity) {
         $key = $identity.ToLower()
@@ -1556,6 +1567,20 @@ NOTES
             if ($accessType -eq 'FullAccess'  -and -not $FullAccess)  { continue }
             if ($accessType -eq 'SendAs'       -and -not $SendAs)       { continue }
             if ($accessType -eq 'SendOnBehalf' -and -not $SendOnBehalf) { continue }
+        }
+
+        $seenKey = "$($row.UserPrincipalName.Trim())|$($row.UserWithAccess.Trim())|$accessType"
+        if (-not $SeenKeys.Add($seenKey)) {
+            $Log.Add([PSCustomObject][ordered]@{
+                SourceMailbox  = $row.UserPrincipalName
+                TargetMailbox  = $null
+                SourceDelegate = $row.UserWithAccess
+                TargetDelegate = $null
+                AccessType     = $accessType
+                Status         = 'Skipped'
+                Details        = 'Duplicate entry in permissions file'
+            })
+            continue
         }
 
         $mbxKey      = $row.UserPrincipalName.Trim().ToLower()

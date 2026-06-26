@@ -1547,7 +1547,7 @@ NOTES
     foreach ($row in $Permissions) {
         $count++
         Write-Progress -Activity "Importing Permissions" `
-            -Status "Row $count of $total — $($row.AccessType): $($row.UserPrincipalName)" `
+            -Status "Row $count of $total - $($row.AccessType): $($row.UserPrincipalName)" `
             -PercentComplete ([math]::Round(($count / $total) * 100))
 
         $accessType = $row.AccessType

@@ -68,6 +68,12 @@ function Get-FrankensteinHelp {
         MFA registration, admin roles, groups, devices, Conditional Access, apps, and security posture.
         Switches: [-CSV] [-UseCurrentSession]
 
+    11) Import-FrankensteinMailboxPermissions
+        Imports FullAccess, SendAs, and SendOnBehalf permissions using a permissions export CSV and a
+        migration mapping CSV. Both the mailbox and delegate must exist in the mapping to apply a permission.
+        Outputs a timestamped log CSV showing successes, skips, and failures.
+        Switches: [-FullAccess] [-SendAs] [-SendOnBehalf] [-UseCurrentSession] [-Help]
+
 "@
 }
 
@@ -1420,6 +1426,241 @@ NOTES
     else {
         $Results
     }
+}
+
+function Import-FrankensteinMailboxPermissions {
+    [CmdletBinding()]
+    Param (
+        [Switch]$FullAccess,
+        [Switch]$SendAs,
+        [Switch]$SendOnBehalf,
+        [Switch]$UseCurrentSession,
+        [Switch]$Help
+    )
+
+    if ($Help) {
+        Write-Host @"
+SYNOPSIS
+    Imports FullAccess, SendAs, and SendOnBehalf permissions using a permissions export and a mapping file.
+
+DESCRIPTION
+    Reads a permissions CSV exported by Get-FrankensteinMailboxPermissions and applies those permissions
+    in the target environment. A mapping file (Source/Target CSV) is required to translate source SMTP
+    addresses to destination SMTP addresses. Both the mailbox AND the delegate must appear in the mapping
+    for a permission to be applied. Supports mailboxes and distribution groups as delegates.
+    Results are written to a timestamped log CSV.
+
+PARAMETERS
+    -UseCurrentSession  Use the current Exchange Online session instead of prompting to connect.
+    -FullAccess         Process only FullAccess rows from the permissions export.
+    -SendAs             Process only SendAs rows from the permissions export.
+    -SendOnBehalf       Process only SendOnBehalf rows from the permissions export.
+    -Help               Display this help text.
+
+    Note: If no permission type switch is specified, all three types are processed.
+
+EXAMPLE
+    Import-FrankensteinMailboxPermissions -UseCurrentSession -FullAccess -SendAs -SendOnBehalf
+
+NOTES
+    Author: Eric D. Frank
+"@
+        return
+    }
+
+    Add-Type -AssemblyName System.Windows.Forms
+
+    # --- File picker 1: Permissions export ---
+    [System.Windows.Forms.MessageBox]::Show(
+        "Step 1 of 2: Select the permissions export CSV produced by Get-FrankensteinMailboxPermissions.`n`nExpected columns:`n  `u{2022} UserPrincipalName  — SMTP address of the mailbox`n  `u{2022} UserWithAccess     — SMTP address of the delegate`n  `u{2022} AccessType         — FullAccess, SendAs, or SendOnBehalf",
+        "Select Permissions Export File",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+
+    $permDialog        = New-Object System.Windows.Forms.OpenFileDialog
+    $permDialog.Title  = "Select Permissions Export CSV"
+    $permDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+
+    if ($permDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host "No permissions file selected. Exiting." -ForegroundColor Yellow
+        return
+    }
+    $PermissionsFile = $permDialog.FileName
+
+    # --- File picker 2: Mapping file ---
+    [System.Windows.Forms.MessageBox]::Show(
+        "Step 2 of 2: Select your migration mapping CSV.`n`nRequired columns:`n  `u{2022} Source — original SMTP address (must match values in the permissions export)`n  `u{2022} Target — destination SMTP address in the new environment`n`nBoth the mailbox AND the delegate must have entries in this file for a permission to be applied.`nDistribution groups are supported as delegate entries.",
+        "Select Mapping File",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+
+    $mapDialog        = New-Object System.Windows.Forms.OpenFileDialog
+    $mapDialog.Title  = "Select Mapping File CSV"
+    $mapDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+
+    if ($mapDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host "No mapping file selected. Exiting." -ForegroundColor Yellow
+        return
+    }
+    $MappingFile = $mapDialog.FileName
+
+    # --- Load and validate files ---
+    $Permissions = Import-Csv $PermissionsFile
+
+    $MappingRaw = Import-Csv $MappingFile
+    $Mapping    = @{}
+    foreach ($entry in $MappingRaw) {
+        if ($entry.Source -and $entry.Target) {
+            $Mapping[$entry.Source.Trim().ToLower()] = $entry.Target.Trim()
+        }
+    }
+
+    if ($Mapping.Count -eq 0) {
+        Write-Host "Mapping file is empty or missing Source/Target columns. Exiting." -ForegroundColor Red
+        return
+    }
+
+    $processAll = (-not $FullAccess -and -not $SendAs -and -not $SendOnBehalf)
+
+    if (-not $UseCurrentSession) {
+        Connect-ExchangeOnline
+    }
+
+    $Log           = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $total         = $Permissions.Count
+    $count         = 0
+    $RecipientCache = @{}
+
+    function Resolve-TargetRecipient ([string]$identity) {
+        $key = $identity.ToLower()
+        if (-not $RecipientCache.ContainsKey($key)) {
+            $RecipientCache[$key] = Get-Recipient -Identity $identity -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+        }
+        return $RecipientCache[$key]
+    }
+
+    Write-Host "Processing $total permission rows..." -ForegroundColor Cyan
+
+    foreach ($row in $Permissions) {
+        $count++
+        Write-Progress -Activity "Importing Permissions" `
+            -Status "Row $count of $total — $($row.AccessType): $($row.UserPrincipalName)" `
+            -PercentComplete ([math]::Round(($count / $total) * 100))
+
+        $accessType = $row.AccessType
+
+        if (-not $processAll) {
+            if ($accessType -eq 'FullAccess'  -and -not $FullAccess)  { continue }
+            if ($accessType -eq 'SendAs'       -and -not $SendAs)       { continue }
+            if ($accessType -eq 'SendOnBehalf' -and -not $SendOnBehalf) { continue }
+        }
+
+        $mbxKey      = $row.UserPrincipalName.Trim().ToLower()
+        $delegateKey = $row.UserWithAccess.Trim().ToLower()
+        $mbxTarget      = $Mapping[$mbxKey]
+        $delegateTarget = $Mapping[$delegateKey]
+
+        $logEntry = [ordered]@{
+            SourceMailbox  = $row.UserPrincipalName
+            TargetMailbox  = $mbxTarget
+            SourceDelegate = $row.UserWithAccess
+            TargetDelegate = $delegateTarget
+            AccessType     = $accessType
+            Status         = $null
+            Details        = $null
+        }
+
+        if (-not $mbxTarget -and -not $delegateTarget) {
+            $logEntry.Status  = 'Skipped'
+            $logEntry.Details = 'Neither mailbox nor delegate found in mapping'
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+        if (-not $mbxTarget) {
+            $logEntry.Status  = 'Skipped'
+            $logEntry.Details = 'Mailbox not found in mapping'
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+        if (-not $delegateTarget) {
+            $logEntry.Status  = 'Skipped'
+            $logEntry.Details = 'Delegate not found in mapping'
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+
+        # Resolve mapping values to PrimarySmtpAddress (handles proxy addresses)
+        $resolvedMbx      = Resolve-TargetRecipient $mbxTarget
+        $resolvedDelegate = Resolve-TargetRecipient $delegateTarget
+
+        if (-not $resolvedMbx -and -not $resolvedDelegate) {
+            $logEntry.Status  = 'Failed'
+            $logEntry.Details = "Neither target mailbox ('$mbxTarget') nor target delegate ('$delegateTarget') found in environment"
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+        if (-not $resolvedMbx) {
+            $logEntry.Status  = 'Failed'
+            $logEntry.Details = "Target mailbox '$mbxTarget' not found in environment"
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+        if (-not $resolvedDelegate) {
+            $logEntry.Status  = 'Failed'
+            $logEntry.Details = "Target delegate '$delegateTarget' not found in environment"
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+
+        $mbxPrimary      = $resolvedMbx.PrimarySmtpAddress
+        $delegatePrimary = $resolvedDelegate.PrimarySmtpAddress
+
+        $logEntry.TargetMailbox  = $mbxPrimary
+        $logEntry.TargetDelegate = $delegatePrimary
+
+        try {
+            switch ($accessType) {
+                'FullAccess' {
+                    Add-MailboxPermission -Identity $mbxPrimary -User $delegatePrimary `
+                        -AccessRights FullAccess -InheritanceType All `
+                        -AutoMapping $false -ErrorAction Stop | Out-Null
+                }
+                'SendAs' {
+                    Add-RecipientPermission -Identity $mbxPrimary -Trustee $delegatePrimary `
+                        -AccessRights SendAs -Confirm:$false -ErrorAction Stop | Out-Null
+                }
+                'SendOnBehalf' {
+                    Set-Mailbox -Identity $mbxPrimary -GrantSendOnBehalfTo @{Add = $delegatePrimary} `
+                        -ErrorAction Stop
+                }
+            }
+            $logEntry.Status  = 'Success'
+            $logEntry.Details = 'Permission applied'
+        } catch {
+            $logEntry.Status  = 'Failed'
+            $logEntry.Details = $_.Exception.Message
+        }
+
+        $Log.Add([PSCustomObject]$logEntry)
+    }
+
+    Write-Progress -Activity "Importing Permissions" -Completed
+
+    $LogFile = ".\ImportPermissionsLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+    $Log | Export-Csv $LogFile -NoTypeInformation -Encoding UTF8
+
+    $success = ($Log | Where-Object Status -eq 'Success').Count
+    $skipped = ($Log | Where-Object Status -eq 'Skipped').Count
+    $failed  = ($Log | Where-Object Status -eq 'Failed').Count
+
+    Write-Host "`nImport complete." -ForegroundColor Green
+    Write-Host "  Success : $success" -ForegroundColor Green
+    Write-Host "  Skipped : $skipped" -ForegroundColor Yellow
+    Write-Host "  Failed  : $failed"  -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'Green' })
+    Write-Host "  Log     : $LogFile" -ForegroundColor Cyan
 }
 
 function Set-FrankensteinPSWindowTitle {

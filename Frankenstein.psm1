@@ -2368,8 +2368,14 @@ NOTES
             $logEntry.Status  = 'Success'
             $logEntry.Details = 'Membership applied'
         } catch {
-            $logEntry.Status  = 'Failed'
-            $logEntry.Details = $_.Exception.Message
+            $errMsg = $_.Exception.Message
+            if ($errMsg -match 'already a member|already exists|is already in the group') {
+                $logEntry.Status  = 'AlreadyExists'
+                $logEntry.Details = "Member Already Exists: $memberPrimary is already a member of $groupPrimary"
+            } else {
+                $logEntry.Status  = 'Failed'
+                $logEntry.Details = $errMsg
+            }
         }
 
         $Log.Add([PSCustomObject]$logEntry)
@@ -2380,15 +2386,17 @@ NOTES
     $LogFile = ".\ImportGroupMembershipLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
     $Log | Export-Csv $LogFile -NoTypeInformation -Encoding UTF8
 
-    $success = ($Log | Where-Object Status -eq 'Success').Count
-    $skipped = ($Log | Where-Object Status -eq 'Skipped').Count
-    $failed  = ($Log | Where-Object Status -eq 'Failed').Count
+    $success       = ($Log | Where-Object Status -eq 'Success').Count
+    $skipped       = ($Log | Where-Object Status -eq 'Skipped').Count
+    $alreadyExists = ($Log | Where-Object Status -eq 'AlreadyExists').Count
+    $failed        = ($Log | Where-Object Status -eq 'Failed').Count
 
     Write-Host "`nImport complete." -ForegroundColor Green
-    Write-Host "  Success : $success" -ForegroundColor Green
-    Write-Host "  Skipped : $skipped" -ForegroundColor Yellow
-    Write-Host "  Failed  : $failed"  -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'Green' })
-    Write-Host "  Log     : $LogFile" -ForegroundColor Cyan
+    Write-Host "  Success        : $success"       -ForegroundColor Green
+    Write-Host "  Skipped        : $skipped"       -ForegroundColor Yellow
+    Write-Host "  Member Already Exists : $alreadyExists" -ForegroundColor Yellow
+    Write-Host "  Failed         : $failed"        -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'Green' })
+    Write-Host "  Log            : $LogFile"       -ForegroundColor Cyan
 }
 
 function Set-FrankensteinPSWindowTitle {

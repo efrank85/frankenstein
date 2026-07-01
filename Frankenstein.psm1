@@ -74,6 +74,25 @@ function Get-FrankensteinHelp {
         Outputs a timestamped log CSV showing successes, skips, and failures.
         Switches: [-FullAccess] [-SendAs] [-SendOnBehalf] [-UseCurrentSession] [-Help]
 
+    12) Get-FrankensteinGroups
+        Exports properties for all mail-enabled group types: Distribution Groups, Mail-Enabled Security Groups,
+        Dynamic Distribution Groups, and M365 (Unified) Groups. A GroupType column identifies each record.
+        Switches: [-DistributionGroups] [-MailEnabledSecurityGroups] [-DynamicDistributionGroups] [-M365Groups]
+                  [-UseCurrentSession] [-CSV] [-Help]
+
+    13) Get-FrankensteinGroupMember
+        Exports group membership for all mail-enabled group types. DDG members are resolved live from the
+        recipient filter and tagged as Dynamic. M365 groups include both Members and Owners with a Role column.
+        Switches: [-DistributionGroups] [-MailEnabledSecurityGroups] [-DynamicDistributionGroups] [-M365Groups]
+                  [-UseCurrentSession] [-CSV] [-Help]
+
+    14) Import-FrankensteinGroupMembers
+        Imports group membership using a membership export CSV and a migration mapping CSV (Source/Target).
+        DDG rows are skipped automatically. M365 Owner rows are applied via the Owners link type.
+        Outputs a timestamped log CSV showing successes, skips, and failures.
+        Switches: [-DistributionGroups] [-MailEnabledSecurityGroups] [-DynamicDistributionGroups] [-M365Groups]
+                  [-UseCurrentSession] [-Help]
+
 "@
 }
 
@@ -1675,6 +1694,631 @@ NOTES
     Write-Progress -Activity "Importing Permissions" -Completed
 
     $LogFile = ".\ImportPermissionsLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+    $Log | Export-Csv $LogFile -NoTypeInformation -Encoding UTF8
+
+    $success = ($Log | Where-Object Status -eq 'Success').Count
+    $skipped = ($Log | Where-Object Status -eq 'Skipped').Count
+    $failed  = ($Log | Where-Object Status -eq 'Failed').Count
+
+    Write-Host "`nImport complete." -ForegroundColor Green
+    Write-Host "  Success : $success" -ForegroundColor Green
+    Write-Host "  Skipped : $skipped" -ForegroundColor Yellow
+    Write-Host "  Failed  : $failed"  -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'Green' })
+    Write-Host "  Log     : $LogFile" -ForegroundColor Cyan
+}
+
+function Get-FrankensteinGroups {
+    [CmdletBinding()]
+    Param (
+        [Switch]$DistributionGroups,
+        [Switch]$MailEnabledSecurityGroups,
+        [Switch]$DynamicDistributionGroups,
+        [Switch]$M365Groups,
+        [Switch]$UseCurrentSession,
+        [Switch]$CSV,
+        [Switch]$Help
+    )
+
+    if ($Help) {
+        Write-Host @"
+SYNOPSIS
+    Exports properties for Distribution Groups, Mail-Enabled Security Groups,
+    Dynamic Distribution Groups, and M365 (Unified) Groups.
+
+DESCRIPTION
+    By default all four group types are exported. Use type switches to scope the export.
+    A GroupType column identifies each record. Type-specific properties (RecipientFilter,
+    Visibility, SharePointSiteUrl, etc.) are included for all records and left blank where
+    not applicable so the CSV schema remains consistent across types.
+
+PARAMETERS
+    -DistributionGroups         Include Distribution Groups.
+    -MailEnabledSecurityGroups  Include Mail-Enabled Security Groups.
+    -DynamicDistributionGroups  Include Dynamic Distribution Groups.
+    -M365Groups                 Include M365 (Unified) Groups.
+    -UseCurrentSession          Use the current Exchange Online session.
+    -CSV                        Export results to a timestamped CSV file.
+    -Help                       Display this help text.
+
+    Note: If no group type switch is specified, all types are exported.
+
+EXAMPLE
+    Get-FrankensteinGroups -UseCurrentSession -CSV
+    Get-FrankensteinGroups -UseCurrentSession -M365Groups -DistributionGroups -CSV
+
+NOTES
+    Author: Eric D. Frank
+"@
+        return
+    }
+
+    if (-not $UseCurrentSession) { Connect-ExchangeOnline }
+
+    $processAll = (-not $DistributionGroups -and -not $MailEnabledSecurityGroups -and -not $DynamicDistributionGroups -and -not $M365Groups)
+    $Results    = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    function Join-Prop ($col) {
+        if ($col) { ($col | ForEach-Object { "$_" }) -join '; ' } else { '' }
+    }
+
+    function New-GroupRecord ($g, [string]$GroupTypeName) {
+        [PSCustomObject]@{
+            GroupType                            = $GroupTypeName
+            DisplayName                          = $g.DisplayName
+            PrimarySmtpAddress                   = $g.PrimarySmtpAddress
+            Alias                                = $g.Alias
+            ExchangeGuid                         = $g.ExchangeGuid
+            ExternalDirectoryObjectId            = if ($g.PSObject.Properties['ExternalDirectoryObjectId'] -and $g.ExternalDirectoryObjectId) { "$($g.ExternalDirectoryObjectId)" } else { '' }
+            Description                          = $g.Description
+            ManagedBy                            = Join-Prop $g.ManagedBy
+            HiddenFromAddressListsEnabled        = $g.HiddenFromAddressListsEnabled
+            RequireSenderAuthenticationEnabled   = $g.RequireSenderAuthenticationEnabled
+            MemberJoinRestriction                = if ($g.PSObject.Properties['MemberJoinRestriction'])    { "$($g.MemberJoinRestriction)" }    else { '' }
+            MemberDepartRestriction              = if ($g.PSObject.Properties['MemberDepartRestriction'])  { "$($g.MemberDepartRestriction)" }  else { '' }
+            ModerationEnabled                    = $g.ModerationEnabled
+            ModeratedBy                          = Join-Prop $g.ModeratedBy
+            SendModerationNotifications          = if ($g.PSObject.Properties['SendModerationNotifications'])          { "$($g.SendModerationNotifications)" }          else { '' }
+            AcceptMessagesOnlyFrom               = Join-Prop $g.AcceptMessagesOnlyFrom
+            AcceptMessagesOnlyFromDLMembers      = Join-Prop $g.AcceptMessagesOnlyFromDLMembers
+            BypassModerationFromSendersOrMembers = if ($g.PSObject.Properties['BypassModerationFromSendersOrMembers']) { Join-Prop $g.BypassModerationFromSendersOrMembers } else { '' }
+            ReportToManagerEnabled               = if ($g.PSObject.Properties['ReportToManagerEnabled'])               { "$($g.ReportToManagerEnabled)" }               else { '' }
+            ReportToOriginatorEnabled            = if ($g.PSObject.Properties['ReportToOriginatorEnabled'])            { "$($g.ReportToOriginatorEnabled)" }            else { '' }
+            RecipientFilter                      = if ($g.PSObject.Properties['RecipientFilter'])                      { "$($g.RecipientFilter)" }                      else { '' }
+            RecipientContainer                   = if ($g.PSObject.Properties['RecipientContainer'])                   { "$($g.RecipientContainer)" }                   else { '' }
+            Visibility                           = if ($g.PSObject.Properties['Visibility'])                           { "$($g.Visibility)" }                           else { '' }
+            AccessType                           = if ($g.PSObject.Properties['AccessType'])                           { "$($g.AccessType)" }                           else { '' }
+            SharePointSiteUrl                    = if ($g.PSObject.Properties['SharePointSiteUrl'])                    { "$($g.SharePointSiteUrl)" }                    else { '' }
+            AutoSubscribeNewMembers              = if ($g.PSObject.Properties['AutoSubscribeNewMembers'])              { "$($g.AutoSubscribeNewMembers)" }              else { '' }
+            WelcomeMessageEnabled                = if ($g.PSObject.Properties['WelcomeMessageEnabled'])                { "$($g.WelcomeMessageEnabled)" }                else { '' }
+            EmailAddresses                       = Join-Prop $g.EmailAddresses
+            WhenCreated                          = $g.WhenCreated
+            WhenChanged                          = $g.WhenChanged
+        }
+    }
+
+    if ($processAll -or $DistributionGroups) {
+        Write-Host "Gathering Distribution Groups..." -ForegroundColor Cyan
+        $groups = @(Get-DistributionGroup -RecipientTypeDetails MailUniversalDistributionGroup -ResultSize Unlimited)
+        $i = 0; $n = $groups.Count
+        foreach ($g in $groups) {
+            $i++
+            Write-Progress -Activity "Distribution Groups" -Status "$($g.DisplayName) ($i of $n)" -PercentComplete ([math]::Round(($i / $n) * 100))
+            $Results.Add((New-GroupRecord $g "DistributionGroup"))
+        }
+        Write-Progress -Activity "Distribution Groups" -Completed
+        Write-Host "  Found $n Distribution Groups." -ForegroundColor Gray
+    }
+
+    if ($processAll -or $MailEnabledSecurityGroups) {
+        Write-Host "Gathering Mail-Enabled Security Groups..." -ForegroundColor Cyan
+        $groups = @(Get-DistributionGroup -RecipientTypeDetails MailUniversalSecurityGroup -ResultSize Unlimited)
+        $i = 0; $n = $groups.Count
+        foreach ($g in $groups) {
+            $i++
+            Write-Progress -Activity "Mail-Enabled Security Groups" -Status "$($g.DisplayName) ($i of $n)" -PercentComplete ([math]::Round(($i / $n) * 100))
+            $Results.Add((New-GroupRecord $g "MailEnabledSecurityGroup"))
+        }
+        Write-Progress -Activity "Mail-Enabled Security Groups" -Completed
+        Write-Host "  Found $n Mail-Enabled Security Groups." -ForegroundColor Gray
+    }
+
+    if ($processAll -or $DynamicDistributionGroups) {
+        Write-Host "Gathering Dynamic Distribution Groups..." -ForegroundColor Cyan
+        $groups = @(Get-DynamicDistributionGroup -ResultSize Unlimited)
+        $i = 0; $n = $groups.Count
+        foreach ($g in $groups) {
+            $i++
+            Write-Progress -Activity "Dynamic Distribution Groups" -Status "$($g.DisplayName) ($i of $n)" -PercentComplete ([math]::Round(($i / $n) * 100))
+            $Results.Add((New-GroupRecord $g "DynamicDistributionGroup"))
+        }
+        Write-Progress -Activity "Dynamic Distribution Groups" -Completed
+        Write-Host "  Found $n Dynamic Distribution Groups." -ForegroundColor Gray
+    }
+
+    if ($processAll -or $M365Groups) {
+        Write-Host "Gathering M365 Groups..." -ForegroundColor Cyan
+        $groups = @(Get-UnifiedGroup -ResultSize Unlimited)
+        $i = 0; $n = $groups.Count
+        foreach ($g in $groups) {
+            $i++
+            Write-Progress -Activity "M365 Groups" -Status "$($g.DisplayName) ($i of $n)" -PercentComplete ([math]::Round(($i / $n) * 100))
+            $Results.Add((New-GroupRecord $g "M365Group"))
+        }
+        Write-Progress -Activity "M365 Groups" -Completed
+        Write-Host "  Found $n M365 Groups." -ForegroundColor Gray
+    }
+
+    Write-Host "`nTotal groups collected: $($Results.Count)" -ForegroundColor Cyan
+
+    if ($CSV) {
+        $FileName = ".\Groups_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+        $Results | Export-Csv $FileName -NoTypeInformation -Encoding UTF8
+        Write-Host "Export complete: $FileName" -ForegroundColor Green
+    } else {
+        $Results
+    }
+}
+
+function Get-FrankensteinGroupMember {
+    [CmdletBinding()]
+    Param (
+        [Switch]$DistributionGroups,
+        [Switch]$MailEnabledSecurityGroups,
+        [Switch]$DynamicDistributionGroups,
+        [Switch]$M365Groups,
+        [Switch]$ImportCSV,
+        [Switch]$UseCurrentSession,
+        [Switch]$CSV,
+        [Switch]$Help
+    )
+
+    if ($Help) {
+        Write-Host @"
+SYNOPSIS
+    Exports group membership for all mail-enabled group types.
+
+DESCRIPTION
+    For Distribution Groups and Mail-Enabled Security Groups, direct members are enumerated.
+    For Dynamic Distribution Groups, membership is resolved live from the recipient filter
+    and tagged with Role = Dynamic to indicate it cannot be statically imported.
+    For M365 Groups, both Members and Owners are exported with a Role column (Member/Owner).
+
+    Use -ImportCSV to scope the pull to a specific list of groups rather than querying all
+    groups from Exchange Online. A file picker will prompt for a CSV with two columns:
+      - PrimarySmtpAddress : the group's primary SMTP address
+      - GroupType          : DistributionGroup, MailEnabledSecurityGroup,
+                             DynamicDistributionGroup, or M365Group
+
+    Type switches (-M365Groups, etc.) can be combined with -ImportCSV to further filter
+    which rows from the imported list are processed.
+
+PARAMETERS
+    -DistributionGroups         Include Distribution Groups.
+    -MailEnabledSecurityGroups  Include Mail-Enabled Security Groups.
+    -DynamicDistributionGroups  Include Dynamic Distribution Groups (live filter resolution).
+    -M365Groups                 Include M365 (Unified) Groups (Members and Owners).
+    -ImportCSV                  Scope membership pull to a list of groups from a CSV file.
+    -UseCurrentSession          Use the current Exchange Online session.
+    -CSV                        Export results to a timestamped CSV file.
+    -Help                       Display this help text.
+
+    Note: If no group type switch is specified, all types are processed.
+
+EXAMPLE
+    Get-FrankensteinGroupMember -UseCurrentSession -CSV
+    Get-FrankensteinGroupMember -UseCurrentSession -ImportCSV -CSV
+    Get-FrankensteinGroupMember -UseCurrentSession -ImportCSV -M365Groups -CSV
+
+NOTES
+    Author: Eric D. Frank
+"@
+        return
+    }
+
+    if (-not $UseCurrentSession) { Connect-ExchangeOnline }
+
+    $ImportedGroups = $null
+    if ($ImportCSV) {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show(
+            "Select a CSV containing the groups to scope this membership pull to.`n`nRequired columns:`n  - PrimarySmtpAddress : the group's primary SMTP address`n  - GroupType          : DistributionGroup, MailEnabledSecurityGroup,`n                         DynamicDistributionGroup, or M365Group`n`nOnly groups present in this file will be queried for membership.",
+            "Select Group Scope CSV",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+
+        $scopeDialog        = New-Object System.Windows.Forms.OpenFileDialog
+        $scopeDialog.Title  = "Select Group Scope CSV"
+        $scopeDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+        if ($scopeDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+            Write-Host "No scope file selected. Exiting." -ForegroundColor Yellow
+            return
+        }
+        $ImportedGroups = Import-Csv $scopeDialog.FileName
+        if (-not ($ImportedGroups | Get-Member -Name 'PrimarySmtpAddress') -or -not ($ImportedGroups | Get-Member -Name 'GroupType')) {
+            Write-Host "Scope CSV is missing required columns (PrimarySmtpAddress, GroupType). Exiting." -ForegroundColor Red
+            return
+        }
+        Write-Host "Scope file loaded: $($ImportedGroups.Count) group(s) to process." -ForegroundColor Cyan
+    }
+
+    $processAll = (-not $DistributionGroups -and -not $MailEnabledSecurityGroups -and -not $DynamicDistributionGroups -and -not $M365Groups)
+    $Results    = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $SeenKeys   = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    function Add-MemberRecord ($group, [string]$groupType, $member, [string]$role) {
+        $memberSmtp = if ($member.PrimarySmtpAddress) { $member.PrimarySmtpAddress } else { $member.WindowsLiveID }
+        $key = "$($group.PrimarySmtpAddress)|$memberSmtp|$role"
+        if ($SeenKeys.Add($key)) {
+            $Results.Add([PSCustomObject]@{
+                GroupDisplayName           = $group.DisplayName
+                GroupPrimarySmtp           = $group.PrimarySmtpAddress
+                GroupType                  = $groupType
+                MemberDisplayName          = $member.DisplayName
+                MemberPrimarySmtp          = $memberSmtp
+                MemberRecipientTypeDetails = $member.RecipientTypeDetails
+                Role                       = $role
+            })
+        }
+    }
+
+    if ($processAll -or $DistributionGroups) {
+        Write-Host "Gathering Distribution Group membership..." -ForegroundColor Cyan
+        if ($ImportCSV) {
+            $scopedSmtps = @($ImportedGroups | Where-Object { $_.GroupType -eq 'DistributionGroup' } | ForEach-Object { $_.PrimarySmtpAddress })
+            $groups = foreach ($smtp in $scopedSmtps) {
+                $g = Get-DistributionGroup -Identity $smtp -ErrorAction SilentlyContinue
+                if (-not $g) { Write-Warning "Distribution Group not found: $smtp" }
+                $g
+            }
+            $groups = @($groups | Where-Object { $_ })
+        } else {
+            $groups = @(Get-DistributionGroup -RecipientTypeDetails MailUniversalDistributionGroup -ResultSize Unlimited)
+        }
+        $i = 0; $n = $groups.Count
+        foreach ($g in $groups) {
+            $i++
+            Write-Progress -Activity "DG Membership" -Status "$($g.DisplayName) ($i of $n)" -PercentComplete ([math]::Round(($i / $n) * 100))
+            $members = @(Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction SilentlyContinue)
+            foreach ($m in $members) { Add-MemberRecord $g "DistributionGroup" $m "Member" }
+        }
+        Write-Progress -Activity "DG Membership" -Completed
+        Write-Host "  Processed $n Distribution Groups." -ForegroundColor Gray
+    }
+
+    if ($processAll -or $MailEnabledSecurityGroups) {
+        Write-Host "Gathering Mail-Enabled Security Group membership..." -ForegroundColor Cyan
+        if ($ImportCSV) {
+            $scopedSmtps = @($ImportedGroups | Where-Object { $_.GroupType -eq 'MailEnabledSecurityGroup' } | ForEach-Object { $_.PrimarySmtpAddress })
+            $groups = foreach ($smtp in $scopedSmtps) {
+                $g = Get-DistributionGroup -Identity $smtp -ErrorAction SilentlyContinue
+                if (-not $g) { Write-Warning "Mail-Enabled Security Group not found: $smtp" }
+                $g
+            }
+            $groups = @($groups | Where-Object { $_ })
+        } else {
+            $groups = @(Get-DistributionGroup -RecipientTypeDetails MailUniversalSecurityGroup -ResultSize Unlimited)
+        }
+        $i = 0; $n = $groups.Count
+        foreach ($g in $groups) {
+            $i++
+            Write-Progress -Activity "MESG Membership" -Status "$($g.DisplayName) ($i of $n)" -PercentComplete ([math]::Round(($i / $n) * 100))
+            $members = @(Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction SilentlyContinue)
+            foreach ($m in $members) { Add-MemberRecord $g "MailEnabledSecurityGroup" $m "Member" }
+        }
+        Write-Progress -Activity "MESG Membership" -Completed
+        Write-Host "  Processed $n Mail-Enabled Security Groups." -ForegroundColor Gray
+    }
+
+    if ($processAll -or $DynamicDistributionGroups) {
+        Write-Host "Gathering Dynamic Distribution Group membership (resolving filters live)..." -ForegroundColor Cyan
+        if ($ImportCSV) {
+            $scopedSmtps = @($ImportedGroups | Where-Object { $_.GroupType -eq 'DynamicDistributionGroup' } | ForEach-Object { $_.PrimarySmtpAddress })
+            $groups = foreach ($smtp in $scopedSmtps) {
+                $g = Get-DynamicDistributionGroup -Identity $smtp -ErrorAction SilentlyContinue
+                if (-not $g) { Write-Warning "Dynamic Distribution Group not found: $smtp" }
+                $g
+            }
+            $groups = @($groups | Where-Object { $_ })
+        } else {
+            $groups = @(Get-DynamicDistributionGroup -ResultSize Unlimited)
+        }
+        $i = 0; $n = $groups.Count
+        foreach ($g in $groups) {
+            $i++
+            Write-Progress -Activity "DDG Membership" -Status "$($g.DisplayName) ($i of $n)" -PercentComplete ([math]::Round(($i / $n) * 100))
+            try {
+                $members = @(Get-Recipient -RecipientPreviewFilter $g.RecipientFilter -ResultSize Unlimited -ErrorAction Stop)
+                foreach ($m in $members) { Add-MemberRecord $g "DynamicDistributionGroup" $m "Dynamic" }
+            } catch {
+                Write-Warning "Could not resolve membership for DDG '$($g.DisplayName)': $($_.Exception.Message)"
+            }
+        }
+        Write-Progress -Activity "DDG Membership" -Completed
+        Write-Host "  Processed $n Dynamic Distribution Groups." -ForegroundColor Gray
+    }
+
+    if ($processAll -or $M365Groups) {
+        Write-Host "Gathering M365 Group membership..." -ForegroundColor Cyan
+        if ($ImportCSV) {
+            $scopedSmtps = @($ImportedGroups | Where-Object { $_.GroupType -eq 'M365Group' } | ForEach-Object { $_.PrimarySmtpAddress })
+            $groups = foreach ($smtp in $scopedSmtps) {
+                $g = Get-UnifiedGroup -Identity $smtp -ErrorAction SilentlyContinue
+                if (-not $g) { Write-Warning "M365 Group not found: $smtp" }
+                $g
+            }
+            $groups = @($groups | Where-Object { $_ })
+        } else {
+            $groups = @(Get-UnifiedGroup -ResultSize Unlimited)
+        }
+        $i = 0; $n = $groups.Count
+        foreach ($g in $groups) {
+            $i++
+            Write-Progress -Activity "M365 Membership" -Status "$($g.DisplayName) ($i of $n)" -PercentComplete ([math]::Round(($i / $n) * 100))
+            $members = @(Get-UnifiedGroupLinks -Identity $g.Identity -LinkType Members -ResultSize Unlimited -ErrorAction SilentlyContinue)
+            foreach ($m in $members) { Add-MemberRecord $g "M365Group" $m "Member" }
+            $owners = @(Get-UnifiedGroupLinks -Identity $g.Identity -LinkType Owners -ResultSize Unlimited -ErrorAction SilentlyContinue)
+            foreach ($m in $owners)  { Add-MemberRecord $g "M365Group" $m "Owner" }
+        }
+        Write-Progress -Activity "M365 Membership" -Completed
+        Write-Host "  Processed $n M365 Groups." -ForegroundColor Gray
+    }
+
+    Write-Host "`nTotal membership records: $($Results.Count)" -ForegroundColor Cyan
+
+    if ($CSV) {
+        $FileName = ".\GroupMembership_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+        $Results | Export-Csv $FileName -NoTypeInformation -Encoding UTF8
+        Write-Host "Export complete: $FileName" -ForegroundColor Green
+    } else {
+        $Results
+    }
+}
+
+function Import-FrankensteinGroupMembers {
+    [CmdletBinding()]
+    Param (
+        [Switch]$DistributionGroups,
+        [Switch]$MailEnabledSecurityGroups,
+        [Switch]$DynamicDistributionGroups,
+        [Switch]$M365Groups,
+        [Switch]$UseCurrentSession,
+        [Switch]$Help
+    )
+
+    if ($Help) {
+        Write-Host @"
+SYNOPSIS
+    Imports group membership using a membership export CSV and a migration mapping CSV.
+
+DESCRIPTION
+    Reads a membership CSV exported by Get-FrankensteinGroupMember and applies membership
+    in the target environment. A mapping file (Source/Target CSV) translates source SMTP
+    addresses to destination SMTP addresses for both groups and members.
+    Dynamic Distribution Group rows are always skipped (filter-based membership cannot be
+    statically imported). M365 Owner rows are applied via the Owners link type.
+    Results are written to a timestamped log CSV.
+
+PARAMETERS
+    -DistributionGroups         Process Distribution Group rows.
+    -MailEnabledSecurityGroups  Process Mail-Enabled Security Group rows.
+    -DynamicDistributionGroups  Process DDG rows (they will be logged as Skipped).
+    -M365Groups                 Process M365 Group rows.
+    -UseCurrentSession          Use the current Exchange Online session.
+    -Help                       Display this help text.
+
+    Note: If no group type switch is specified, all types are processed.
+
+EXAMPLE
+    Import-FrankensteinGroupMembers -UseCurrentSession
+    Import-FrankensteinGroupMembers -UseCurrentSession -M365Groups -DistributionGroups
+
+NOTES
+    Author: Eric D. Frank
+"@
+        return
+    }
+
+    Add-Type -AssemblyName System.Windows.Forms
+
+    [System.Windows.Forms.MessageBox]::Show(
+        "Step 1 of 2: Select the group membership export CSV produced by Get-FrankensteinGroupMember.`n`nExpected columns:`n  - GroupPrimarySmtp : SMTP address of the source group`n  - GroupType        : DistributionGroup, MailEnabledSecurityGroup, DynamicDistributionGroup, or M365Group`n  - MemberPrimarySmtp: SMTP address of the source member`n  - Role             : Member, Owner (M365 only), or Dynamic (DDG - will be skipped)",
+        "Select Group Membership Export File",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+
+    $memberDialog        = New-Object System.Windows.Forms.OpenFileDialog
+    $memberDialog.Title  = "Select Group Membership Export CSV"
+    $memberDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+    if ($memberDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host "No membership file selected. Exiting." -ForegroundColor Yellow
+        return
+    }
+    $MembershipFile = $memberDialog.FileName
+
+    [System.Windows.Forms.MessageBox]::Show(
+        "Step 2 of 2: Select your migration mapping CSV.`n`nRequired columns:`n  - Source : original SMTP address (groups AND members must both be covered)`n  - Target : destination SMTP address in the new environment`n`nDynamic Distribution Group rows are always skipped regardless of mapping.",
+        "Select Mapping File",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+
+    $mapDialog        = New-Object System.Windows.Forms.OpenFileDialog
+    $mapDialog.Title  = "Select Mapping File CSV"
+    $mapDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+    if ($mapDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host "No mapping file selected. Exiting." -ForegroundColor Yellow
+        return
+    }
+    $MappingFile = $mapDialog.FileName
+
+    $MembershipRows = Import-Csv $MembershipFile
+    $MappingRaw     = Import-Csv $MappingFile
+    $Mapping        = @{}
+    foreach ($entry in $MappingRaw) {
+        if ($entry.Source -and $entry.Target) {
+            $Mapping[$entry.Source.Trim().ToLower()] = $entry.Target.Trim()
+        }
+    }
+
+    if ($Mapping.Count -eq 0) {
+        Write-Host "Mapping file is empty or missing Source/Target columns. Exiting." -ForegroundColor Red
+        return
+    }
+
+    $processAll = (-not $DistributionGroups -and -not $MailEnabledSecurityGroups -and -not $DynamicDistributionGroups -and -not $M365Groups)
+
+    if (-not $UseCurrentSession) { Connect-ExchangeOnline }
+
+    $Log            = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $total          = $MembershipRows.Count
+    $count          = 0
+    $RecipientCache = @{}
+    $SeenKeys       = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    function Resolve-TargetRecipient ([string]$identity) {
+        $key = $identity.ToLower()
+        if (-not $RecipientCache.ContainsKey($key)) {
+            $RecipientCache[$key] = Get-Recipient -Identity $identity -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        return $RecipientCache[$key]
+    }
+
+    Write-Host "Processing $total membership rows..." -ForegroundColor Cyan
+
+    foreach ($row in $MembershipRows) {
+        $count++
+        Write-Progress -Activity "Importing Group Membership" `
+            -Status "Row $count of $total - $($row.GroupType): $($row.GroupPrimarySmtp)" `
+            -PercentComplete ([math]::Round(($count / $total) * 100))
+
+        $groupType = $row.GroupType
+        $role      = $row.Role
+
+        if (-not $processAll) {
+            if ($groupType -eq 'DistributionGroup'        -and -not $DistributionGroups)       { continue }
+            if ($groupType -eq 'MailEnabledSecurityGroup' -and -not $MailEnabledSecurityGroups) { continue }
+            if ($groupType -eq 'DynamicDistributionGroup' -and -not $DynamicDistributionGroups) { continue }
+            if ($groupType -eq 'M365Group'                -and -not $M365Groups)                { continue }
+        }
+
+        $seenKey = "$($row.GroupPrimarySmtp.Trim())|$($row.MemberPrimarySmtp.Trim())|$role"
+        if (-not $SeenKeys.Add($seenKey)) {
+            $Log.Add([PSCustomObject][ordered]@{
+                SourceGroup  = $row.GroupPrimarySmtp
+                TargetGroup  = $null
+                SourceMember = $row.MemberPrimarySmtp
+                TargetMember = $null
+                GroupType    = $groupType
+                Role         = $role
+                Status       = 'Skipped'
+                Details      = 'Duplicate entry in membership file'
+            })
+            continue
+        }
+
+        if ($groupType -eq 'DynamicDistributionGroup') {
+            $Log.Add([PSCustomObject][ordered]@{
+                SourceGroup  = $row.GroupPrimarySmtp
+                TargetGroup  = $null
+                SourceMember = $row.MemberPrimarySmtp
+                TargetMember = $null
+                GroupType    = $groupType
+                Role         = $role
+                Status       = 'Skipped'
+                Details      = 'Dynamic Distribution Group membership is filter-based and cannot be statically imported'
+            })
+            continue
+        }
+
+        $groupKey    = $row.GroupPrimarySmtp.Trim().ToLower()
+        $memberKey   = $row.MemberPrimarySmtp.Trim().ToLower()
+        $groupTarget  = $Mapping[$groupKey]
+        $memberTarget = $Mapping[$memberKey]
+
+        $logEntry = [ordered]@{
+            SourceGroup  = $row.GroupPrimarySmtp
+            TargetGroup  = $groupTarget
+            SourceMember = $row.MemberPrimarySmtp
+            TargetMember = $memberTarget
+            GroupType    = $groupType
+            Role         = $role
+            Status       = $null
+            Details      = $null
+        }
+
+        if (-not $groupTarget -and -not $memberTarget) {
+            $logEntry.Status  = 'Skipped'
+            $logEntry.Details = 'Neither group nor member found in mapping'
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+        if (-not $groupTarget) {
+            $logEntry.Status  = 'Skipped'
+            $logEntry.Details = 'Group not found in mapping'
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+        if (-not $memberTarget) {
+            $logEntry.Status  = 'Skipped'
+            $logEntry.Details = 'Member not found in mapping'
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+
+        $resolvedGroup  = Resolve-TargetRecipient $groupTarget
+        $resolvedMember = Resolve-TargetRecipient $memberTarget
+
+        if (-not $resolvedGroup -and -not $resolvedMember) {
+            $logEntry.Status  = 'Failed'
+            $logEntry.Details = "Neither target group ('$groupTarget') nor target member ('$memberTarget') found in environment"
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+        if (-not $resolvedGroup) {
+            $logEntry.Status  = 'Failed'
+            $logEntry.Details = "Target group '$groupTarget' not found in environment"
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+        if (-not $resolvedMember) {
+            $logEntry.Status  = 'Failed'
+            $logEntry.Details = "Target member '$memberTarget' not found in environment"
+            $Log.Add([PSCustomObject]$logEntry)
+            continue
+        }
+
+        $groupPrimary  = $resolvedGroup.PrimarySmtpAddress
+        $memberPrimary = $resolvedMember.PrimarySmtpAddress
+        $logEntry.TargetGroup  = $groupPrimary
+        $logEntry.TargetMember = $memberPrimary
+
+        try {
+            switch ($groupType) {
+                { $_ -eq 'DistributionGroup' -or $_ -eq 'MailEnabledSecurityGroup' } {
+                    Add-DistributionGroupMember -Identity $groupPrimary -Member $memberPrimary `
+                        -BypassSecurityGroupManagerCheck -ErrorAction Stop
+                }
+                'M365Group' {
+                    $linkType = if ($role -eq 'Owner') { 'Owners' } else { 'Members' }
+                    Add-UnifiedGroupLinks -Identity $groupPrimary -LinkType $linkType `
+                        -Links $memberPrimary -ErrorAction Stop
+                }
+            }
+            $logEntry.Status  = 'Success'
+            $logEntry.Details = 'Membership applied'
+        } catch {
+            $logEntry.Status  = 'Failed'
+            $logEntry.Details = $_.Exception.Message
+        }
+
+        $Log.Add([PSCustomObject]$logEntry)
+    }
+
+    Write-Progress -Activity "Importing Group Membership" -Completed
+
+    $LogFile = ".\ImportGroupMembershipLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
     $Log | Export-Csv $LogFile -NoTypeInformation -Encoding UTF8
 
     $success = ($Log | Where-Object Status -eq 'Success').Count

@@ -1470,13 +1470,15 @@ function Import-FrankensteinMailboxPermissions {
     if ($Help) {
         Write-Host @"
 SYNOPSIS
-    Imports FullAccess, SendAs, and SendOnBehalf permissions using a permissions export and a mapping file.
+    Imports FullAccess, SendAs, and SendOnBehalf permissions using a permissions export and two mapping files.
 
 DESCRIPTION
     Reads a permissions CSV exported by Get-FrankensteinMailboxPermissions and applies those permissions
-    in the target environment. A mapping file (Source/Target CSV) is required to translate source SMTP
-    addresses to destination SMTP addresses. Both the mailbox AND the delegate must appear in the mapping
-    for a permission to be applied. Supports mailboxes and distribution groups as delegates.
+    in the target environment. Two separate mapping files (Source/Target CSVs) are required:
+      - Mailbox mapping  : translates source mailbox SMTP addresses to destination addresses
+      - Delegate mapping : translates source delegate SMTP addresses to destination addresses
+    Both the mailbox AND the delegate must resolve for a permission to be applied.
+    Supports mailboxes and distribution groups as delegates.
     Results are written to a timestamped log CSV.
 
 PARAMETERS
@@ -1501,7 +1503,7 @@ NOTES
 
     # --- File picker 1: Permissions export ---
     [System.Windows.Forms.MessageBox]::Show(
-        "Step 1 of 2: Select the permissions export CSV produced by Get-FrankensteinMailboxPermissions.`n`nExpected columns:`n  - UserPrincipalName  : SMTP address of the mailbox`n  - UserWithAccess     : SMTP address of the delegate`n  - AccessType         : FullAccess, SendAs, or SendOnBehalf",
+        "Step 1 of 3: Select the permissions export CSV produced by Get-FrankensteinMailboxPermissions.`n`nExpected columns:`n  - UserPrincipalName  : SMTP address of the mailbox`n  - UserWithAccess     : SMTP address of the delegate`n  - AccessType         : FullAccess, SendAs, or SendOnBehalf",
         "Select Permissions Export File",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information
@@ -1510,44 +1512,69 @@ NOTES
     $permDialog        = New-Object System.Windows.Forms.OpenFileDialog
     $permDialog.Title  = "Select Permissions Export CSV"
     $permDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
-
     if ($permDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
         Write-Host "No permissions file selected. Exiting." -ForegroundColor Yellow
         return
     }
     $PermissionsFile = $permDialog.FileName
 
-    # --- File picker 2: Mapping file ---
+    # --- File picker 2: Mailbox mapping ---
     [System.Windows.Forms.MessageBox]::Show(
-        "Step 2 of 2: Select your migration mapping CSV.`n`nRequired columns:`n  - Source : original SMTP address (must match values in the permissions export)`n  - Target : destination SMTP address in the new environment`n`nBoth the mailbox AND the delegate must have entries in this file for a permission to be applied.`nDistribution groups are supported as delegate entries.",
-        "Select Mapping File",
+        "Step 2 of 3: Select your MAILBOX mapping CSV.`n`nRequired columns:`n  - Source : original mailbox SMTP address (matches UserPrincipalName in the permissions export)`n  - Target : destination mailbox SMTP address in the new environment",
+        "Select Mailbox Mapping File",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null
 
-    $mapDialog        = New-Object System.Windows.Forms.OpenFileDialog
-    $mapDialog.Title  = "Select Mapping File CSV"
-    $mapDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
-
-    if ($mapDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
-        Write-Host "No mapping file selected. Exiting." -ForegroundColor Yellow
+    $mbxMapDialog        = New-Object System.Windows.Forms.OpenFileDialog
+    $mbxMapDialog.Title  = "Select Mailbox Mapping CSV"
+    $mbxMapDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+    if ($mbxMapDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host "No mailbox mapping file selected. Exiting." -ForegroundColor Yellow
         return
     }
-    $MappingFile = $mapDialog.FileName
+    $MailboxMappingFile = $mbxMapDialog.FileName
+
+    # --- File picker 3: Delegate mapping ---
+    [System.Windows.Forms.MessageBox]::Show(
+        "Step 3 of 3: Select your DELEGATE mapping CSV.`n`nRequired columns:`n  - Source : original delegate SMTP address (matches UserWithAccess in the permissions export)`n  - Target : destination delegate SMTP address in the new environment`n`nDelegates may be users or distribution groups.",
+        "Select Delegate Mapping File",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+
+    $delMapDialog        = New-Object System.Windows.Forms.OpenFileDialog
+    $delMapDialog.Title  = "Select Delegate Mapping CSV"
+    $delMapDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+    if ($delMapDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host "No delegate mapping file selected. Exiting." -ForegroundColor Yellow
+        return
+    }
+    $DelegateMappingFile = $delMapDialog.FileName
 
     # --- Load and validate files ---
     $Permissions = Import-Csv $PermissionsFile
 
-    $MappingRaw = Import-Csv $MappingFile
-    $Mapping    = @{}
-    foreach ($entry in $MappingRaw) {
+    $MailboxMapping = @{}
+    foreach ($entry in (Import-Csv $MailboxMappingFile)) {
         if ($entry.Source -and $entry.Target) {
-            $Mapping[$entry.Source.Trim().ToLower()] = $entry.Target.Trim()
+            $MailboxMapping[$entry.Source.Trim().ToLower()] = $entry.Target.Trim()
         }
     }
 
-    if ($Mapping.Count -eq 0) {
-        Write-Host "Mapping file is empty or missing Source/Target columns. Exiting." -ForegroundColor Red
+    $DelegateMapping = @{}
+    foreach ($entry in (Import-Csv $DelegateMappingFile)) {
+        if ($entry.Source -and $entry.Target) {
+            $DelegateMapping[$entry.Source.Trim().ToLower()] = $entry.Target.Trim()
+        }
+    }
+
+    if ($MailboxMapping.Count -eq 0) {
+        Write-Host "Mailbox mapping file is empty or missing Source/Target columns. Exiting." -ForegroundColor Red
+        return
+    }
+    if ($DelegateMapping.Count -eq 0) {
+        Write-Host "Delegate mapping file is empty or missing Source/Target columns. Exiting." -ForegroundColor Red
         return
     }
 
@@ -1604,8 +1631,8 @@ NOTES
 
         $mbxKey      = $row.UserPrincipalName.Trim().ToLower()
         $delegateKey = $row.UserWithAccess.Trim().ToLower()
-        $mbxTarget      = $Mapping[$mbxKey]
-        $delegateTarget = $Mapping[$delegateKey]
+        $mbxTarget      = $MailboxMapping[$mbxKey]
+        $delegateTarget = $DelegateMapping[$delegateKey]
 
         $logEntry = [ordered]@{
             SourceMailbox  = $row.UserPrincipalName
@@ -1619,19 +1646,19 @@ NOTES
 
         if (-not $mbxTarget -and -not $delegateTarget) {
             $logEntry.Status  = 'Skipped'
-            $logEntry.Details = 'Neither mailbox nor delegate found in mapping'
+            $logEntry.Details = 'Mailbox not found in mailbox mapping; Delegate not found in delegate mapping'
             $Log.Add([PSCustomObject]$logEntry)
             continue
         }
         if (-not $mbxTarget) {
             $logEntry.Status  = 'Skipped'
-            $logEntry.Details = 'Mailbox not found in mapping'
+            $logEntry.Details = 'Mailbox not found in mailbox mapping'
             $Log.Add([PSCustomObject]$logEntry)
             continue
         }
         if (-not $delegateTarget) {
             $logEntry.Status  = 'Skipped'
-            $logEntry.Details = 'Delegate not found in mapping'
+            $logEntry.Details = 'Delegate not found in delegate mapping'
             $Log.Add([PSCustomObject]$logEntry)
             continue
         }
@@ -2089,12 +2116,13 @@ function Import-FrankensteinGroupMembers {
     if ($Help) {
         Write-Host @"
 SYNOPSIS
-    Imports group membership using a membership export CSV and a migration mapping CSV.
+    Imports group membership using a membership export CSV and two mapping files.
 
 DESCRIPTION
     Reads a membership CSV exported by Get-FrankensteinGroupMember and applies membership
-    in the target environment. A mapping file (Source/Target CSV) translates source SMTP
-    addresses to destination SMTP addresses for both groups and members.
+    in the target environment. Two separate mapping files (Source/Target CSVs) are required:
+      - Group mapping  : translates source group SMTP addresses to destination addresses
+      - Member mapping : translates source member SMTP addresses to destination addresses
     Dynamic Distribution Group rows are always skipped (filter-based membership cannot be
     statically imported). M365 Owner rows are applied via the Owners link type.
     Results are written to a timestamped log CSV.
@@ -2121,8 +2149,9 @@ NOTES
 
     Add-Type -AssemblyName System.Windows.Forms
 
+    # --- File picker 1: Membership export ---
     [System.Windows.Forms.MessageBox]::Show(
-        "Step 1 of 2: Select the group membership export CSV produced by Get-FrankensteinGroupMember.`n`nExpected columns:`n  - GroupPrimarySmtp : SMTP address of the source group`n  - GroupType        : DistributionGroup, MailEnabledSecurityGroup, DynamicDistributionGroup, or M365Group`n  - MemberPrimarySmtp: SMTP address of the source member`n  - Role             : Member, Owner (M365 only), or Dynamic (DDG - will be skipped)",
+        "Step 1 of 3: Select the group membership export CSV produced by Get-FrankensteinGroupMember.`n`nExpected columns:`n  - GroupPrimarySmtp  : SMTP address of the source group`n  - GroupType         : DistributionGroup, MailEnabledSecurityGroup, DynamicDistributionGroup, or M365Group`n  - MemberPrimarySmtp : SMTP address of the source member`n  - Role              : Member, Owner (M365 only), or Dynamic (DDG - will be skipped)",
         "Select Group Membership Export File",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information
@@ -2137,33 +2166,63 @@ NOTES
     }
     $MembershipFile = $memberDialog.FileName
 
+    # --- File picker 2: Group mapping ---
     [System.Windows.Forms.MessageBox]::Show(
-        "Step 2 of 2: Select your migration mapping CSV.`n`nRequired columns:`n  - Source : original SMTP address (groups AND members must both be covered)`n  - Target : destination SMTP address in the new environment`n`nDynamic Distribution Group rows are always skipped regardless of mapping.",
-        "Select Mapping File",
+        "Step 2 of 3: Select your GROUP mapping CSV.`n`nRequired columns:`n  - Source : original group SMTP address (matches GroupPrimarySmtp in the membership export)`n  - Target : destination group SMTP address in the new environment`n`nDynamic Distribution Group rows are always skipped regardless of mapping.",
+        "Select Group Mapping File",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null
 
-    $mapDialog        = New-Object System.Windows.Forms.OpenFileDialog
-    $mapDialog.Title  = "Select Mapping File CSV"
-    $mapDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
-    if ($mapDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
-        Write-Host "No mapping file selected. Exiting." -ForegroundColor Yellow
+    $grpMapDialog        = New-Object System.Windows.Forms.OpenFileDialog
+    $grpMapDialog.Title  = "Select Group Mapping CSV"
+    $grpMapDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+    if ($grpMapDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host "No group mapping file selected. Exiting." -ForegroundColor Yellow
         return
     }
-    $MappingFile = $mapDialog.FileName
+    $GroupMappingFile = $grpMapDialog.FileName
 
+    # --- File picker 3: Member mapping ---
+    [System.Windows.Forms.MessageBox]::Show(
+        "Step 3 of 3: Select your MEMBER mapping CSV.`n`nRequired columns:`n  - Source : original member SMTP address (matches MemberPrimarySmtp in the membership export)`n  - Target : destination member SMTP address in the new environment`n`nMembers may be users, contacts, or mail-enabled groups.",
+        "Select Member Mapping File",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+
+    $memMapDialog        = New-Object System.Windows.Forms.OpenFileDialog
+    $memMapDialog.Title  = "Select Member Mapping CSV"
+    $memMapDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+    if ($memMapDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host "No member mapping file selected. Exiting." -ForegroundColor Yellow
+        return
+    }
+    $MemberMappingFile = $memMapDialog.FileName
+
+    # --- Load and validate files ---
     $MembershipRows = Import-Csv $MembershipFile
-    $MappingRaw     = Import-Csv $MappingFile
-    $Mapping        = @{}
-    foreach ($entry in $MappingRaw) {
+
+    $GroupMapping = @{}
+    foreach ($entry in (Import-Csv $GroupMappingFile)) {
         if ($entry.Source -and $entry.Target) {
-            $Mapping[$entry.Source.Trim().ToLower()] = $entry.Target.Trim()
+            $GroupMapping[$entry.Source.Trim().ToLower()] = $entry.Target.Trim()
         }
     }
 
-    if ($Mapping.Count -eq 0) {
-        Write-Host "Mapping file is empty or missing Source/Target columns. Exiting." -ForegroundColor Red
+    $MemberMapping = @{}
+    foreach ($entry in (Import-Csv $MemberMappingFile)) {
+        if ($entry.Source -and $entry.Target) {
+            $MemberMapping[$entry.Source.Trim().ToLower()] = $entry.Target.Trim()
+        }
+    }
+
+    if ($GroupMapping.Count -eq 0) {
+        Write-Host "Group mapping file is empty or missing Source/Target columns. Exiting." -ForegroundColor Red
+        return
+    }
+    if ($MemberMapping.Count -eq 0) {
+        Write-Host "Member mapping file is empty or missing Source/Target columns. Exiting." -ForegroundColor Red
         return
     }
 
@@ -2234,8 +2293,8 @@ NOTES
 
         $groupKey    = $row.GroupPrimarySmtp.Trim().ToLower()
         $memberKey   = $row.MemberPrimarySmtp.Trim().ToLower()
-        $groupTarget  = $Mapping[$groupKey]
-        $memberTarget = $Mapping[$memberKey]
+        $groupTarget  = $GroupMapping[$groupKey]
+        $memberTarget = $MemberMapping[$memberKey]
 
         $logEntry = [ordered]@{
             SourceGroup  = $row.GroupPrimarySmtp
@@ -2250,19 +2309,19 @@ NOTES
 
         if (-not $groupTarget -and -not $memberTarget) {
             $logEntry.Status  = 'Skipped'
-            $logEntry.Details = 'Neither group nor member found in mapping'
+            $logEntry.Details = 'Group not found in group mapping; Member not found in member mapping'
             $Log.Add([PSCustomObject]$logEntry)
             continue
         }
         if (-not $groupTarget) {
             $logEntry.Status  = 'Skipped'
-            $logEntry.Details = 'Group not found in mapping'
+            $logEntry.Details = 'Group not found in group mapping'
             $Log.Add([PSCustomObject]$logEntry)
             continue
         }
         if (-not $memberTarget) {
             $logEntry.Status  = 'Skipped'
-            $logEntry.Details = 'Member not found in mapping'
+            $logEntry.Details = 'Member not found in member mapping'
             $Log.Add([PSCustomObject]$logEntry)
             continue
         }

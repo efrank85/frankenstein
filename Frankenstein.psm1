@@ -2409,6 +2409,10 @@ NOTES
 function Get-FrankensteinMailboxReport {
     [CmdletBinding()]
     Param (
+        [Switch]$UserMailbox,
+        [Switch]$SharedMailbox,
+        [Switch]$RoomMailbox,
+        [Switch]$EquipmentMailbox,
         [Switch]$IncludeDisabled,
         [Switch]$IncludeStatistics,
         [Switch]$ImportCSV,
@@ -2424,12 +2428,21 @@ SYNOPSIS
 
 DESCRIPTION
     Collects properties for UserMailbox, SharedMailbox, RoomMailbox, and EquipmentMailbox.
-    By default only enabled mailboxes are included. Use -IncludeDisabled to include mailboxes
-    whose associated account is disabled. Use -ImportCSV to scope the report to a specific list
-    of mailboxes supplied in a CSV file. Always outputs a timestamped CSV file.
+    By default all four types are included. Use the type switches to scope to one or more types.
+
+    -IncludeDisabled applies only to UserMailbox objects. SharedMailbox, RoomMailbox, and
+    EquipmentMailbox are always included regardless of account enabled state, since those
+    object types are disabled by design in Azure AD.
+
+    Use -ImportCSV to scope the report to a specific list of mailboxes in a CSV file.
+    Always outputs a timestamped CSV file.
 
 PARAMETERS
-    -IncludeDisabled    Include mailboxes with disabled Azure AD accounts.
+    -UserMailbox        Include User Mailboxes (default: included).
+    -SharedMailbox      Include Shared Mailboxes (default: included).
+    -RoomMailbox        Include Room Mailboxes (default: included).
+    -EquipmentMailbox   Include Equipment Mailboxes (default: included).
+    -IncludeDisabled    Also include UserMailboxes whose Azure AD account is disabled.
     -IncludeStatistics  Append TotalItemSize, ItemCount, and LastLogonTime from Get-MailboxStatistics.
                         Note: adds one API call per mailbox; slower on large environments.
     -ImportCSV          Scope the report to a CSV file containing a PrimarySmtpAddress column.
@@ -2437,9 +2450,12 @@ PARAMETERS
     -OutputPath         Folder path for the output CSV. Defaults to the current working directory.
     -Help               Display this help text.
 
+    Note: If no type switch is specified, all four types are included.
+
 EXAMPLE
     Get-FrankensteinMailboxReport -UseCurrentSession
-    Get-FrankensteinMailboxReport -UseCurrentSession -IncludeDisabled -IncludeStatistics
+    Get-FrankensteinMailboxReport -UseCurrentSession -UserMailbox -IncludeDisabled
+    Get-FrankensteinMailboxReport -UseCurrentSession -SharedMailbox -RoomMailbox
     Get-FrankensteinMailboxReport -UseCurrentSession -ImportCSV -OutputPath C:\Reports
 
 NOTES
@@ -2476,6 +2492,14 @@ NOTES
 
     if (-not $UseCurrentSession) { Connect-ExchangeOnline }
 
+    $typeAll        = (-not $UserMailbox -and -not $SharedMailbox -and -not $RoomMailbox -and -not $EquipmentMailbox)
+    $recipientTypes = @(
+        if ($typeAll -or $UserMailbox)      { 'UserMailbox' }
+        if ($typeAll -or $SharedMailbox)    { 'SharedMailbox' }
+        if ($typeAll -or $RoomMailbox)      { 'RoomMailbox' }
+        if ($typeAll -or $EquipmentMailbox) { 'EquipmentMailbox' }
+    )
+
     # --- Build mailbox record ---
     function New-MailboxRecord ($mbx) {
         $stats = $null
@@ -2483,10 +2507,16 @@ NOTES
             $stats = Get-MailboxStatistics -Identity $mbx.ExchangeGuid.ToString() -ErrorAction SilentlyContinue
         }
 
+        $onMicrosoftSmtp = $mbx.EmailAddresses |
+            Where-Object { $_.ToString() -like 'smtp:*@*.onmicrosoft.com' } |
+            Select-Object -First 1 |
+            ForEach-Object { $_.ToString() -replace '^(?i)smtp:', '' }
+
         [PSCustomObject]@{
             # Identity
             DisplayName                      = $mbx.DisplayName
             PrimarySmtpAddress               = $mbx.PrimarySmtpAddress
+            OnMicrosoftAddress               = if ($onMicrosoftSmtp) { $onMicrosoftSmtp } else { '' }
             UserPrincipalName                = $mbx.UserPrincipalName
             SamAccountName                   = $mbx.SamAccountName
             Alias                            = $mbx.Alias
@@ -2503,6 +2533,7 @@ NOTES
 
             # Account status
             AccountDisabled                  = $mbx.AccountDisabled
+            IsDirSynced                      = $mbx.IsDirSynced
             WhenCreated                      = $mbx.WhenCreated
             WhenChanged                      = $mbx.WhenChanged
             WhenMailboxCreated               = $mbx.WhenMailboxCreated
@@ -2578,14 +2609,15 @@ NOTES
                 Write-Warning "Mailbox not found: $($row.PrimarySmtpAddress)"
                 continue
             }
-            if (-not $IncludeDisabled -and $mbx.AccountDisabled) { continue }
+            if (-not $typeAll -and $mbx.RecipientTypeDetails -notin $recipientTypes) { continue }
+            if (-not $IncludeDisabled -and $mbx.AccountDisabled -and $mbx.RecipientTypeDetails -eq 'UserMailbox') { continue }
             $Results.Add((New-MailboxRecord $mbx))
         }
     } else {
         Write-Host "Retrieving mailboxes..." -ForegroundColor Cyan
-        $Mailboxes = @(Get-Mailbox -RecipientTypeDetails UserMailbox, SharedMailbox, RoomMailbox, EquipmentMailbox -ResultSize Unlimited)
+        $Mailboxes = @(Get-Mailbox -RecipientTypeDetails $recipientTypes -ResultSize Unlimited)
         if (-not $IncludeDisabled) {
-            $Mailboxes = @($Mailboxes | Where-Object { -not $_.AccountDisabled })
+            $Mailboxes = @($Mailboxes | Where-Object { $_.RecipientTypeDetails -ne 'UserMailbox' -or -not $_.AccountDisabled })
         }
         $total = $Mailboxes.Count
         $count = 0

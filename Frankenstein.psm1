@@ -93,6 +93,13 @@ function Get-FrankensteinHelp {
         Switches: [-DistributionGroups] [-MailEnabledSecurityGroups] [-DynamicDistributionGroups] [-M365Groups]
                   [-UseCurrentSession] [-Help]
 
+    15) Get-FrankensteinMailboxReport
+        Exports a comprehensive mailbox report for UserMailbox, SharedMailbox, RoomMailbox, and EquipmentMailbox.
+        Defaults to enabled mailboxes only. Supports scoping to a CSV list of addresses via -ImportCSV.
+        Always outputs a timestamped CSV. Use -IncludeStatistics to append size, item count, and last logon.
+        Switches:    [-IncludeDisabled] [-IncludeStatistics] [-ImportCSV] [-UseCurrentSession] [-Help]
+        Parameters:  [-OutputPath <path>]
+
 "@
 }
 
@@ -2397,6 +2404,209 @@ NOTES
     Write-Host "  Member Already Exists : $alreadyExists" -ForegroundColor Yellow
     Write-Host "  Failed         : $failed"        -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'Green' })
     Write-Host "  Log            : $LogFile"       -ForegroundColor Cyan
+}
+
+function Get-FrankensteinMailboxReport {
+    [CmdletBinding()]
+    Param (
+        [Switch]$IncludeDisabled,
+        [Switch]$IncludeStatistics,
+        [Switch]$ImportCSV,
+        [Switch]$UseCurrentSession,
+        [String]$OutputPath = '.',
+        [Switch]$Help
+    )
+
+    if ($Help) {
+        Write-Host @"
+SYNOPSIS
+    Exports a comprehensive mailbox report for all standard mailbox types.
+
+DESCRIPTION
+    Collects properties for UserMailbox, SharedMailbox, RoomMailbox, and EquipmentMailbox.
+    By default only enabled mailboxes are included. Use -IncludeDisabled to include mailboxes
+    whose associated account is disabled. Use -ImportCSV to scope the report to a specific list
+    of mailboxes supplied in a CSV file. Always outputs a timestamped CSV file.
+
+PARAMETERS
+    -IncludeDisabled    Include mailboxes with disabled Azure AD accounts.
+    -IncludeStatistics  Append TotalItemSize, ItemCount, and LastLogonTime from Get-MailboxStatistics.
+                        Note: adds one API call per mailbox; slower on large environments.
+    -ImportCSV          Scope the report to a CSV file containing a PrimarySmtpAddress column.
+    -UseCurrentSession  Use the current Exchange Online session instead of prompting to connect.
+    -OutputPath         Folder path for the output CSV. Defaults to the current working directory.
+    -Help               Display this help text.
+
+EXAMPLE
+    Get-FrankensteinMailboxReport -UseCurrentSession
+    Get-FrankensteinMailboxReport -UseCurrentSession -IncludeDisabled -IncludeStatistics
+    Get-FrankensteinMailboxReport -UseCurrentSession -ImportCSV -OutputPath C:\Reports
+
+NOTES
+    Author: Eric D. Frank
+"@
+        return
+    }
+
+    # --- Optional ImportCSV file picker ---
+    $ImportedMailboxes = $null
+    if ($ImportCSV) {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show(
+            "Select a CSV containing the mailboxes to include in this report.`n`nRequired column:`n  - PrimarySmtpAddress : the mailbox's primary SMTP address`n`nAny additional columns in the file are ignored.",
+            "Select Mailbox Scope CSV",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+
+        $scopeDialog        = New-Object System.Windows.Forms.OpenFileDialog
+        $scopeDialog.Title  = "Select Mailbox Scope CSV"
+        $scopeDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+        if ($scopeDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+            Write-Host "No scope file selected. Exiting." -ForegroundColor Yellow
+            return
+        }
+        $ImportedMailboxes = Import-Csv $scopeDialog.FileName
+        if (-not ($ImportedMailboxes | Get-Member -Name 'PrimarySmtpAddress')) {
+            Write-Host "Scope CSV is missing the required PrimarySmtpAddress column. Exiting." -ForegroundColor Red
+            return
+        }
+        Write-Host "Scope file loaded: $($ImportedMailboxes.Count) address(es) to process." -ForegroundColor Cyan
+    }
+
+    if (-not $UseCurrentSession) { Connect-ExchangeOnline }
+
+    # --- Build mailbox record ---
+    function New-MailboxRecord ($mbx) {
+        $stats = $null
+        if ($IncludeStatistics) {
+            $stats = Get-MailboxStatistics -Identity $mbx.ExchangeGuid.ToString() -ErrorAction SilentlyContinue
+        }
+
+        [PSCustomObject]@{
+            # Identity
+            DisplayName                      = $mbx.DisplayName
+            PrimarySmtpAddress               = $mbx.PrimarySmtpAddress
+            UserPrincipalName                = $mbx.UserPrincipalName
+            SamAccountName                   = $mbx.SamAccountName
+            Alias                            = $mbx.Alias
+            RecipientTypeDetails             = $mbx.RecipientTypeDetails
+
+            # GUIDs / legacy identifiers
+            ExchangeGuid                     = $mbx.ExchangeGuid
+            ExternalDirectoryObjectId        = $mbx.ExternalDirectoryObjectId
+            LegacyExchangeDN                 = $mbx.LegacyExchangeDN
+            DistinguishedName                = $mbx.DistinguishedName
+
+            # All proxy addresses
+            EmailAddresses                   = ($mbx.EmailAddresses | ForEach-Object { "$_" }) -join ', '
+
+            # Account status
+            AccountDisabled                  = $mbx.AccountDisabled
+            WhenCreated                      = $mbx.WhenCreated
+            WhenChanged                      = $mbx.WhenChanged
+            WhenMailboxCreated               = $mbx.WhenMailboxCreated
+
+            # Forwarding
+            ForwardingAddress                = $mbx.ForwardingAddress
+            ForwardingSmtpAddress            = $mbx.ForwardingSmtpAddress
+            DeliverToMailboxAndForward       = $mbx.DeliverToMailboxAndForward
+
+            # Address list visibility
+            HiddenFromAddressListsEnabled    = $mbx.HiddenFromAddressListsEnabled
+
+            # Archive
+            ArchiveStatus                    = $mbx.ArchiveStatus
+            ArchiveGuid                      = $mbx.ArchiveGuid
+            ArchiveName                      = ($mbx.ArchiveName -join ', ')
+
+            # Compliance / legal hold
+            LitigationHoldEnabled            = $mbx.LitigationHoldEnabled
+            LitigationHoldDuration           = $mbx.LitigationHoldDuration
+            LitigationHoldOwner              = $mbx.LitigationHoldOwner
+            LitigationHoldDate               = $mbx.LitigationHoldDate
+            InPlaceHolds                     = ($mbx.InPlaceHolds -join ', ')
+            SingleItemRecoveryEnabled        = $mbx.SingleItemRecoveryEnabled
+            RetainDeletedItemsFor            = $mbx.RetainDeletedItemsFor
+
+            # Quota
+            ProhibitSendQuota                = $mbx.ProhibitSendQuota
+            ProhibitSendReceiveQuota         = $mbx.ProhibitSendReceiveQuota
+            IssueWarningQuota                = $mbx.IssueWarningQuota
+            UseDatabaseQuotaDefaults         = $mbx.UseDatabaseQuotaDefaults
+            MaxSendSize                      = $mbx.MaxSendSize
+            MaxReceiveSize                   = $mbx.MaxReceiveSize
+
+            # Policy
+            RetentionPolicy                  = $mbx.RetentionPolicy
+            RetentionHoldEnabled             = $mbx.RetentionHoldEnabled
+            AddressBookPolicy                = $mbx.AddressBookPolicy
+            SharingPolicy                    = $mbx.SharingPolicy
+
+            # Audit
+            AuditEnabled                     = $mbx.AuditEnabled
+            AuditLogAgeLimit                 = $mbx.AuditLogAgeLimit
+
+            # Authentication / protocols (available on Get-Mailbox in EXO)
+            ActiveSyncEnabled                = $mbx.ActiveSyncEnabled
+            OWAEnabled                       = $mbx.OWAEnabled
+            MAPIEnabled                      = $mbx.MAPIEnabled
+            EwsEnabled                       = $mbx.EwsEnabled
+            PopEnabled                       = $mbx.PopEnabled
+            ImapEnabled                      = $mbx.ImapEnabled
+
+            # Statistics (populated only when -IncludeStatistics is set)
+            TotalItemSize                    = if ($stats) { $stats.TotalItemSize.Value } else { '' }
+            ItemCount                        = if ($stats) { $stats.ItemCount }           else { '' }
+            LastLogonTime                    = if ($stats) { $stats.LastLogonTime }       else { '' }
+        }
+    }
+
+    $Results = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    if ($ImportCSV) {
+        $total = $ImportedMailboxes.Count
+        $count = 0
+        foreach ($row in $ImportedMailboxes) {
+            $count++
+            Write-Progress -Activity "Generating Mailbox Report" `
+                -Status "Looking up $($row.PrimarySmtpAddress) ($count of $total)" `
+                -PercentComplete ([math]::Round(($count / $total) * 100))
+
+            $mbx = Get-Mailbox -Identity $row.PrimarySmtpAddress -ErrorAction SilentlyContinue
+            if (-not $mbx) {
+                Write-Warning "Mailbox not found: $($row.PrimarySmtpAddress)"
+                continue
+            }
+            if (-not $IncludeDisabled -and $mbx.AccountDisabled) { continue }
+            $Results.Add((New-MailboxRecord $mbx))
+        }
+    } else {
+        Write-Host "Retrieving mailboxes..." -ForegroundColor Cyan
+        $Mailboxes = @(Get-Mailbox -RecipientTypeDetails UserMailbox, SharedMailbox, RoomMailbox, EquipmentMailbox -ResultSize Unlimited)
+        if (-not $IncludeDisabled) {
+            $Mailboxes = @($Mailboxes | Where-Object { -not $_.AccountDisabled })
+        }
+        $total = $Mailboxes.Count
+        $count = 0
+        Write-Host "Processing $total mailboxes..." -ForegroundColor Cyan
+        foreach ($mbx in $Mailboxes) {
+            $count++
+            Write-Progress -Activity "Generating Mailbox Report" `
+                -Status "$($mbx.DisplayName) ($count of $total)" `
+                -PercentComplete ([math]::Round(($count / $total) * 100))
+            $Results.Add((New-MailboxRecord $mbx))
+        }
+    }
+
+    Write-Progress -Activity "Generating Mailbox Report" -Completed
+
+    $FileName = "MailboxReport_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+    $FullPath = Join-Path $OutputPath $FileName
+    $Results | Export-Csv $FullPath -NoTypeInformation -Encoding UTF8
+
+    Write-Host "`nReport complete: $($Results.Count) mailbox(es) exported." -ForegroundColor Green
+    Write-Host "File: $FullPath" -ForegroundColor Cyan
 }
 
 function Set-FrankensteinPSWindowTitle {

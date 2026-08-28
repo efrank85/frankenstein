@@ -102,6 +102,13 @@ function Get-FrankensteinHelp {
         Switches:    [-IncludeDisabled] [-IncludeStatistics] [-ImportCSV] [-UseCurrentSession] [-Help]
         Parameters:  [-OutputPath <path>]
 
+    18) Invoke-FrankensteinDLMigrator
+        GUI-driven distribution group membership migrator. Source is always M365; target is M365
+        or on-prem Exchange. One mapping CSV covers both group rows and member rows (Source + Target
+        columns). Supports adding members to existing groups or creating groups with a prefix and
+        new SMTP domain. Nested groups are added directly if mapped, or expanded if not. Exports
+        a timestamped log CSV with Created, Success, AlreadyMember, Conflict, Skipped, and Failed.
+
     17) Invoke-FrankensteinPermissionMigrator
         GUI-driven permission migration tool for tenant-to-tenant cutovers.
         Load a Source-to-Target mapping CSV, connect to source (reads permissions live with optional
@@ -3061,13 +3068,17 @@ NOTES
                 $r = Get-Recipient -Identity $rawId -ErrorAction SilentlyContinue
                 if (-not $r) { return }
                 $smtp = $r.PrimarySmtpAddress
-                if ($r.RecipientTypeDetails -in $dlTypes -and $chkResolveDLs.Checked) {
+                $isDL       = $r.RecipientTypeDetails -in $dlTypes
+                $dlIsMapped = $script:PMMappingTable.ContainsKey($smtp.ToLower())
+                if ($isDL -and $chkResolveDLs.Checked -and -not $dlIsMapped) {
+                    # DL has no mapping entry — expand members and grant individually
                     $members = @(Expand-FrankensteinDLMembers -Identity $smtp -Recurse:($chkNestedDLs.Checked))
                     if ($members.Count) {
-                        Write-PMLog "    DL '$smtp' -> $($members.Count) member(s)" ([System.Drawing.Color]::DarkCyan)
+                        Write-PMLog "    DL '$smtp' (unmapped, expanding) -> $($members.Count) member(s)" ([System.Drawing.Color]::DarkCyan)
                         foreach ($m in $members) { Add-PMRecord $m.PrimarySmtpAddress $permType $smtp }
                     }
                 } else {
+                    # Non-DL, DL expansion off, or DL is mapped — record as direct delegate
                     Add-PMRecord $smtp $permType ''
                 }
             }
@@ -3180,7 +3191,7 @@ NOTES
 
     $form                 = New-Object System.Windows.Forms.Form
     $form.Text            = "Frankenstein - Permission Migrator"
-    $form.ClientSize      = New-Object System.Drawing.Size(700, 756)
+    $form.ClientSize      = New-Object System.Drawing.Size(700, 824)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedSingle'
     $form.MaximizeBox     = $false
@@ -3195,79 +3206,171 @@ NOTES
     $lblHeader.Size      = New-Object System.Drawing.Size(660, 28)
     $form.Controls.Add($lblHeader)
 
-    # --- 1. Identity Mapping ---
+    # --- 2. Identity Mapping ---
     $grpMap           = New-Object System.Windows.Forms.GroupBox
-    $grpMap.Text      = "1. Identity Mapping CSV  (Source + Target columns — mailboxes, delegates, and groups)"
-    $grpMap.Location  = New-Object System.Drawing.Point(12, 46)
-    $grpMap.Size      = New-Object System.Drawing.Size(676, 66)
+    $grpMap.Text      = "2. Identity Mapping"
+    $grpMap.Location  = New-Object System.Drawing.Point(12, 154)
+    $grpMap.Size      = New-Object System.Drawing.Size(676, 214)
     $form.Controls.Add($grpMap)
+
+    # CSV option
+    $radCsvMapping          = New-Object System.Windows.Forms.RadioButton
+    $radCsvMapping.Text     = "Load CSV mapping file  (Source + Target columns — mailboxes, delegates, groups)"
+    $radCsvMapping.Checked  = $true
+    $radCsvMapping.Location = New-Object System.Drawing.Point(10, 20)
+    $radCsvMapping.Size     = New-Object System.Drawing.Size(570, 20)
+    $grpMap.Controls.Add($radCsvMapping)
 
     $btnBrowseMap           = New-Object System.Windows.Forms.Button
     $btnBrowseMap.Text      = "Browse..."
-    $btnBrowseMap.Location  = New-Object System.Drawing.Point(580, 18)
-    $btnBrowseMap.Size      = New-Object System.Drawing.Size(84, 26)
+    $btnBrowseMap.Location  = New-Object System.Drawing.Point(582, 16)
+    $btnBrowseMap.Size      = New-Object System.Drawing.Size(82, 26)
     $grpMap.Controls.Add($btnBrowseMap)
 
     $lblMapPath             = New-Object System.Windows.Forms.Label
     $lblMapPath.Text        = "No file loaded"
     $lblMapPath.ForeColor   = [System.Drawing.Color]::Gray
-    $lblMapPath.Location    = New-Object System.Drawing.Point(10, 22)
-    $lblMapPath.Size        = New-Object System.Drawing.Size(560, 18)
+    $lblMapPath.Location    = New-Object System.Drawing.Point(10, 42)
+    $lblMapPath.Size        = New-Object System.Drawing.Size(654, 16)
     $grpMap.Controls.Add($lblMapPath)
+
+    $ttMap = New-Object System.Windows.Forms.ToolTip
+    $ttMap.AutoPopDelay = 12000
+    $ttMap.InitialDelay = 350
+    $ttMap.ReshowDelay  = 200
+    $ttMap.ShowAlways   = $true
+    $csvTip = @"
+CSV Requirements
+────────────────────────────────────────────────
+Column headers (exact, case-insensitive):
+  Source  — the identity in the SOURCE tenant
+  Target  — the corresponding identity in the TARGET tenant
+
+Accepted identity formats:
+  • Primary SMTP address  (user@source.com)
+  • User Principal Name   (user@source.com)
+  • Any value Exchange PowerShell can resolve
+
+Supported object types per row:
+  • User mailbox / Shared mailbox / Room / Equipment
+  • Mail-enabled security group or distribution group
+  • Mail user  •  Mail contact
+
+Important rules:
+  • A permission is only migrated when BOTH the mailbox owner
+    AND the delegate have a row in this file.
+  • DL delegates are automatically expanded to their members at
+    collection time — include individual members, not the DL itself.
+  • onmicrosoft.com addresses are fine as Target values.
+"@
+    $ttMap.SetToolTip($radCsvMapping, $csvTip)
+    $ttMap.SetToolTip($btnBrowseMap,  $csvTip)
+
+    # Manual option
+    $radManualEntry         = New-Object System.Windows.Forms.RadioButton
+    $radManualEntry.Text    = "Enter source/target pairs manually  (no CSV needed — useful for single-user migrations)"
+    $radManualEntry.Location = New-Object System.Drawing.Point(10, 62)
+    $radManualEntry.Size    = New-Object System.Drawing.Size(654, 20)
+    $grpMap.Controls.Add($radManualEntry)
+
+    $txtManualSrc                 = New-Object System.Windows.Forms.TextBox
+    $txtManualSrc.Location        = New-Object System.Drawing.Point(10, 86)
+    $txtManualSrc.Size            = New-Object System.Drawing.Size(284, 22)
+    $txtManualSrc.PlaceholderText = "source@domain.com"
+    $txtManualSrc.Enabled         = $false
+    $grpMap.Controls.Add($txtManualSrc)
+
+    $lblArrow                = New-Object System.Windows.Forms.Label
+    $lblArrow.Text           = "->"
+    $lblArrow.TextAlign      = 'MiddleCenter'
+    $lblArrow.Location       = New-Object System.Drawing.Point(300, 88)
+    $lblArrow.Size           = New-Object System.Drawing.Size(16, 18)
+    $grpMap.Controls.Add($lblArrow)
+
+    $txtManualTgt                 = New-Object System.Windows.Forms.TextBox
+    $txtManualTgt.Location        = New-Object System.Drawing.Point(322, 86)
+    $txtManualTgt.Size            = New-Object System.Drawing.Size(272, 22)
+    $txtManualTgt.PlaceholderText = "target@domain.com"
+    $txtManualTgt.Enabled         = $false
+    $grpMap.Controls.Add($txtManualTgt)
+
+    $btnAddPair             = New-Object System.Windows.Forms.Button
+    $btnAddPair.Text        = "Add"
+    $btnAddPair.Location    = New-Object System.Drawing.Point(602, 84)
+    $btnAddPair.Size        = New-Object System.Drawing.Size(62, 26)
+    $btnAddPair.Enabled     = $false
+    $grpMap.Controls.Add($btnAddPair)
+
+    $lvPairs                = New-Object System.Windows.Forms.ListView
+    $lvPairs.View           = 'Details'
+    $lvPairs.FullRowSelect  = $true
+    $lvPairs.GridLines      = $true
+    $lvPairs.Location       = New-Object System.Drawing.Point(10, 116)
+    $lvPairs.Size           = New-Object System.Drawing.Size(654, 62)
+    $lvPairs.Enabled        = $false
+    $lvPairs.Columns.Add("Source SMTP", 320) | Out-Null
+    $lvPairs.Columns.Add("Target SMTP", 320) | Out-Null
+    $grpMap.Controls.Add($lvPairs)
+
+    $btnRemovePair          = New-Object System.Windows.Forms.Button
+    $btnRemovePair.Text     = "Remove Selected"
+    $btnRemovePair.Location = New-Object System.Drawing.Point(10, 184)
+    $btnRemovePair.Size     = New-Object System.Drawing.Size(126, 24)
+    $btnRemovePair.Enabled  = $false
+    $grpMap.Controls.Add($btnRemovePair)
 
     $lblMapCount            = New-Object System.Windows.Forms.Label
     $lblMapCount.Text       = ""
     $lblMapCount.ForeColor  = [System.Drawing.Color]::DarkGreen
-    $lblMapCount.Location   = New-Object System.Drawing.Point(10, 42)
-    $lblMapCount.Size       = New-Object System.Drawing.Size(560, 16)
+    $lblMapCount.Location   = New-Object System.Drawing.Point(144, 186)
+    $lblMapCount.Size       = New-Object System.Drawing.Size(500, 16)
     $grpMap.Controls.Add($lblMapCount)
 
-    # --- 2. Connections ---
+    # --- 1. Connections ---
     $grpConn           = New-Object System.Windows.Forms.GroupBox
-    $grpConn.Text      = "2. Connections"
-    $grpConn.Location  = New-Object System.Drawing.Point(12, 120)
+    $grpConn.Text      = "1. Connections  (connect to both tenants first to validate credentials)"
+    $grpConn.Location  = New-Object System.Drawing.Point(12, 46)
     $grpConn.Size      = New-Object System.Drawing.Size(676, 100)
     $form.Controls.Add($grpConn)
 
     $btnConnSrc              = New-Object System.Windows.Forms.Button
-    $btnConnSrc.Text         = "Connect + Read Source"
+    $btnConnSrc.Text         = "Connect Source"
     $btnConnSrc.Location     = New-Object System.Drawing.Point(10, 24)
-    $btnConnSrc.Size         = New-Object System.Drawing.Size(168, 30)
+    $btnConnSrc.Size         = New-Object System.Drawing.Size(148, 30)
     $grpConn.Controls.Add($btnConnSrc)
 
     $lblSrcStatus            = New-Object System.Windows.Forms.Label
     $lblSrcStatus.Text       = "Not connected"
     $lblSrcStatus.ForeColor  = [System.Drawing.Color]::Gray
-    $lblSrcStatus.Location   = New-Object System.Drawing.Point(188, 30)
-    $lblSrcStatus.Size       = New-Object System.Drawing.Size(476, 18)
+    $lblSrcStatus.Location   = New-Object System.Drawing.Point(168, 30)
+    $lblSrcStatus.Size       = New-Object System.Drawing.Size(496, 18)
     $grpConn.Controls.Add($lblSrcStatus)
 
     $btnConnTgt              = New-Object System.Windows.Forms.Button
-    $btnConnTgt.Text         = "Connect to Target"
+    $btnConnTgt.Text         = "Connect Target"
     $btnConnTgt.Location     = New-Object System.Drawing.Point(10, 62)
-    $btnConnTgt.Size         = New-Object System.Drawing.Size(168, 30)
-    $btnConnTgt.Enabled      = $false
+    $btnConnTgt.Size         = New-Object System.Drawing.Size(148, 30)
     $grpConn.Controls.Add($btnConnTgt)
 
     $lblTgtStatus            = New-Object System.Windows.Forms.Label
-    $lblTgtStatus.Text       = "Connect source first"
+    $lblTgtStatus.Text       = "Not connected"
     $lblTgtStatus.ForeColor  = [System.Drawing.Color]::Gray
-    $lblTgtStatus.Location   = New-Object System.Drawing.Point(188, 68)
-    $lblTgtStatus.Size       = New-Object System.Drawing.Size(476, 18)
+    $lblTgtStatus.Location   = New-Object System.Drawing.Point(168, 68)
+    $lblTgtStatus.Size       = New-Object System.Drawing.Size(496, 18)
     $grpConn.Controls.Add($lblTgtStatus)
 
     # --- 3. Scope ---
     $grpScope           = New-Object System.Windows.Forms.GroupBox
     $grpScope.Text      = "3. Scope"
-    $grpScope.Location  = New-Object System.Drawing.Point(12, 228)
+    $grpScope.Location  = New-Object System.Drawing.Point(12, 376)
     $grpScope.Size      = New-Object System.Drawing.Size(676, 72)
     $form.Controls.Add($grpScope)
 
     $radAll                  = New-Object System.Windows.Forms.RadioButton
-    $radAll.Text             = "All source identities in mapping CSV"
+    $radAll.Text             = "All mapped identities"
     $radAll.Checked          = $true
     $radAll.Location         = New-Object System.Drawing.Point(10, 22)
-    $radAll.Size             = New-Object System.Drawing.Size(260, 22)
+    $radAll.Size             = New-Object System.Drawing.Size(200, 22)
     $grpScope.Controls.Add($radAll)
 
     $radSingle               = New-Object System.Windows.Forms.RadioButton
@@ -3276,18 +3379,17 @@ NOTES
     $radSingle.Size          = New-Object System.Drawing.Size(120, 22)
     $grpScope.Controls.Add($radSingle)
 
-    $txtSingleMbx            = New-Object System.Windows.Forms.TextBox
-    $txtSingleMbx.Location   = New-Object System.Drawing.Point(136, 46)
-    $txtSingleMbx.Size       = New-Object System.Drawing.Size(524, 22)
-    $txtSingleMbx.Enabled    = $false
-    $txtSingleMbx.ForeColor  = [System.Drawing.Color]::Gray
-    $txtSingleMbx.Text       = "source@domain.com"
+    $txtSingleMbx                 = New-Object System.Windows.Forms.TextBox
+    $txtSingleMbx.Location        = New-Object System.Drawing.Point(136, 46)
+    $txtSingleMbx.Size            = New-Object System.Drawing.Size(524, 22)
+    $txtSingleMbx.Enabled         = $false
+    $txtSingleMbx.PlaceholderText = "source@domain.com"
     $grpScope.Controls.Add($txtSingleMbx)
 
     # --- 4. Permission Types ---
     $grpPerms           = New-Object System.Windows.Forms.GroupBox
     $grpPerms.Text      = "4. Permission Types"
-    $grpPerms.Location  = New-Object System.Drawing.Point(12, 308)
+    $grpPerms.Location  = New-Object System.Drawing.Point(12, 456)
     $grpPerms.Size      = New-Object System.Drawing.Size(676, 56)
     $form.Controls.Add($grpPerms)
 
@@ -3315,7 +3417,7 @@ NOTES
     # --- 5. Options ---
     $grpOpts           = New-Object System.Windows.Forms.GroupBox
     $grpOpts.Text      = "5. Options"
-    $grpOpts.Location  = New-Object System.Drawing.Point(12, 372)
+    $grpOpts.Location  = New-Object System.Drawing.Point(12, 520)
     $grpOpts.Size      = New-Object System.Drawing.Size(676, 90)
     $form.Controls.Add($grpOpts)
 
@@ -3354,14 +3456,14 @@ NOTES
     # --- Action Buttons ---
     $btnPreview               = New-Object System.Windows.Forms.Button
     $btnPreview.Text          = "Preview"
-    $btnPreview.Location      = New-Object System.Drawing.Point(12, 472)
+    $btnPreview.Location      = New-Object System.Drawing.Point(12, 620)
     $btnPreview.Size          = New-Object System.Drawing.Size(130, 34)
     $btnPreview.Enabled       = $false
     $form.Controls.Add($btnPreview)
 
     $btnRun                   = New-Object System.Windows.Forms.Button
     $btnRun.Text              = "Run Migration"
-    $btnRun.Location          = New-Object System.Drawing.Point(260, 472)
+    $btnRun.Location          = New-Object System.Drawing.Point(260, 620)
     $btnRun.Size              = New-Object System.Drawing.Size(180, 34)
     $btnRun.BackColor         = [System.Drawing.Color]::FromArgb(0, 120, 212)
     $btnRun.ForeColor         = [System.Drawing.Color]::White
@@ -3371,7 +3473,7 @@ NOTES
 
     $btnExportLog             = New-Object System.Windows.Forms.Button
     $btnExportLog.Text        = "Export Log"
-    $btnExportLog.Location    = New-Object System.Drawing.Point(558, 472)
+    $btnExportLog.Location    = New-Object System.Drawing.Point(558, 620)
     $btnExportLog.Size        = New-Object System.Drawing.Size(130, 34)
     $btnExportLog.Enabled     = $false
     $form.Controls.Add($btnExportLog)
@@ -3379,13 +3481,13 @@ NOTES
     # --- Status Log ---
     $grpLog           = New-Object System.Windows.Forms.GroupBox
     $grpLog.Text      = "Status Log"
-    $grpLog.Location  = New-Object System.Drawing.Point(12, 516)
-    $grpLog.Size      = New-Object System.Drawing.Size(676, 232)
+    $grpLog.Location  = New-Object System.Drawing.Point(12, 664)
+    $grpLog.Size      = New-Object System.Drawing.Size(676, 152)
     $form.Controls.Add($grpLog)
 
     $rtbLog                   = New-Object System.Windows.Forms.RichTextBox
     $rtbLog.Location          = New-Object System.Drawing.Point(8, 18)
-    $rtbLog.Size              = New-Object System.Drawing.Size(660, 206)
+    $rtbLog.Size              = New-Object System.Drawing.Size(660, 126)
     $rtbLog.ReadOnly          = $true
     $rtbLog.BackColor         = [System.Drawing.Color]::FromArgb(18, 18, 28)
     $rtbLog.ForeColor         = [System.Drawing.Color]::Silver
@@ -3398,16 +3500,77 @@ NOTES
 
     #region ---- Event Handlers ----
 
-    # Radio buttons
-    $radSingle.Add_CheckedChanged({
-        $txtSingleMbx.Enabled = $radSingle.Checked
-        if ($radSingle.Checked) {
-            if ($txtSingleMbx.Text -eq 'source@domain.com') { $txtSingleMbx.Text = ''; $txtSingleMbx.ForeColor = [System.Drawing.Color]::Black }
+    # Mapping mode: CSV vs Manual
+    $radCsvMapping.Add_CheckedChanged({
+        $btnBrowseMap.Enabled  = $radCsvMapping.Checked
+        $lblMapPath.Enabled    = $radCsvMapping.Checked
+        $txtManualSrc.Enabled  = -not $radCsvMapping.Checked
+        $txtManualTgt.Enabled  = -not $radCsvMapping.Checked
+        $btnAddPair.Enabled    = -not $radCsvMapping.Checked
+        $lvPairs.Enabled       = -not $radCsvMapping.Checked
+        $btnRemovePair.Enabled = -not $radCsvMapping.Checked
+        if ($radCsvMapping.Checked) {
+            $lvPairs.Items.Clear()
+            $script:PMMappingTable = @{}
+            $lblMapCount.Text = ""
         }
     })
-    $radAll.Add_CheckedChanged({
-        $txtSingleMbx.Enabled = -not $radAll.Checked
+    $radManualEntry.Add_CheckedChanged({
+        $btnBrowseMap.Enabled  = -not $radManualEntry.Checked
+        $lblMapPath.Enabled    = -not $radManualEntry.Checked
+        $txtManualSrc.Enabled  = $radManualEntry.Checked
+        $txtManualTgt.Enabled  = $radManualEntry.Checked
+        $btnAddPair.Enabled    = $radManualEntry.Checked
+        $lvPairs.Enabled       = $radManualEntry.Checked
+        $btnRemovePair.Enabled = $radManualEntry.Checked
+        if ($radManualEntry.Checked) {
+            $script:PMMappingTable = @{}
+            $lblMapPath.Text      = "No file loaded"
+            $lblMapPath.ForeColor = [System.Drawing.Color]::Gray
+            $lblMapCount.Text     = "0 pair(s) entered"
+        }
     })
+
+    # Add a manual pair
+    $btnAddPair.Add_Click({
+        $src = $txtManualSrc.Text.Trim()
+        $tgt = $txtManualTgt.Text.Trim()
+        if (-not $src -or -not $tgt) {
+            [System.Windows.Forms.MessageBox]::Show("Enter both a source and target SMTP address.", "Missing Address", 'OK', 'Warning') | Out-Null
+            return
+        }
+        $item = New-Object System.Windows.Forms.ListViewItem($src)
+        $item.SubItems.Add($tgt) | Out-Null
+        $lvPairs.Items.Add($item) | Out-Null
+        $script:PMMappingTable[$src.ToLower()] = $tgt
+        $txtManualSrc.Text = ''
+        $txtManualTgt.Text = ''
+        $lblMapCount.Text  = "$($lvPairs.Items.Count) pair(s) entered"
+        Write-PMLog "Pair added: $src -> $tgt" ([System.Drawing.Color]::LimeGreen)
+        $txtManualSrc.Focus() | Out-Null
+    })
+
+    # Enter key in target field triggers Add
+    $txtManualTgt.Add_KeyDown({
+        if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Return) { $btnAddPair.PerformClick() }
+    })
+
+    # Remove selected pair(s)
+    $btnRemovePair.Add_Click({
+        $selected = @($lvPairs.SelectedItems)
+        if (-not $selected.Count) { return }
+        foreach ($item in $selected) { $lvPairs.Items.Remove($item) }
+        $script:PMMappingTable = @{}
+        foreach ($item in $lvPairs.Items) {
+            $script:PMMappingTable[$item.Text.ToLower()] = $item.SubItems[1].Text
+        }
+        $lblMapCount.Text = "$($lvPairs.Items.Count) pair(s) entered"
+        Write-PMLog "Pair(s) removed. $($lvPairs.Items.Count) remaining." ([System.Drawing.Color]::DarkGoldenrod)
+    })
+
+    # Scope radio buttons
+    $radSingle.Add_CheckedChanged({ $txtSingleMbx.Enabled = $radSingle.Checked })
+    $radAll.Add_CheckedChanged({ $txtSingleMbx.Enabled = -not $radAll.Checked })
 
     # DL checkbox dependency
     $chkResolveDLs.Add_CheckedChanged({ $chkNestedDLs.Enabled = $chkResolveDLs.Checked })
@@ -3447,49 +3610,19 @@ NOTES
         }
     })
 
-    # Connect + Read Source
+    # Connect Source — auth validation only, no data collection
     $btnConnSrc.Add_Click({
-        if (-not $script:PMMappingTable.Count) {
-            [System.Windows.Forms.MessageBox]::Show("Load the identity mapping CSV first.", "No Mapping Loaded", 'OK', 'Warning') | Out-Null
-            return
-        }
-        if (-not $chkFullAccess.Checked -and -not $chkSendAs.Checked -and -not $chkSendOnBehalf.Checked) {
-            [System.Windows.Forms.MessageBox]::Show("Select at least one permission type.", "No Permission Types", 'OK', 'Warning') | Out-Null
-            return
-        }
-
-        $mailboxList = if ($radSingle.Checked) {
-            $addr = $txtSingleMbx.Text.Trim()
-            if (-not $addr -or $addr -eq 'source@domain.com') {
-                [System.Windows.Forms.MessageBox]::Show("Enter a source mailbox SMTP address.", "No Address", 'OK', 'Warning') | Out-Null
-                return
-            }
-            if (-not $script:PMMappingTable[$addr.ToLower()]) {
-                Write-PMLog "Warning: '$addr' is not in the mapping file. Permissions will be collected but cannot be applied." ([System.Drawing.Color]::DarkGoldenrod)
-            }
-            @($addr)
-        } else {
-            @($script:PMMappingTable.Keys)
-        }
-
         Set-PMStatusLabel $lblSrcStatus "Connecting..." ([System.Drawing.Color]::DarkGoldenrod)
         $form.UseWaitCursor = $true
         $btnConnSrc.Enabled = $false
-
         try {
             Write-PMLog "Connecting to source tenant..." ([System.Drawing.Color]::Silver)
             Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
             $script:PMSourceConnected = $true
-            Set-PMStatusLabel $lblSrcStatus "Connected. Reading $($mailboxList.Count) mailbox(es)..." ([System.Drawing.Color]::DarkOrange)
-            Write-PMLog "Source connected. Collecting permissions..." ([System.Drawing.Color]::LimeGreen)
-
-            Collect-PMSourcePermissions -MailboxList $mailboxList
-
-            Set-PMStatusLabel $lblSrcStatus "Connected - $($script:PMSourceData.Count) record(s) read" ([System.Drawing.Color]::DarkGreen)
-            $btnConnTgt.Enabled  = $true
-            $btnPreview.Enabled  = $true
-            $lblTgtStatus.Text   = "Ready to connect"
-            $lblTgtStatus.ForeColor = [System.Drawing.Color]::Gray
+            Set-PMStatusLabel $lblSrcStatus "Connected" ([System.Drawing.Color]::DarkGreen)
+            Write-PMLog "Source connected. Load your mapping, then use Preview or Run Migration." ([System.Drawing.Color]::LimeGreen)
+            $btnPreview.Enabled = $true
+            if ($script:PMTargetConnected) { $btnRun.Enabled = $true }
         } catch {
             Set-PMStatusLabel $lblSrcStatus "Connection failed" ([System.Drawing.Color]::Tomato)
             Write-PMLog "ERROR: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
@@ -3499,19 +3632,18 @@ NOTES
         }
     })
 
-    # Connect Target
+    # Connect Target — auth validation only
     $btnConnTgt.Add_Click({
         Set-PMStatusLabel $lblTgtStatus "Connecting..." ([System.Drawing.Color]::DarkGoldenrod)
         $form.UseWaitCursor = $true
         $btnConnTgt.Enabled = $false
-
         try {
             Write-PMLog "Connecting to target tenant..." ([System.Drawing.Color]::Silver)
             Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
             $script:PMTargetConnected = $true
-            Set-PMStatusLabel $lblTgtStatus "Connected - ready to migrate" ([System.Drawing.Color]::DarkGreen)
-            Write-PMLog "Target connected. Run Migration is now available." ([System.Drawing.Color]::LimeGreen)
-            $btnRun.Enabled = $true
+            Set-PMStatusLabel $lblTgtStatus "Connected" ([System.Drawing.Color]::DarkGreen)
+            Write-PMLog "Target connected." ([System.Drawing.Color]::LimeGreen)
+            if ($script:PMSourceConnected) { $btnRun.Enabled = $true }
         } catch {
             Set-PMStatusLabel $lblTgtStatus "Connection failed" ([System.Drawing.Color]::Tomato)
             Write-PMLog "ERROR: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
@@ -3521,33 +3653,81 @@ NOTES
         }
     })
 
-    # Preview
+    # Preview — re-connects to source, collects, then shows what would be applied
     $btnPreview.Add_Click({
-        if (-not $script:PMSourceData.Count) {
-            Write-PMLog "No source data. Connect to source first." ([System.Drawing.Color]::DarkGoldenrod)
+        if (-not $script:PMMappingTable.Count) {
+            $msg = if ($radCsvMapping.Checked) { "Load a mapping CSV first." } else { "Add at least one source/target pair first." }
+            [System.Windows.Forms.MessageBox]::Show($msg, "No Mapping", 'OK', 'Warning') | Out-Null
             return
         }
-        Write-PMLog "---- PREVIEW ($($script:PMSourceData.Count) records) ----" ([System.Drawing.Color]::CornflowerBlue)
-        $wouldApply = 0; $wouldSkip = 0
-        foreach ($perm in $script:PMSourceData) {
-            $mbxT = $script:PMMappingTable[$perm.Mailbox.ToLower()]
-            $delT = $script:PMMappingTable[$perm.Delegate.ToLower()]
-            if ($mbxT -and $delT) {
-                Write-PMLog "  APPLY [$($perm.PermissionType)] $delT -> $mbxT" ([System.Drawing.Color]::LimeGreen)
-                $wouldApply++
-            } else {
-                $miss = if (-not $mbxT) { "mailbox '$($perm.Mailbox)'" } else { "delegate '$($perm.Delegate)'" }
-                Write-PMLog "  SKIP  [$($perm.PermissionType)] No mapping for $miss" ([System.Drawing.Color]::DarkGoldenrod)
-                $wouldSkip++
-            }
+        if (-not $chkFullAccess.Checked -and -not $chkSendAs.Checked -and -not $chkSendOnBehalf.Checked) {
+            [System.Windows.Forms.MessageBox]::Show("Select at least one permission type.", "No Permission Types", 'OK', 'Warning') | Out-Null
+            return
         }
-        Write-PMLog "---- Preview: $wouldApply would apply, $wouldSkip would skip ----" ([System.Drawing.Color]::CornflowerBlue)
+        $mailboxList = if ($radSingle.Checked) {
+            $addr = $txtSingleMbx.Text.Trim()
+            if (-not $addr) {
+                [System.Windows.Forms.MessageBox]::Show("Enter a source mailbox SMTP address.", "No Address", 'OK', 'Warning') | Out-Null
+                return
+            }
+            @($addr)
+        } else { @($script:PMMappingTable.Keys) }
+
+        $btnPreview.Enabled = $false
+        $form.UseWaitCursor = $true
+        try {
+            Write-PMLog "Re-connecting to source for permission read..." ([System.Drawing.Color]::DimGray)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            Set-PMStatusLabel $lblSrcStatus "Connected - reading $($mailboxList.Count) mailbox(es)..." ([System.Drawing.Color]::DarkOrange)
+
+            Collect-PMSourcePermissions -MailboxList $mailboxList
+            Set-PMStatusLabel $lblSrcStatus "Connected - $($script:PMSourceData.Count) record(s) read" ([System.Drawing.Color]::DarkGreen)
+
+            Write-PMLog "---- PREVIEW ($($script:PMSourceData.Count) records) ----" ([System.Drawing.Color]::CornflowerBlue)
+            $wouldApply = 0; $wouldSkip = 0
+            foreach ($perm in $script:PMSourceData) {
+                $mbxT = $script:PMMappingTable[$perm.Mailbox.ToLower()]
+                $delT = $script:PMMappingTable[$perm.Delegate.ToLower()]
+                if ($mbxT -and $delT) {
+                    Write-PMLog "  APPLY [$($perm.PermissionType)] $delT -> $mbxT" ([System.Drawing.Color]::LimeGreen)
+                    $wouldApply++
+                } else {
+                    $miss = if (-not $mbxT) { "mailbox '$($perm.Mailbox)'" } else { "delegate '$($perm.Delegate)'" }
+                    Write-PMLog "  SKIP  [$($perm.PermissionType)] No mapping for $miss" ([System.Drawing.Color]::DarkGoldenrod)
+                    $wouldSkip++
+                }
+            }
+            Write-PMLog "---- Preview: $wouldApply would apply, $wouldSkip would skip ----" ([System.Drawing.Color]::CornflowerBlue)
+        } catch {
+            Write-PMLog "ERROR: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally {
+            $btnPreview.Enabled = $true
+            $form.UseWaitCursor = $false
+        }
     })
 
-    # Run Migration
+    # Run Migration — re-connects to source to collect, then to target to apply
     $btnRun.Add_Click({
+        if (-not $script:PMMappingTable.Count) {
+            $msg = if ($radCsvMapping.Checked) { "Load a mapping CSV first." } else { "Add at least one source/target pair first." }
+            [System.Windows.Forms.MessageBox]::Show($msg, "No Mapping", 'OK', 'Warning') | Out-Null
+            return
+        }
+        if (-not $chkFullAccess.Checked -and -not $chkSendAs.Checked -and -not $chkSendOnBehalf.Checked) {
+            [System.Windows.Forms.MessageBox]::Show("Select at least one permission type.", "No Permission Types", 'OK', 'Warning') | Out-Null
+            return
+        }
+        $mailboxList = if ($radSingle.Checked) {
+            $addr = $txtSingleMbx.Text.Trim()
+            if (-not $addr) {
+                [System.Windows.Forms.MessageBox]::Show("Enter a source mailbox SMTP address.", "No Address", 'OK', 'Warning') | Out-Null
+                return
+            }
+            @($addr)
+        } else { @($script:PMMappingTable.Keys) }
+
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Apply $($script:PMSourceData.Count) permission record(s) to the target tenant?`n`nThis will set permissions on target mailboxes.",
+            "This will connect to both tenants, read permissions for $($mailboxList.Count) source mailbox(es), and apply them to the target tenant.`n`nProceed?",
             "Confirm Migration",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question)
@@ -3555,16 +3735,27 @@ NOTES
 
         $btnRun.Enabled = $false
         $form.UseWaitCursor = $true
-        Write-PMLog "---- MIGRATION STARTED ($($script:PMSourceData.Count) records) ----" ([System.Drawing.Color]::CornflowerBlue)
-
         try {
+            Write-PMLog "Re-connecting to source..." ([System.Drawing.Color]::DimGray)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            Set-PMStatusLabel $lblSrcStatus "Connected - reading $($mailboxList.Count) mailbox(es)..." ([System.Drawing.Color]::DarkOrange)
+
+            Collect-PMSourcePermissions -MailboxList $mailboxList
+            Set-PMStatusLabel $lblSrcStatus "Connected - $($script:PMSourceData.Count) record(s) read" ([System.Drawing.Color]::DarkGreen)
+
+            Write-PMLog "Re-connecting to target..." ([System.Drawing.Color]::DimGray)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            Set-PMStatusLabel $lblTgtStatus "Connected - applying permissions..." ([System.Drawing.Color]::DarkOrange)
+
+            Write-PMLog "---- MIGRATION STARTED ($($script:PMSourceData.Count) records) ----" ([System.Drawing.Color]::CornflowerBlue)
             Apply-PMTargetPermissions
 
-            $cSuccess  = @($script:PMResultLog | Where-Object { $_.Status -eq 'Success' }).Count
-            $cSkipped  = @($script:PMResultLog | Where-Object { $_.Status -eq 'Skipped' }).Count
-            $cDupe     = @($script:PMResultLog | Where-Object { $_.Status -eq 'AlreadyExists' }).Count
-            $cFailed   = @($script:PMResultLog | Where-Object { $_.Status -eq 'Failed' }).Count
+            $cSuccess = @($script:PMResultLog | Where-Object { $_.Status -eq 'Success' }).Count
+            $cSkipped = @($script:PMResultLog | Where-Object { $_.Status -eq 'Skipped' }).Count
+            $cDupe    = @($script:PMResultLog | Where-Object { $_.Status -eq 'AlreadyExists' }).Count
+            $cFailed  = @($script:PMResultLog | Where-Object { $_.Status -eq 'Failed' }).Count
             Write-PMLog "---- COMPLETE: $cSuccess applied | $cSkipped skipped | $cDupe already existed | $cFailed failed ----" ([System.Drawing.Color]::CornflowerBlue)
+            Set-PMStatusLabel $lblTgtStatus "Connected - migration complete" ([System.Drawing.Color]::DarkGreen)
             $btnExportLog.Enabled = $true
         } catch {
             Write-PMLog "FATAL: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
@@ -3592,11 +3783,933 @@ NOTES
 
     #endregion
 
-    Write-PMLog "Ready. Load a mapping CSV, then click 'Connect + Read Source'." ([System.Drawing.Color]::Silver)
-    Write-PMLog "Note: Source connection reads permissions into memory. You then re-authenticate to the target." ([System.Drawing.Color]::DimGray)
+    Write-PMLog "Ready. Connect to both tenants first to validate credentials, then load your mapping." ([System.Drawing.Color]::Silver)
+    Write-PMLog "Note: Preview and Run Migration re-authenticate to source (to read) then target (to apply)." ([System.Drawing.Color]::DimGray)
 
     $form.ShowDialog() | Out-Null
     $form.Dispose()
+}
+
+function Invoke-FrankensteinDLMigrator {
+    <#
+    .SYNOPSIS
+        GUI tool for migrating distribution group membership from M365 source to M365 or on-prem Exchange target.
+    #>
+    [CmdletBinding()]
+    Param()
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    #region ---- State ----
+    $script:DLSourceConnected = $false
+    $script:DLTargetConnected = $false
+    $script:DLOnPremSession   = $null
+    $script:DLMappingTable    = @{}
+    $script:DLGroupMeta       = @{}   # source.ToLower() -> {DisplayName, Alias, Type, DLType}
+    $script:DLSourceData      = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $script:DLResultLog       = [System.Collections.Generic.List[PSCustomObject]]::new()
+    #endregion
+
+    #region ---- Inner Functions ----
+
+    function Write-DLLog ([string]$msg, [System.Drawing.Color]$color) {
+        $ts = (Get-Date).ToString('HH:mm:ss')
+        $rtbLog.SelectionStart  = $rtbLog.TextLength
+        $rtbLog.SelectionLength = 0
+        $rtbLog.SelectionColor  = $color
+        $rtbLog.AppendText("[$ts] $msg`n")
+        $rtbLog.ScrollToCaret()
+        $rtbLog.Refresh()
+    }
+
+    function Set-DLStatusLabel ([System.Windows.Forms.Label]$lbl, [string]$text, [System.Drawing.Color]$color) {
+        $lbl.Text      = $text
+        $lbl.ForeColor = $color
+    }
+
+    function Add-TargetDLMember ([string]$TargetGroup, [string]$TargetMember, [string]$GroupType) {
+        if ($GroupType -eq 'GroupMailbox') {
+            Add-UnifiedGroupLinks -Identity $TargetGroup -LinkType Members -Links $TargetMember -ErrorAction Stop
+        } elseif ($radOnPrem.Checked -and $script:DLOnPremSession) {
+            Invoke-Command -Session $script:DLOnPremSession -ScriptBlock {
+                param($g, $m)
+                Add-DistributionGroupMember -Identity $g -Member $m -BypassSecurityGroupManagerCheck -ErrorAction Stop
+            } -ArgumentList $TargetGroup, $TargetMember
+        } else {
+            Add-DistributionGroupMember -Identity $TargetGroup -Member $TargetMember -ErrorAction Stop
+        }
+    }
+
+    function New-TargetDLGroup ([string]$Name, [string]$Alias, [string]$PrimarySmtp, [string]$DLType, [string]$GroupType, [string]$OU) {
+        if ($GroupType -eq 'GroupMailbox') {
+            New-UnifiedGroup -DisplayName $Name -Alias $Alias -PrimarySmtpAddress $PrimarySmtp -ErrorAction Stop | Out-Null
+        } elseif ($radOnPrem.Checked -and $script:DLOnPremSession) {
+            Invoke-Command -Session $script:DLOnPremSession -ScriptBlock {
+                param($n, $a, $s, $t, $o)
+                $p = @{ Name = $n; Alias = $a; PrimarySmtpAddress = $s; Type = $t }
+                if ($o) { $p['OrganizationalUnit'] = $o }
+                New-DistributionGroup @p -ErrorAction Stop
+            } -ArgumentList $Name, $Alias, $PrimarySmtp, $DLType, $OU
+        } else {
+            $p = @{ Name = $Name; Alias = $Alias; PrimarySmtpAddress = $PrimarySmtp; Type = $DLType }
+            if ($OU) { $p['OrganizationalUnit'] = $OU }
+            New-DistributionGroup @p -ErrorAction Stop | Out-Null
+        }
+    }
+
+    function Collect-DLSourceData {
+        $script:DLSourceData.Clear()
+        $script:DLGroupMeta.Clear()
+        $dlTypes = @('MailUniversalDistributionGroup','MailUniversalSecurityGroup','GroupMailbox')
+
+        Write-DLLog "Scanning mapping for source groups..." ([System.Drawing.Color]::DimGray)
+        $sourceGroups = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+        foreach ($srcSmtp in @($script:DLMappingTable.Keys)) {
+            $grp = Get-DistributionGroup -Identity $srcSmtp -ErrorAction SilentlyContinue
+            if ($grp) {
+                $script:DLGroupMeta[$srcSmtp.ToLower()] = @{
+                    DisplayName = $grp.DisplayName
+                    Alias       = $grp.Alias
+                    Type        = $grp.RecipientTypeDetails
+                    DLType      = if ($grp.RecipientTypeDetails -eq 'MailUniversalSecurityGroup') { 'Security' } else { 'Distribution' }
+                }
+                $sourceGroups.Add([PSCustomObject]@{ Smtp = $srcSmtp; Type = $grp.RecipientTypeDetails })
+                continue
+            }
+            $ug = Get-UnifiedGroup -Identity $srcSmtp -ErrorAction SilentlyContinue
+            if ($ug) {
+                $script:DLGroupMeta[$srcSmtp.ToLower()] = @{
+                    DisplayName = $ug.DisplayName
+                    Alias       = $ug.Alias
+                    Type        = 'GroupMailbox'
+                    DLType      = 'Distribution'
+                }
+                $sourceGroups.Add([PSCustomObject]@{ Smtp = $srcSmtp; Type = 'GroupMailbox' })
+            }
+        }
+
+        $total = $sourceGroups.Count
+        Write-DLLog "Found $total source group(s). Reading members..." ([System.Drawing.Color]::DimGray)
+        $idx = 0
+
+        foreach ($grpEntry in $sourceGroups) {
+            $idx++
+            $srcSmtp = $grpEntry.Smtp
+            $srcType = $grpEntry.Type
+            $tgtSmtp = $script:DLMappingTable[$srcSmtp.ToLower()]
+            Write-DLLog "  [$idx/$total] $srcSmtp ($srcType)" ([System.Drawing.Color]::DimGray)
+
+            $members = if ($srcType -eq 'GroupMailbox') {
+                @(Get-UnifiedGroupLinks -Identity $srcSmtp -LinkType Members -ResultSize Unlimited -ErrorAction SilentlyContinue)
+            } else {
+                @(Get-DistributionGroupMember -Identity $srcSmtp -ResultSize Unlimited -ErrorAction SilentlyContinue)
+            }
+
+            foreach ($m in $members) {
+                $mSmtp   = $m.PrimarySmtpAddress
+                $mType   = $m.RecipientTypeDetails
+                $mTarget = $script:DLMappingTable[$mSmtp.ToLower()]
+
+                if ($mType -in $dlTypes) {
+                    if ($mTarget) {
+                        $script:DLSourceData.Add([PSCustomObject]@{
+                            SourceGroup     = $srcSmtp
+                            TargetGroup     = $tgtSmtp
+                            SourceMember    = $mSmtp
+                            TargetMember    = $mTarget
+                            MemberType      = $mType
+                            ExpandedFrom    = ''
+                            SourceGroupType = $srcType
+                        })
+                    } else {
+                        Write-DLLog "    Nested '$mSmtp' unmapped — expanding members" ([System.Drawing.Color]::DarkCyan)
+                        $expanded = @(Expand-FrankensteinDLMembers -Identity $mSmtp -Recurse)
+                        foreach ($em in $expanded) {
+                            $emTarget = $script:DLMappingTable[$em.PrimarySmtpAddress.ToLower()]
+                            if ($emTarget) {
+                                $script:DLSourceData.Add([PSCustomObject]@{
+                                    SourceGroup     = $srcSmtp
+                                    TargetGroup     = $tgtSmtp
+                                    SourceMember    = $em.PrimarySmtpAddress
+                                    TargetMember    = $emTarget
+                                    MemberType      = $em.RecipientTypeDetails
+                                    ExpandedFrom    = $mSmtp
+                                    SourceGroupType = $srcType
+                                })
+                            } else {
+                                Write-DLLog "      SKIP $($em.PrimarySmtpAddress) (expanded from $mSmtp) — not mapped" ([System.Drawing.Color]::DarkGoldenrod)
+                            }
+                        }
+                    }
+                } else {
+                    if ($mTarget) {
+                        $script:DLSourceData.Add([PSCustomObject]@{
+                            SourceGroup     = $srcSmtp
+                            TargetGroup     = $tgtSmtp
+                            SourceMember    = $mSmtp
+                            TargetMember    = $mTarget
+                            MemberType      = $mType
+                            ExpandedFrom    = ''
+                            SourceGroupType = $srcType
+                        })
+                    } else {
+                        Write-DLLog "    SKIP $mSmtp — not mapped" ([System.Drawing.Color]::DarkGoldenrod)
+                    }
+                }
+            }
+        }
+        Write-DLLog "Collection complete: $($script:DLSourceData.Count) member record(s) across $total group(s)." ([System.Drawing.Color]::LimeGreen)
+    }
+
+    function Apply-DLTargetData {
+        $script:DLResultLog.Clear()
+        $createMode = $radCreateGroups.Checked
+        $prefix     = $txtPrefix.Text.Trim()
+        $newDomain  = $txtNewDomain.Text.Trim().TrimStart('@')
+
+        # Phase 1: Create groups
+        if ($createMode) {
+            Write-DLLog "---- Phase 1: Creating groups ----" ([System.Drawing.Color]::CornflowerBlue)
+            foreach ($srcSmtp in @($script:DLGroupMeta.Keys)) {
+                $meta    = $script:DLGroupMeta[$srcSmtp]
+                $srcType = $meta.Type
+
+                if ($srcType -eq 'GroupMailbox' -and $radOnPrem.Checked) {
+                    Write-DLLog "  SKIP $srcSmtp — M365 Groups cannot be created on-prem" ([System.Drawing.Color]::DarkGoldenrod)
+                    $script:DLResultLog.Add([PSCustomObject][ordered]@{
+                        Operation = 'CreateGroup'; SourceGroup = $srcSmtp; TargetGroup = 'N/A'
+                        SourceMember = ''; TargetMember = ''; ExpandedFrom = ''
+                        Status = 'Skipped'; Details = 'M365 Group not supported on on-prem target'
+                        Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+                    })
+                    continue
+                }
+
+                $tgtAlias = ($prefix + $meta.Alias).ToLower() -replace '[^a-z0-9\-_]',''
+                $tgtName  = if ($prefix) { "$prefix$($meta.DisplayName)" } else { $meta.DisplayName }
+                $tgtSmtp  = "$tgtAlias@$newDomain"
+
+                try {
+                    New-TargetDLGroup -Name $tgtName -Alias $tgtAlias -PrimarySmtp $tgtSmtp -DLType $meta.DLType -GroupType $srcType -OU $txtOU.Text.Trim()
+                    $script:DLMappingTable[$srcSmtp.ToLower()] = $tgtSmtp
+                    Write-DLLog "  CREATED $tgtName ($tgtSmtp)" ([System.Drawing.Color]::LimeGreen)
+                    $script:DLResultLog.Add([PSCustomObject][ordered]@{
+                        Operation = 'CreateGroup'; SourceGroup = $srcSmtp; TargetGroup = $tgtSmtp
+                        SourceMember = ''; TargetMember = ''; ExpandedFrom = ''
+                        Status = 'Created'; Details = ''
+                        Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+                    })
+                } catch {
+                    $err    = $_.Exception.Message
+                    $status = if ($err -match 'already|exists|conflict') { 'Conflict' } else { 'Failed' }
+                    $color  = if ($status -eq 'Conflict') { [System.Drawing.Color]::SteelBlue } else { [System.Drawing.Color]::Tomato }
+                    Write-DLLog "  $status $tgtName — $err" $color
+                    $script:DLResultLog.Add([PSCustomObject][ordered]@{
+                        Operation = 'CreateGroup'; SourceGroup = $srcSmtp; TargetGroup = $tgtSmtp
+                        SourceMember = ''; TargetMember = ''; ExpandedFrom = ''
+                        Status = $status; Details = $err
+                        Timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+                    })
+                }
+            }
+        }
+
+        # Phase 2: Add members
+        Write-DLLog "---- Phase 2: Adding members ($($script:DLSourceData.Count) record(s)) ----" ([System.Drawing.Color]::CornflowerBlue)
+        foreach ($rec in $script:DLSourceData) {
+            $tgtGroup  = $script:DLMappingTable[$rec.SourceGroup.ToLower()]
+            if (-not $tgtGroup) { $tgtGroup = $rec.TargetGroup }
+            $tgtMember    = $rec.TargetMember
+            $srcGroupType = $rec.SourceGroupType
+
+            $log = [ordered]@{
+                Operation    = 'AddMember'
+                SourceGroup  = $rec.SourceGroup
+                TargetGroup  = $tgtGroup
+                SourceMember = $rec.SourceMember
+                TargetMember = $tgtMember
+                ExpandedFrom = $rec.ExpandedFrom
+                Status       = ''
+                Details      = ''
+                Timestamp    = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            }
+
+            if ($srcGroupType -eq 'GroupMailbox' -and $radOnPrem.Checked) {
+                $log.Status  = 'Skipped'
+                $log.Details = 'M365 Group membership not supported on on-prem target'
+                Write-DLLog "  SKIP  $tgtMember -> $tgtGroup (M365 Group on on-prem)" ([System.Drawing.Color]::DarkGoldenrod)
+                $script:DLResultLog.Add([PSCustomObject]$log)
+                continue
+            }
+
+            try {
+                Add-TargetDLMember -TargetGroup $tgtGroup -TargetMember $tgtMember -GroupType $srcGroupType
+                $log.Status  = 'Success'
+                $log.Details = 'Member added'
+                Write-DLLog "  OK    $tgtMember -> $tgtGroup$(if ($rec.ExpandedFrom) { " (from $($rec.ExpandedFrom))" })" ([System.Drawing.Color]::LimeGreen)
+            } catch {
+                $err = $_.Exception.Message
+                if ($err -match 'already|member|exists') {
+                    $log.Status  = 'AlreadyMember'
+                    $log.Details = 'Already a member'
+                    Write-DLLog "  DUP   $tgtMember already in $tgtGroup" ([System.Drawing.Color]::SteelBlue)
+                } else {
+                    $log.Status  = 'Failed'
+                    $log.Details = $err
+                    Write-DLLog "  ERR   $tgtMember -> $tgtGroup — $err" ([System.Drawing.Color]::Tomato)
+                }
+            }
+            $script:DLResultLog.Add([PSCustomObject]$log)
+        }
+    }
+
+    #endregion
+
+    #region ---- Build Form ----
+
+    $form                 = New-Object System.Windows.Forms.Form
+    $form.Text            = "Frankenstein - DL Migrator"
+    $form.ClientSize      = New-Object System.Drawing.Size(700, 836)
+    $form.StartPosition   = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedSingle'
+    $form.MaximizeBox     = $false
+    $form.Font            = New-Object System.Drawing.Font("Segoe UI", 9)
+    $form.BackColor       = [System.Drawing.Color]::FromArgb(245, 245, 248)
+
+    $lblHeader           = New-Object System.Windows.Forms.Label
+    $lblHeader.Text      = "Frankenstein - Distribution Group Migrator"
+    $lblHeader.Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
+    $lblHeader.ForeColor = [System.Drawing.Color]::FromArgb(28, 28, 72)
+    $lblHeader.Location  = New-Object System.Drawing.Point(14, 12)
+    $lblHeader.Size      = New-Object System.Drawing.Size(660, 28)
+    $form.Controls.Add($lblHeader)
+
+    # --- 1. Connections ---
+    $grpConn           = New-Object System.Windows.Forms.GroupBox
+    $grpConn.Text      = "1. Connections  (source is always M365 — connect to both first to validate credentials)"
+    $grpConn.Location  = New-Object System.Drawing.Point(12, 46)
+    $grpConn.Size      = New-Object System.Drawing.Size(676, 148)
+    $form.Controls.Add($grpConn)
+
+    $btnConnSrc              = New-Object System.Windows.Forms.Button
+    $btnConnSrc.Text         = "Connect Source (M365)"
+    $btnConnSrc.Location     = New-Object System.Drawing.Point(10, 22)
+    $btnConnSrc.Size         = New-Object System.Drawing.Size(168, 30)
+    $grpConn.Controls.Add($btnConnSrc)
+
+    $lblSrcStatus            = New-Object System.Windows.Forms.Label
+    $lblSrcStatus.Text       = "Not connected"
+    $lblSrcStatus.ForeColor  = [System.Drawing.Color]::Gray
+    $lblSrcStatus.Location   = New-Object System.Drawing.Point(188, 28)
+    $lblSrcStatus.Size       = New-Object System.Drawing.Size(476, 18)
+    $grpConn.Controls.Add($lblSrcStatus)
+
+    $lblTargetType           = New-Object System.Windows.Forms.Label
+    $lblTargetType.Text      = "Target type:"
+    $lblTargetType.Location  = New-Object System.Drawing.Point(10, 64)
+    $lblTargetType.Size      = New-Object System.Drawing.Size(78, 18)
+    $grpConn.Controls.Add($lblTargetType)
+
+    $radM365                 = New-Object System.Windows.Forms.RadioButton
+    $radM365.Text            = "M365"
+    $radM365.Checked         = $true
+    $radM365.Location        = New-Object System.Drawing.Point(92, 62)
+    $radM365.Size            = New-Object System.Drawing.Size(58, 20)
+    $grpConn.Controls.Add($radM365)
+
+    $radOnPrem               = New-Object System.Windows.Forms.RadioButton
+    $radOnPrem.Text          = "On-prem Exchange"
+    $radOnPrem.Location      = New-Object System.Drawing.Point(156, 62)
+    $radOnPrem.Size          = New-Object System.Drawing.Size(148, 20)
+    $grpConn.Controls.Add($radOnPrem)
+
+    $txtOnPremUri                 = New-Object System.Windows.Forms.TextBox
+    $txtOnPremUri.Location        = New-Object System.Drawing.Point(10, 86)
+    $txtOnPremUri.Size            = New-Object System.Drawing.Size(654, 22)
+    $txtOnPremUri.PlaceholderText = "On-prem URI: https://mailserver.domain.com/PowerShell/  (leave blank to use current Exchange session)"
+    $txtOnPremUri.Enabled         = $false
+    $grpConn.Controls.Add($txtOnPremUri)
+
+    $btnConnTgt              = New-Object System.Windows.Forms.Button
+    $btnConnTgt.Text         = "Connect Target (M365)"
+    $btnConnTgt.Location     = New-Object System.Drawing.Point(10, 114)
+    $btnConnTgt.Size         = New-Object System.Drawing.Size(168, 30)
+    $grpConn.Controls.Add($btnConnTgt)
+
+    $lblTgtStatus            = New-Object System.Windows.Forms.Label
+    $lblTgtStatus.Text       = "Not connected"
+    $lblTgtStatus.ForeColor  = [System.Drawing.Color]::Gray
+    $lblTgtStatus.Location   = New-Object System.Drawing.Point(188, 120)
+    $lblTgtStatus.Size       = New-Object System.Drawing.Size(476, 18)
+    $grpConn.Controls.Add($lblTgtStatus)
+
+    # --- 2. Identity Mapping ---
+    $grpMap           = New-Object System.Windows.Forms.GroupBox
+    $grpMap.Text      = "2. Identity Mapping"
+    $grpMap.Location  = New-Object System.Drawing.Point(12, 202)
+    $grpMap.Size      = New-Object System.Drawing.Size(676, 214)
+    $form.Controls.Add($grpMap)
+
+    $radCsvMapping          = New-Object System.Windows.Forms.RadioButton
+    $radCsvMapping.Text     = "Load CSV mapping file  (Source + Target columns — include both groups AND their members)"
+    $radCsvMapping.Checked  = $true
+    $radCsvMapping.Location = New-Object System.Drawing.Point(10, 20)
+    $radCsvMapping.Size     = New-Object System.Drawing.Size(570, 20)
+    $grpMap.Controls.Add($radCsvMapping)
+
+    $btnBrowseMap           = New-Object System.Windows.Forms.Button
+    $btnBrowseMap.Text      = "Browse..."
+    $btnBrowseMap.Location  = New-Object System.Drawing.Point(582, 16)
+    $btnBrowseMap.Size      = New-Object System.Drawing.Size(82, 26)
+    $grpMap.Controls.Add($btnBrowseMap)
+
+    $lblMapPath             = New-Object System.Windows.Forms.Label
+    $lblMapPath.Text        = "No file loaded"
+    $lblMapPath.ForeColor   = [System.Drawing.Color]::Gray
+    $lblMapPath.Location    = New-Object System.Drawing.Point(10, 42)
+    $lblMapPath.Size        = New-Object System.Drawing.Size(654, 16)
+    $grpMap.Controls.Add($lblMapPath)
+
+    $ttDLMap = New-Object System.Windows.Forms.ToolTip
+    $ttDLMap.AutoPopDelay = 12000
+    $ttDLMap.InitialDelay = 350
+    $ttDLMap.ReshowDelay  = 200
+    $ttDLMap.ShowAlways   = $true
+    $dlCsvTip = @"
+CSV Requirements
+────────────────────────────────────────────────
+Column headers (exact, case-insensitive):
+  Source  — identity in the SOURCE tenant (M365)
+  Target  — corresponding identity in the TARGET
+
+Include BOTH types of rows in one file:
+  • Group rows:  source DL/SG SMTP → target DL/SG SMTP
+  • Member rows: source user SMTP  → target user SMTP
+
+Nested groups in the mapping: target equivalent is
+  added as a member (structure preserved).
+Nested groups NOT in the mapping: members expanded,
+  and those members in the mapping are added individually.
+
+Accepted formats: SMTP, UPN, or any Exchange-resolvable identity.
+Supported group types: MailUniversalDistributionGroup,
+  MailUniversalSecurityGroup, GroupMailbox (M365 Groups).
+"@
+    $ttDLMap.SetToolTip($radCsvMapping, $dlCsvTip)
+    $ttDLMap.SetToolTip($btnBrowseMap,  $dlCsvTip)
+
+    $radManualEntry         = New-Object System.Windows.Forms.RadioButton
+    $radManualEntry.Text    = "Enter source/target pairs manually"
+    $radManualEntry.Location = New-Object System.Drawing.Point(10, 62)
+    $radManualEntry.Size    = New-Object System.Drawing.Size(654, 20)
+    $grpMap.Controls.Add($radManualEntry)
+
+    $txtManualSrc                 = New-Object System.Windows.Forms.TextBox
+    $txtManualSrc.Location        = New-Object System.Drawing.Point(10, 86)
+    $txtManualSrc.Size            = New-Object System.Drawing.Size(284, 22)
+    $txtManualSrc.PlaceholderText = "source@domain.com"
+    $txtManualSrc.Enabled         = $false
+    $grpMap.Controls.Add($txtManualSrc)
+
+    $lblArrow                = New-Object System.Windows.Forms.Label
+    $lblArrow.Text           = "->"
+    $lblArrow.TextAlign      = 'MiddleCenter'
+    $lblArrow.Location       = New-Object System.Drawing.Point(300, 88)
+    $lblArrow.Size           = New-Object System.Drawing.Size(16, 18)
+    $grpMap.Controls.Add($lblArrow)
+
+    $txtManualTgt                 = New-Object System.Windows.Forms.TextBox
+    $txtManualTgt.Location        = New-Object System.Drawing.Point(322, 86)
+    $txtManualTgt.Size            = New-Object System.Drawing.Size(272, 22)
+    $txtManualTgt.PlaceholderText = "target@domain.com"
+    $txtManualTgt.Enabled         = $false
+    $grpMap.Controls.Add($txtManualTgt)
+
+    $btnAddPair             = New-Object System.Windows.Forms.Button
+    $btnAddPair.Text        = "Add"
+    $btnAddPair.Location    = New-Object System.Drawing.Point(602, 84)
+    $btnAddPair.Size        = New-Object System.Drawing.Size(62, 26)
+    $btnAddPair.Enabled     = $false
+    $grpMap.Controls.Add($btnAddPair)
+
+    $lvPairs                = New-Object System.Windows.Forms.ListView
+    $lvPairs.View           = 'Details'
+    $lvPairs.FullRowSelect  = $true
+    $lvPairs.GridLines      = $true
+    $lvPairs.Location       = New-Object System.Drawing.Point(10, 116)
+    $lvPairs.Size           = New-Object System.Drawing.Size(654, 62)
+    $lvPairs.Enabled        = $false
+    $lvPairs.Columns.Add("Source SMTP", 320) | Out-Null
+    $lvPairs.Columns.Add("Target SMTP", 320) | Out-Null
+    $grpMap.Controls.Add($lvPairs)
+
+    $btnRemovePair          = New-Object System.Windows.Forms.Button
+    $btnRemovePair.Text     = "Remove Selected"
+    $btnRemovePair.Location = New-Object System.Drawing.Point(10, 184)
+    $btnRemovePair.Size     = New-Object System.Drawing.Size(126, 24)
+    $btnRemovePair.Enabled  = $false
+    $grpMap.Controls.Add($btnRemovePair)
+
+    $lblMapCount            = New-Object System.Windows.Forms.Label
+    $lblMapCount.Text       = ""
+    $lblMapCount.ForeColor  = [System.Drawing.Color]::DarkGreen
+    $lblMapCount.Location   = New-Object System.Drawing.Point(144, 186)
+    $lblMapCount.Size       = New-Object System.Drawing.Size(500, 16)
+    $grpMap.Controls.Add($lblMapCount)
+
+    # --- 3. Operation ---
+    $grpOp           = New-Object System.Windows.Forms.GroupBox
+    $grpOp.Text      = "3. Operation"
+    $grpOp.Location  = New-Object System.Drawing.Point(12, 424)
+    $grpOp.Size      = New-Object System.Drawing.Size(676, 136)
+    $form.Controls.Add($grpOp)
+
+    $radAddMembers          = New-Object System.Windows.Forms.RadioButton
+    $radAddMembers.Text     = "Add members to existing groups  (groups must already exist on target)"
+    $radAddMembers.Checked  = $true
+    $radAddMembers.Location = New-Object System.Drawing.Point(10, 22)
+    $radAddMembers.Size     = New-Object System.Drawing.Size(654, 20)
+    $grpOp.Controls.Add($radAddMembers)
+
+    $radCreateGroups          = New-Object System.Windows.Forms.RadioButton
+    $radCreateGroups.Text     = "Create groups, then add members  (name/alias conflicts are skipped and logged)"
+    $radCreateGroups.Location = New-Object System.Drawing.Point(10, 46)
+    $radCreateGroups.Size     = New-Object System.Drawing.Size(654, 20)
+    $grpOp.Controls.Add($radCreateGroups)
+
+    $lblPrefix               = New-Object System.Windows.Forms.Label
+    $lblPrefix.Text          = "Prefix:"
+    $lblPrefix.Location      = New-Object System.Drawing.Point(28, 76)
+    $lblPrefix.Size          = New-Object System.Drawing.Size(46, 18)
+    $lblPrefix.Enabled       = $false
+    $grpOp.Controls.Add($lblPrefix)
+
+    $txtPrefix                    = New-Object System.Windows.Forms.TextBox
+    $txtPrefix.Location           = New-Object System.Drawing.Point(78, 74)
+    $txtPrefix.Size               = New-Object System.Drawing.Size(120, 22)
+    $txtPrefix.PlaceholderText    = "e.g. MIGR-"
+    $txtPrefix.Enabled            = $false
+    $grpOp.Controls.Add($txtPrefix)
+
+    $lblNewDomain            = New-Object System.Windows.Forms.Label
+    $lblNewDomain.Text       = "New SMTP domain:"
+    $lblNewDomain.Location   = New-Object System.Drawing.Point(216, 76)
+    $lblNewDomain.Size       = New-Object System.Drawing.Size(112, 18)
+    $lblNewDomain.Enabled    = $false
+    $grpOp.Controls.Add($lblNewDomain)
+
+    $txtNewDomain                 = New-Object System.Windows.Forms.TextBox
+    $txtNewDomain.Location        = New-Object System.Drawing.Point(332, 74)
+    $txtNewDomain.Size            = New-Object System.Drawing.Size(244, 22)
+    $txtNewDomain.PlaceholderText = "target.com"
+    $txtNewDomain.Enabled         = $false
+    $grpOp.Controls.Add($txtNewDomain)
+
+    $lblOU               = New-Object System.Windows.Forms.Label
+    $lblOU.Text          = "Organizational Unit:"
+    $lblOU.Location      = New-Object System.Drawing.Point(28, 102)
+    $lblOU.Size          = New-Object System.Drawing.Size(124, 18)
+    $lblOU.Enabled       = $false
+    $grpOp.Controls.Add($lblOU)
+
+    $txtOU                    = New-Object System.Windows.Forms.TextBox
+    $txtOU.Location           = New-Object System.Drawing.Point(156, 100)
+    $txtOU.Size               = New-Object System.Drawing.Size(506, 22)
+    $txtOU.PlaceholderText    = "OU=Groups,DC=domain,DC=com  (optional — leave blank for Exchange default)"
+    $txtOU.Enabled            = $false
+    $grpOp.Controls.Add($txtOU)
+
+    # --- 4. Options ---
+    $grpOpts           = New-Object System.Windows.Forms.GroupBox
+    $grpOpts.Text      = "4. Options"
+    $grpOpts.Location  = New-Object System.Drawing.Point(12, 568)
+    $grpOpts.Size      = New-Object System.Drawing.Size(676, 52)
+    $form.Controls.Add($grpOpts)
+
+    $lblOutPath               = New-Object System.Windows.Forms.Label
+    $lblOutPath.Text          = "Log output path:"
+    $lblOutPath.Location      = New-Object System.Drawing.Point(10, 18)
+    $lblOutPath.Size          = New-Object System.Drawing.Size(112, 22)
+    $grpOpts.Controls.Add($lblOutPath)
+
+    $txtOutPath               = New-Object System.Windows.Forms.TextBox
+    $txtOutPath.Text          = (Get-Location).Path
+    $txtOutPath.Location      = New-Object System.Drawing.Point(126, 16)
+    $txtOutPath.Size          = New-Object System.Drawing.Size(434, 22)
+    $grpOpts.Controls.Add($txtOutPath)
+
+    $btnBrowseOut             = New-Object System.Windows.Forms.Button
+    $btnBrowseOut.Text        = "Browse..."
+    $btnBrowseOut.Location    = New-Object System.Drawing.Point(570, 14)
+    $btnBrowseOut.Size        = New-Object System.Drawing.Size(94, 26)
+    $grpOpts.Controls.Add($btnBrowseOut)
+
+    # --- Action Buttons ---
+    $btnPreview               = New-Object System.Windows.Forms.Button
+    $btnPreview.Text          = "Preview"
+    $btnPreview.Location      = New-Object System.Drawing.Point(12, 630)
+    $btnPreview.Size          = New-Object System.Drawing.Size(130, 34)
+    $btnPreview.Enabled       = $false
+    $form.Controls.Add($btnPreview)
+
+    $btnRun                   = New-Object System.Windows.Forms.Button
+    $btnRun.Text              = "Run Migration"
+    $btnRun.Location          = New-Object System.Drawing.Point(260, 630)
+    $btnRun.Size              = New-Object System.Drawing.Size(180, 34)
+    $btnRun.BackColor         = [System.Drawing.Color]::FromArgb(0, 120, 212)
+    $btnRun.ForeColor         = [System.Drawing.Color]::White
+    $btnRun.FlatStyle         = 'Flat'
+    $btnRun.Enabled           = $false
+    $form.Controls.Add($btnRun)
+
+    $btnExportLog             = New-Object System.Windows.Forms.Button
+    $btnExportLog.Text        = "Export Log"
+    $btnExportLog.Location    = New-Object System.Drawing.Point(558, 630)
+    $btnExportLog.Size        = New-Object System.Drawing.Size(130, 34)
+    $btnExportLog.Enabled     = $false
+    $form.Controls.Add($btnExportLog)
+
+    # --- Status Log ---
+    $grpLog           = New-Object System.Windows.Forms.GroupBox
+    $grpLog.Text      = "Status Log"
+    $grpLog.Location  = New-Object System.Drawing.Point(12, 674)
+    $grpLog.Size      = New-Object System.Drawing.Size(676, 152)
+    $form.Controls.Add($grpLog)
+
+    $rtbLog                   = New-Object System.Windows.Forms.RichTextBox
+    $rtbLog.Location          = New-Object System.Drawing.Point(8, 18)
+    $rtbLog.Size              = New-Object System.Drawing.Size(660, 126)
+    $rtbLog.ReadOnly          = $true
+    $rtbLog.BackColor         = [System.Drawing.Color]::FromArgb(18, 18, 28)
+    $rtbLog.ForeColor         = [System.Drawing.Color]::Silver
+    $rtbLog.Font              = New-Object System.Drawing.Font("Consolas", 8.5)
+    $rtbLog.ScrollBars        = 'Vertical'
+    $rtbLog.BorderStyle       = 'None'
+    $grpLog.Controls.Add($rtbLog)
+
+    #endregion
+
+    #region ---- Event Handlers ----
+
+    # Target type selection
+    $radM365.Add_CheckedChanged({
+        $txtOnPremUri.Enabled = -not $radM365.Checked
+        $btnConnTgt.Text      = if ($radM365.Checked) { "Connect Target (M365)" } else { "Connect Target (On-prem)" }
+    })
+    $radOnPrem.Add_CheckedChanged({
+        $txtOnPremUri.Enabled = $radOnPrem.Checked
+        $btnConnTgt.Text      = if ($radOnPrem.Checked) { "Connect Target (On-prem)" } else { "Connect Target (M365)" }
+    })
+
+    # Mapping mode: CSV vs Manual
+    $radCsvMapping.Add_CheckedChanged({
+        $btnBrowseMap.Enabled  = $radCsvMapping.Checked
+        $lblMapPath.Enabled    = $radCsvMapping.Checked
+        $txtManualSrc.Enabled  = -not $radCsvMapping.Checked
+        $txtManualTgt.Enabled  = -not $radCsvMapping.Checked
+        $btnAddPair.Enabled    = -not $radCsvMapping.Checked
+        $lvPairs.Enabled       = -not $radCsvMapping.Checked
+        $btnRemovePair.Enabled = -not $radCsvMapping.Checked
+        if ($radCsvMapping.Checked) {
+            $lvPairs.Items.Clear()
+            $script:DLMappingTable = @{}
+            $lblMapCount.Text = ""
+        }
+    })
+    $radManualEntry.Add_CheckedChanged({
+        $btnBrowseMap.Enabled  = -not $radManualEntry.Checked
+        $lblMapPath.Enabled    = -not $radManualEntry.Checked
+        $txtManualSrc.Enabled  = $radManualEntry.Checked
+        $txtManualTgt.Enabled  = $radManualEntry.Checked
+        $btnAddPair.Enabled    = $radManualEntry.Checked
+        $lvPairs.Enabled       = $radManualEntry.Checked
+        $btnRemovePair.Enabled = $radManualEntry.Checked
+        if ($radManualEntry.Checked) {
+            $script:DLMappingTable = @{}
+            $lblMapPath.Text      = "No file loaded"
+            $lblMapPath.ForeColor = [System.Drawing.Color]::Gray
+            $lblMapCount.Text     = "0 pair(s) entered"
+        }
+    })
+
+    $btnAddPair.Add_Click({
+        $src = $txtManualSrc.Text.Trim()
+        $tgt = $txtManualTgt.Text.Trim()
+        if (-not $src -or -not $tgt) {
+            [System.Windows.Forms.MessageBox]::Show("Enter both a source and target address.", "Missing Address", 'OK', 'Warning') | Out-Null
+            return
+        }
+        $item = New-Object System.Windows.Forms.ListViewItem($src)
+        $item.SubItems.Add($tgt) | Out-Null
+        $lvPairs.Items.Add($item) | Out-Null
+        $script:DLMappingTable[$src.ToLower()] = $tgt
+        $txtManualSrc.Text = ''
+        $txtManualTgt.Text = ''
+        $lblMapCount.Text  = "$($lvPairs.Items.Count) pair(s) entered"
+        Write-DLLog "Pair added: $src -> $tgt" ([System.Drawing.Color]::LimeGreen)
+        $txtManualSrc.Focus() | Out-Null
+    })
+    $txtManualTgt.Add_KeyDown({
+        if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Return) { $btnAddPair.PerformClick() }
+    })
+
+    $btnRemovePair.Add_Click({
+        $selected = @($lvPairs.SelectedItems)
+        if (-not $selected.Count) { return }
+        foreach ($item in $selected) { $lvPairs.Items.Remove($item) }
+        $script:DLMappingTable = @{}
+        foreach ($item in $lvPairs.Items) { $script:DLMappingTable[$item.Text.ToLower()] = $item.SubItems[1].Text }
+        $lblMapCount.Text = "$($lvPairs.Items.Count) pair(s) entered"
+        Write-DLLog "Pair(s) removed. $($lvPairs.Items.Count) remaining." ([System.Drawing.Color]::DarkGoldenrod)
+    })
+
+    # Operation mode
+    $radAddMembers.Add_CheckedChanged({
+        $lblPrefix.Enabled    = -not $radAddMembers.Checked
+        $txtPrefix.Enabled    = -not $radAddMembers.Checked
+        $lblNewDomain.Enabled = -not $radAddMembers.Checked
+        $txtNewDomain.Enabled = -not $radAddMembers.Checked
+        $lblOU.Enabled        = -not $radAddMembers.Checked
+        $txtOU.Enabled        = -not $radAddMembers.Checked
+    })
+    $radCreateGroups.Add_CheckedChanged({
+        $lblPrefix.Enabled    = $radCreateGroups.Checked
+        $txtPrefix.Enabled    = $radCreateGroups.Checked
+        $lblNewDomain.Enabled = $radCreateGroups.Checked
+        $txtNewDomain.Enabled = $radCreateGroups.Checked
+        $lblOU.Enabled        = $radCreateGroups.Checked
+        $txtOU.Enabled        = $radCreateGroups.Checked
+    })
+
+    # Browse mapping CSV
+    $btnBrowseMap.Add_Click({
+        $dlg        = New-Object System.Windows.Forms.OpenFileDialog
+        $dlg.Title  = "Select Source-to-Target Mapping CSV"
+        $dlg.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+        if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+        $rows = Import-Csv $dlg.FileName
+        if (-not ($rows | Get-Member -Name 'Source') -or -not ($rows | Get-Member -Name 'Target')) {
+            [System.Windows.Forms.MessageBox]::Show("CSV must have 'Source' and 'Target' columns.", "Invalid CSV", 'OK', 'Error') | Out-Null
+            return
+        }
+        $script:DLMappingTable = @{}
+        foreach ($row in $rows) {
+            if ($row.Source -and $row.Target) { $script:DLMappingTable[$row.Source.Trim().ToLower()] = $row.Target.Trim() }
+        }
+        $lblMapPath.Text      = $dlg.FileName
+        $lblMapPath.ForeColor = [System.Drawing.Color]::DarkGreen
+        $lblMapCount.Text     = "$($script:DLMappingTable.Count) entries loaded"
+        Write-DLLog "Mapping CSV loaded: $($script:DLMappingTable.Count) entries" ([System.Drawing.Color]::LimeGreen)
+    })
+
+    # Browse output folder
+    $btnBrowseOut.Add_Click({
+        $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dlg.Description = "Select log output folder"
+        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $txtOutPath.Text = $dlg.SelectedPath }
+    })
+
+    # Connect Source
+    $btnConnSrc.Add_Click({
+        Set-DLStatusLabel $lblSrcStatus "Connecting..." ([System.Drawing.Color]::DarkGoldenrod)
+        $form.UseWaitCursor = $true
+        $btnConnSrc.Enabled = $false
+        try {
+            Write-DLLog "Connecting to source M365 tenant..." ([System.Drawing.Color]::Silver)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            $script:DLSourceConnected = $true
+            Set-DLStatusLabel $lblSrcStatus "Connected" ([System.Drawing.Color]::DarkGreen)
+            Write-DLLog "Source connected. Load your mapping, then use Preview or Run Migration." ([System.Drawing.Color]::LimeGreen)
+            $btnPreview.Enabled = $true
+            if ($script:DLTargetConnected) { $btnRun.Enabled = $true }
+        } catch {
+            Set-DLStatusLabel $lblSrcStatus "Connection failed" ([System.Drawing.Color]::Tomato)
+            Write-DLLog "ERROR: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally {
+            $form.UseWaitCursor = $false
+            $btnConnSrc.Enabled = $true
+        }
+    })
+
+    # Connect Target
+    $btnConnTgt.Add_Click({
+        Set-DLStatusLabel $lblTgtStatus "Connecting..." ([System.Drawing.Color]::DarkGoldenrod)
+        $form.UseWaitCursor = $true
+        $btnConnTgt.Enabled = $false
+        try {
+            if ($radM365.Checked) {
+                Write-DLLog "Connecting to target M365 tenant..." ([System.Drawing.Color]::Silver)
+                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+                Set-DLStatusLabel $lblTgtStatus "Connected (M365)" ([System.Drawing.Color]::DarkGreen)
+                Write-DLLog "Target M365 connected." ([System.Drawing.Color]::LimeGreen)
+            } else {
+                $uri = $txtOnPremUri.Text.Trim()
+                if ($uri) {
+                    Write-DLLog "Connecting to on-prem Exchange: $uri" ([System.Drawing.Color]::Silver)
+                    $script:DLOnPremSession = New-PSSession -ConfigurationName Microsoft.Exchange `
+                        -ConnectionUri $uri -Authentication Kerberos -ErrorAction Stop
+                    Set-DLStatusLabel $lblTgtStatus "Connected (on-prem via URI)" ([System.Drawing.Color]::DarkGreen)
+                    Write-DLLog "On-prem session established." ([System.Drawing.Color]::LimeGreen)
+                } else {
+                    Set-DLStatusLabel $lblTgtStatus "Using current Exchange session" ([System.Drawing.Color]::DarkGreen)
+                    Write-DLLog "Using current Exchange PS session for on-prem target." ([System.Drawing.Color]::LimeGreen)
+                    Write-DLLog "Note: After connecting to source EXO above, verify on-prem cmdlets are still active before running." ([System.Drawing.Color]::DarkGoldenrod)
+                }
+            }
+            $script:DLTargetConnected = $true
+            if ($script:DLSourceConnected) { $btnRun.Enabled = $true }
+        } catch {
+            Set-DLStatusLabel $lblTgtStatus "Connection failed" ([System.Drawing.Color]::Tomato)
+            Write-DLLog "ERROR: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally {
+            $form.UseWaitCursor = $false
+            $btnConnTgt.Enabled = $true
+        }
+    })
+
+    # Shared validation — returns $true if ready to proceed
+    function Confirm-DLReadyState {
+        if (-not $script:DLMappingTable.Count) {
+            $msg = if ($radCsvMapping.Checked) { "Load a mapping CSV first." } else { "Add at least one source/target pair first." }
+            [System.Windows.Forms.MessageBox]::Show($msg, "No Mapping", 'OK', 'Warning') | Out-Null
+            return $false
+        }
+        if ($radCreateGroups.Checked -and -not $txtNewDomain.Text.Trim()) {
+            [System.Windows.Forms.MessageBox]::Show("Enter a new SMTP domain for group creation.", "Missing Domain", 'OK', 'Warning') | Out-Null
+            return $false
+        }
+        return $true
+    }
+
+    # Preview
+    $btnPreview.Add_Click({
+        if (-not (Confirm-DLReadyState)) { return }
+        $btnPreview.Enabled = $false
+        $form.UseWaitCursor = $true
+        try {
+            Write-DLLog "Re-connecting to source for member read..." ([System.Drawing.Color]::DimGray)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
+
+            Collect-DLSourceData
+            Set-DLStatusLabel $lblSrcStatus "Connected - $($script:DLSourceData.Count) member record(s)" ([System.Drawing.Color]::DarkGreen)
+
+            Write-DLLog "---- PREVIEW ----" ([System.Drawing.Color]::CornflowerBlue)
+
+            if ($radCreateGroups.Checked) {
+                $prefix    = $txtPrefix.Text.Trim()
+                $newDomain = $txtNewDomain.Text.Trim().TrimStart('@')
+                Write-DLLog "  [Create Phase — $($script:DLGroupMeta.Count) group(s)]" ([System.Drawing.Color]::CornflowerBlue)
+                foreach ($srcSmtp in @($script:DLGroupMeta.Keys)) {
+                    $meta     = $script:DLGroupMeta[$srcSmtp]
+                    $tgtAlias = ($prefix + $meta.Alias).ToLower() -replace '[^a-z0-9\-_]',''
+                    $tgtName  = if ($prefix) { "$prefix$($meta.DisplayName)" } else { $meta.DisplayName }
+                    $tgtSmtp  = "$tgtAlias@$newDomain"
+                    $skip     = ($meta.Type -eq 'GroupMailbox' -and $radOnPrem.Checked)
+                    if ($skip) {
+                        Write-DLLog "  SKIP   $srcSmtp — M365 Group cannot be created on-prem" ([System.Drawing.Color]::DarkGoldenrod)
+                    } else {
+                        $ouInfo = if ($txtOU.Text.Trim()) { "  OU=$($txtOU.Text.Trim())" } else { '' }
+                        Write-DLLog "  CREATE $tgtName ($tgtSmtp)  [$($meta.Type)]$ouInfo" ([System.Drawing.Color]::LimeGreen)
+                    }
+                }
+            }
+
+            $wouldAdd = 0; $wouldSkip = 0
+            Write-DLLog "  [Member Phase — $($script:DLSourceData.Count) record(s)]" ([System.Drawing.Color]::CornflowerBlue)
+            foreach ($rec in $script:DLSourceData) {
+                $tgt = $script:DLMappingTable[$rec.SourceGroup.ToLower()]
+                if (-not $tgt) { $tgt = $rec.TargetGroup }
+                Write-DLLog "  ADD   $($rec.TargetMember) -> $tgt$(if ($rec.ExpandedFrom) { " (from $($rec.ExpandedFrom))" })" ([System.Drawing.Color]::LimeGreen)
+                $wouldAdd++
+            }
+            Write-DLLog "---- Preview: $wouldAdd member(s) would be added ----" ([System.Drawing.Color]::CornflowerBlue)
+        } catch {
+            Write-DLLog "ERROR: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally {
+            $btnPreview.Enabled = $true
+            $form.UseWaitCursor = $false
+        }
+    })
+
+    # Run Migration
+    $btnRun.Add_Click({
+        if (-not (Confirm-DLReadyState)) { return }
+        $modeDesc = if ($radCreateGroups.Checked) { "create groups and add members" } else { "add members to existing groups" }
+        $confirm  = [System.Windows.Forms.MessageBox]::Show(
+            "This will connect to both tenants and $modeDesc for $($script:DLGroupMeta.Count) group(s).`n`nProceed?",
+            "Confirm Migration",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+
+        $btnRun.Enabled = $false
+        $form.UseWaitCursor = $true
+        try {
+            Write-DLLog "Re-connecting to source..." ([System.Drawing.Color]::DimGray)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
+            Collect-DLSourceData
+            Set-DLStatusLabel $lblSrcStatus "Connected - $($script:DLSourceData.Count) member record(s) read" ([System.Drawing.Color]::DarkGreen)
+
+            if ($radM365.Checked) {
+                Write-DLLog "Re-connecting to target M365..." ([System.Drawing.Color]::DimGray)
+                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            } elseif ($script:DLOnPremSession -and $script:DLOnPremSession.State -ne 'Opened') {
+                $uri = $txtOnPremUri.Text.Trim()
+                if ($uri) {
+                    Write-DLLog "Re-establishing on-prem session..." ([System.Drawing.Color]::DimGray)
+                    $script:DLOnPremSession = New-PSSession -ConfigurationName Microsoft.Exchange `
+                        -ConnectionUri $uri -Authentication Kerberos -ErrorAction Stop
+                }
+            }
+            Set-DLStatusLabel $lblTgtStatus "Connected - applying..." ([System.Drawing.Color]::DarkOrange)
+
+            Apply-DLTargetData
+
+            $cCreated = @($script:DLResultLog | Where-Object { $_.Status -eq 'Created' }).Count
+            $cSuccess = @($script:DLResultLog | Where-Object { $_.Status -eq 'Success' }).Count
+            $cDupe    = @($script:DLResultLog | Where-Object { $_.Status -eq 'AlreadyMember' }).Count
+            $cConf    = @($script:DLResultLog | Where-Object { $_.Status -eq 'Conflict' }).Count
+            $cFailed  = @($script:DLResultLog | Where-Object { $_.Status -eq 'Failed' }).Count
+            Write-DLLog "---- COMPLETE: $cCreated created | $cSuccess added | $cDupe already members | $cConf conflicts | $cFailed failed ----" ([System.Drawing.Color]::CornflowerBlue)
+            Set-DLStatusLabel $lblTgtStatus "Connected - migration complete" ([System.Drawing.Color]::DarkGreen)
+            $btnExportLog.Enabled = $true
+        } catch {
+            Write-DLLog "FATAL: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally {
+            $btnRun.Enabled = $true
+            $form.UseWaitCursor = $false
+        }
+    })
+
+    # Export Log
+    $btnExportLog.Add_Click({
+        $outPath = $txtOutPath.Text.Trim()
+        if (-not (Test-Path $outPath)) {
+            Write-DLLog "Output path not found: $outPath" ([System.Drawing.Color]::Tomato)
+            return
+        }
+        $file = Join-Path $outPath "DLMigrationLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+        try {
+            $script:DLResultLog | Export-Csv $file -NoTypeInformation -Encoding UTF8
+            Write-DLLog "Log exported: $file" ([System.Drawing.Color]::LimeGreen)
+        } catch {
+            Write-DLLog "Export failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        }
+    })
+
+    #endregion
+
+    Write-DLLog "Ready. Connect to both tenants first, then load your mapping." ([System.Drawing.Color]::Silver)
+    Write-DLLog "Tip: Include both group rows AND member rows in the same mapping CSV." ([System.Drawing.Color]::DimGray)
+
+    $form.ShowDialog() | Out-Null
+    $form.Dispose()
+    if ($script:DLOnPremSession) { Remove-PSSession $script:DLOnPremSession -ErrorAction SilentlyContinue }
 }
 
 function Set-FrankensteinPSWindowTitle {

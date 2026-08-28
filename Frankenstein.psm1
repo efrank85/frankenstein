@@ -100,6 +100,15 @@ function Get-FrankensteinHelp {
         Switches:    [-IncludeDisabled] [-IncludeStatistics] [-ImportCSV] [-UseCurrentSession] [-Help]
         Parameters:  [-OutputPath <path>]
 
+    16) Get-FrankensteinAliasReport
+        Exports a flat address map with one row per address per recipient. Columns: DisplayName,
+        PrimarySmtpAddress, Address, AddressType (SMTP/smtp/X500/SIP), RecipientType.
+        Covers mailboxes, groups (DG/MESG/M365), mail users, and mail contacts.
+        Use -LegacyDN to append an X500 row from each object's LegacyExchangeDN.
+        Switches:    [-Mailboxes] [-Groups] [-MailUsers] [-MailContacts] [-LegacyDN] [-SIP]
+                     [-ImportCSV] [-UseCurrentSession] [-CSV] [-Help]
+        Parameters:  [-OutputPath <path>]
+
 "@
 }
 
@@ -2639,6 +2648,300 @@ NOTES
 
     Write-Host "`nReport complete: $($Results.Count) mailbox(es) exported." -ForegroundColor Green
     Write-Host "File: $FullPath" -ForegroundColor Cyan
+}
+
+function Get-FrankensteinAliasReport {
+    [CmdletBinding()]
+    Param (
+        [Switch]$Mailboxes,
+        [Switch]$Groups,
+        [Switch]$MailUsers,
+        [Switch]$MailContacts,
+        [Switch]$LegacyDN,
+        [Switch]$SIP,
+        [Switch]$IncludeOnMSAddress,
+        [Switch]$ImportCSV,
+        [Switch]$ImportMappingCSV,
+        [Switch]$UseCurrentSession,
+        [String]$OutputPath = '.',
+        [Switch]$CSV,
+        [Switch]$Help
+    )
+
+    if ($Help) {
+        Write-Host @"
+SYNOPSIS
+    Exports a flat address map with one row per address per recipient.
+
+DESCRIPTION
+    For each recipient, one row is written per email address. This produces a lookup table
+    where every SMTP alias, primary address, and optionally LegacyExchangeDN or SIP address
+    maps back to the object's PrimarySmtpAddress and type.
+
+    Default (no type switches): all mailboxes (User, Shared, Room, Equipment).
+    Use type switches to include other recipient types or mix and match.
+
+PARAMETERS
+    -Mailboxes      Include UserMailbox, SharedMailbox, RoomMailbox, EquipmentMailbox.
+    -Groups         Include Distribution Groups, Mail-Enabled Security Groups, and M365 Groups.
+    -MailUsers      Include Mail Users and Guest Mail Users.
+    -MailContacts   Include Mail Contacts.
+    -LegacyDN           Append an X500 row per recipient using the LegacyExchangeDN value.
+    -SIP                Include SIP proxy addresses as additional rows.
+    -IncludeOnMSAddress By default, onmicrosoft.com addresses are excluded since they are
+                        never stamped on objects in a target tenant. Set this switch to include them.
+    -ImportCSV          Scope to a CSV file with a PrimarySmtpAddress column.
+    -ImportMappingCSV   Scope to a mapping CSV with Source and Target columns.
+                        Source can be UPN, PrimarySMTP, alias, or any Exchange-resolvable identity.
+                        Adds a TargetAddress column to the export populated with the Target value.
+                        Use this to drive a ForEach loop in the target tenant to stamp aliases.
+                        Mutually exclusive with -ImportCSV (mapping takes precedence if both set).
+    -UseCurrentSession  Use the current Exchange Online session.
+    -OutputPath         Folder path for the output CSV. Defaults to the current directory.
+    -CSV                Export results to a timestamped CSV file.
+    -Help               Display this help text.
+
+    Note: If no type switch is specified, all mailboxes are included.
+
+OUTPUT COLUMNS
+    DisplayName, PrimarySmtpAddress, AddressValue, AddressType, RecipientType[, TargetAddress]
+
+    AddressType values:
+      SMTP   - primary SMTP address
+      smtp   - secondary/alias SMTP address
+      X500   - LegacyExchangeDN (requires -LegacyDN)
+      SIP    - SIP address (requires -SIP)
+
+    TargetAddress is only present when -ImportMappingCSV is used. It contains the
+    Target value from the mapping file — typically the object's identity in the target tenant.
+
+EXAMPLE
+    Get-FrankensteinAliasReport -UseCurrentSession -CSV
+    Get-FrankensteinAliasReport -UseCurrentSession -Mailboxes -Groups -LegacyDN -CSV
+    Get-FrankensteinAliasReport -UseCurrentSession -ImportCSV -LegacyDN -CSV
+    Get-FrankensteinAliasReport -UseCurrentSession -ImportMappingCSV -LegacyDN -CSV
+
+NOTES
+    Author: Eric D. Frank
+"@
+        return
+    }
+
+    Add-Type -AssemblyName System.Windows.Forms
+
+    # --- Optional ImportCSV file picker ---
+    $ScopedAddresses = $null
+    if ($ImportCSV -and -not $ImportMappingCSV) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Select a CSV containing the recipients to include in this report.`n`nRequired column:`n  - PrimarySmtpAddress : the recipient's primary SMTP address`n`nAny additional columns in the file are ignored.",
+            "Select Recipient Scope CSV",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+
+        $scopeDialog        = New-Object System.Windows.Forms.OpenFileDialog
+        $scopeDialog.Title  = "Select Recipient Scope CSV"
+        $scopeDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+        if ($scopeDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+            Write-Host "No scope file selected. Exiting." -ForegroundColor Yellow
+            return
+        }
+        $imported = Import-Csv $scopeDialog.FileName
+        if (-not ($imported | Get-Member -Name 'PrimarySmtpAddress')) {
+            Write-Host "Scope CSV is missing the required PrimarySmtpAddress column. Exiting." -ForegroundColor Red
+            return
+        }
+        $ScopedAddresses = @($imported | ForEach-Object { $_.PrimarySmtpAddress } | Where-Object { $_ })
+        Write-Host "Scope file loaded: $($ScopedAddresses.Count) address(es) to process." -ForegroundColor Cyan
+    }
+
+    # --- Optional ImportMappingCSV file picker ---
+    $MappingEntries  = $null
+    $ResolvedMapping = @{}   # PrimarySmtpAddress.ToLower() -> Target value
+    if ($ImportMappingCSV) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Select a mapping CSV to scope this report and populate the TargetAddress column.`n`nRequired columns:`n  - Source : UPN, PrimarySMTP, alias, or any Exchange-resolvable identity`n  - Target : identity of the matching object in the target tenant`n`nEach Source is resolved to its PrimarySmtpAddress. The Target value is stamped`non every address row for that recipient so you can drive a ForEach loop in the target tenant.",
+            "Select Source-to-Target Mapping CSV",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+
+        $mapDialog        = New-Object System.Windows.Forms.OpenFileDialog
+        $mapDialog.Title  = "Select Source-to-Target Mapping CSV"
+        $mapDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+        if ($mapDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+            Write-Host "No mapping file selected. Exiting." -ForegroundColor Yellow
+            return
+        }
+        $mapImported = Import-Csv $mapDialog.FileName
+        if (-not ($mapImported | Get-Member -Name 'Source') -or -not ($mapImported | Get-Member -Name 'Target')) {
+            Write-Host "Mapping CSV is missing required Source and/or Target columns. Exiting." -ForegroundColor Red
+            return
+        }
+        $MappingEntries = @($mapImported | Where-Object { $_.Source -and $_.Target })
+        Write-Host "Mapping file loaded: $($MappingEntries.Count) entries to process." -ForegroundColor Cyan
+    }
+
+    if (-not $UseCurrentSession) { Connect-ExchangeOnline }
+
+    # Build recipient type filter
+    $typeAll    = (-not $Mailboxes -and -not $Groups -and -not $MailUsers -and -not $MailContacts)
+    $typeFilter = @(
+        if ($typeAll -or $Mailboxes)    { 'UserMailbox'; 'SharedMailbox'; 'RoomMailbox'; 'EquipmentMailbox' }
+        if ($typeAll -or $Groups)       { 'MailUniversalDistributionGroup'; 'MailUniversalSecurityGroup'; 'GroupMailbox' }
+        if ($typeAll -or $MailUsers)    { 'MailUser'; 'GuestMailUser' }
+        if ($typeAll -or $MailContacts) { 'MailContact' }
+    )
+
+    $Results = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    function Add-AddressRows ($recip) {
+        $primarySmtp = $recip.PrimarySmtpAddress
+        $displayName = $recip.DisplayName
+        $recipType   = $recip.RecipientTypeDetails
+        $targetAddr  = if ($ImportMappingCSV) { $ResolvedMapping[$primarySmtp.ToLower()] } else { $null }
+
+        foreach ($addr in $recip.EmailAddresses) {
+            $addrStr  = $addr.ToString()
+            $colonIdx = $addrStr.IndexOf(':')
+            if ($colonIdx -lt 0) { continue }
+            $prefix = $addrStr.Substring(0, $colonIdx)
+            $value  = $addrStr.Substring($colonIdx + 1)
+
+            $include = ($prefix -ieq 'smtp') -or ($SIP -and $prefix -ieq 'sip')
+            if (-not $include) { continue }
+            if (-not $IncludeOnMSAddress -and $value -like '*onmicrosoft.com') { continue }
+
+            $row = [ordered]@{
+                DisplayName        = $displayName
+                PrimarySmtpAddress = $primarySmtp
+                AddressValue       = $value
+                AddressType        = $prefix
+                RecipientType      = $recipType
+            }
+            if ($ImportMappingCSV) { $row['TargetAddress'] = $targetAddr }
+            $Results.Add([PSCustomObject]$row)
+        }
+
+        if ($LegacyDN -and $recip.LegacyExchangeDN) {
+            $row = [ordered]@{
+                DisplayName        = $displayName
+                PrimarySmtpAddress = $primarySmtp
+                AddressValue       = $recip.LegacyExchangeDN
+                AddressType        = 'X500'
+                RecipientType      = $recipType
+            }
+            if ($ImportMappingCSV) { $row['TargetAddress'] = $targetAddr }
+            $Results.Add([PSCustomObject]$row)
+        }
+    }
+
+    # Resolves a Get-Recipient stub to the type-specific object that carries LegacyExchangeDN
+    function Get-FullRecipientObject ($recip) {
+        $id = $recip.PrimarySmtpAddress
+        switch ($recip.RecipientTypeDetails) {
+            { $_ -in @('UserMailbox','SharedMailbox','RoomMailbox','EquipmentMailbox') }       { Get-Mailbox           -Identity $id -ErrorAction SilentlyContinue; break }
+            { $_ -in @('MailUniversalDistributionGroup','MailUniversalSecurityGroup') }        { Get-DistributionGroup -Identity $id -ErrorAction SilentlyContinue; break }
+            'GroupMailbox'                                                                      { Get-UnifiedGroup      -Identity $id -ErrorAction SilentlyContinue; break }
+            { $_ -in @('MailUser','GuestMailUser') }                                           { Get-MailUser          -Identity $id -ErrorAction SilentlyContinue; break }
+            'MailContact'                                                                       { Get-MailContact       -Identity $id -ErrorAction SilentlyContinue; break }
+            default                                                                             { $recip }
+        }
+    }
+
+    if ($ImportMappingCSV) {
+        $total = $MappingEntries.Count
+        $count = 0
+        foreach ($entry in $MappingEntries) {
+            $count++
+            $sourceId  = $entry.Source.Trim()
+            $targetVal = $entry.Target.Trim()
+            Write-Progress -Activity "Generating Alias Report" `
+                -Status "Resolving $sourceId ($count of $total)" `
+                -PercentComplete ([math]::Round(($count / $total) * 100))
+
+            $recip = Get-Recipient -Identity $sourceId -ErrorAction SilentlyContinue
+            if (-not $recip) {
+                Write-Warning "Recipient not found: $sourceId"
+                continue
+            }
+            if (-not $typeAll -and $recip.RecipientTypeDetails -notin $typeFilter) {
+                Write-Warning "Recipient '$sourceId' is type '$($recip.RecipientTypeDetails)' which is excluded by the current type switches."
+                continue
+            }
+            if ($LegacyDN) { $recip = Get-FullRecipientObject $recip }
+            $ResolvedMapping[$recip.PrimarySmtpAddress.ToLower()] = $targetVal
+            Add-AddressRows $recip
+        }
+    } elseif ($ImportCSV) {
+        $total = $ScopedAddresses.Count
+        $count = 0
+        foreach ($smtp in $ScopedAddresses) {
+            $count++
+            Write-Progress -Activity "Generating Alias Report" `
+                -Status "Looking up $smtp ($count of $total)" `
+                -PercentComplete ([math]::Round(($count / $total) * 100))
+
+            $recip = Get-Recipient -Identity $smtp -ErrorAction SilentlyContinue
+            if (-not $recip) {
+                Write-Warning "Recipient not found: $smtp"
+                continue
+            }
+            if (-not $typeAll -and $recip.RecipientTypeDetails -notin $typeFilter) {
+                Write-Warning "Recipient '$smtp' is type '$($recip.RecipientTypeDetails)' which is excluded by the current type switches."
+                continue
+            }
+            if ($LegacyDN) { $recip = Get-FullRecipientObject $recip }
+            Add-AddressRows $recip
+        }
+    } else {
+        # Bulk path: use type-specific cmdlets directly — they carry LegacyExchangeDN natively.
+        # Get-Recipient is avoided here because EXO's REST module returns LegacyExchangeDN as null.
+        $AllRecipients = [System.Collections.Generic.List[object]]::new()
+
+        if ($typeAll -or $Mailboxes) {
+            Write-Host "Fetching mailboxes..." -ForegroundColor Cyan
+            @(Get-Mailbox -ResultSize Unlimited -RecipientTypeDetails @('UserMailbox','SharedMailbox','RoomMailbox','EquipmentMailbox')) |
+                ForEach-Object { $AllRecipients.Add($_) }
+        }
+        if ($typeAll -or $Groups) {
+            Write-Host "Fetching distribution groups..." -ForegroundColor Cyan
+            @(Get-DistributionGroup -ResultSize Unlimited) | ForEach-Object { $AllRecipients.Add($_) }
+            Write-Host "Fetching M365 groups..." -ForegroundColor Cyan
+            @(Get-UnifiedGroup -ResultSize Unlimited)      | ForEach-Object { $AllRecipients.Add($_) }
+        }
+        if ($typeAll -or $MailUsers) {
+            Write-Host "Fetching mail users..." -ForegroundColor Cyan
+            @(Get-MailUser -ResultSize Unlimited) | ForEach-Object { $AllRecipients.Add($_) }
+        }
+        if ($typeAll -or $MailContacts) {
+            Write-Host "Fetching mail contacts..." -ForegroundColor Cyan
+            @(Get-MailContact -ResultSize Unlimited) | ForEach-Object { $AllRecipients.Add($_) }
+        }
+
+        $total = $AllRecipients.Count
+        Write-Host "Processing $total recipient(s)..." -ForegroundColor Cyan
+        $count = 0
+        foreach ($recip in $AllRecipients) {
+            $count++
+            Write-Progress -Activity "Generating Alias Report" `
+                -Status "$($recip.DisplayName) ($count of $total)" `
+                -PercentComplete ([math]::Round(($count / $total) * 100))
+            Add-AddressRows $recip
+        }
+    }
+
+    Write-Progress -Activity "Generating Alias Report" -Completed
+    Write-Host "`nTotal address rows: $($Results.Count) across $total recipient(s)." -ForegroundColor Cyan
+
+    if ($CSV) {
+        $FileName = "AliasReport_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+        $FullPath = Join-Path $OutputPath $FileName
+        $Results | Export-Csv $FullPath -NoTypeInformation -Encoding UTF8
+        Write-Host "Export complete: $FullPath" -ForegroundColor Green
+    } else {
+        $Results
+    }
 }
 
 function Set-FrankensteinPSWindowTitle {

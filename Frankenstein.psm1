@@ -56,7 +56,9 @@ function Get-FrankensteinHelp {
        Displays a summary of all recipient types. Auto-detects Exchange Online vs On-Premises.
 
     8) Get-FrankensteinMailboxPermissions
-       Retrieves FullAccess, SendAs, and SendOnBehalf permissions.
+       Retrieves FullAccess, SendAs, and SendOnBehalf permissions. DL delegates are automatically
+       expanded to individual members (including nested DLs). Expanded rows include an
+       ExpandedFromGroup column showing which DL the member came from.
        Switches: [-FullAccess] [-SendAs] [-SendOnBehalf] [-UseCurrentSession] [-CSV] [-Help]
 
     9) Get-FrankensteinVirtualDirectories
@@ -99,6 +101,13 @@ function Get-FrankensteinHelp {
         Always outputs a timestamped CSV. Use -IncludeStatistics to append size, item count, and last logon.
         Switches:    [-IncludeDisabled] [-IncludeStatistics] [-ImportCSV] [-UseCurrentSession] [-Help]
         Parameters:  [-OutputPath <path>]
+
+    17) Invoke-FrankensteinPermissionMigrator
+        GUI-driven permission migration tool for tenant-to-tenant cutovers.
+        Load a Source-to-Target mapping CSV, connect to source (reads permissions live with optional
+        DL expansion), connect to target, then run the migration. Exports a timestamped log CSV
+        with Success, Skipped, AlreadyExists, and Failed results per permission entry.
+        Switches: [-Help]
 
     16) Get-FrankensteinAliasReport
         Exports a flat address map with one row per address per recipient. Columns: DisplayName,
@@ -1334,6 +1343,30 @@ function Get-FrankensteinGSuiteDiscovery {
     Pop-Location
 }
 
+function Expand-FrankensteinDLMembers {
+    [CmdletBinding()]
+    Param (
+        [string]$Identity,
+        [Switch]$Recurse,
+        [int]$Depth    = 0,
+        [int]$MaxDepth = 5,
+        [System.Collections.Generic.HashSet[string]]$Visited = $null
+    )
+    if ($null -eq $Visited) {
+        $Visited = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    if ($Depth -gt $MaxDepth -or -not $Visited.Add($Identity)) { return }
+
+    $members = @(Get-DistributionGroupMember -Identity $Identity -ResultSize Unlimited -ErrorAction SilentlyContinue)
+    foreach ($m in $members) {
+        if ($Recurse -and $m.RecipientTypeDetails -in @('MailUniversalDistributionGroup','MailUniversalSecurityGroup')) {
+            Expand-FrankensteinDLMembers -Identity $m.PrimarySmtpAddress -Recurse:$Recurse -Depth ($Depth + 1) -MaxDepth $MaxDepth -Visited $Visited
+        } else {
+            $m
+        }
+    }
+}
+
 function Get-FrankensteinMailboxPermissions {
     [CmdletBinding()]
     Param (
@@ -1352,6 +1385,9 @@ SYNOPSIS
 
 DESCRIPTION
     Requires minimum of Exchange Reader. Global Reader will not work.
+    Any delegate that is a Distribution Group or Mail-Enabled Security Group is automatically
+    expanded to its individual members, including nested DLs recursively. Expanded rows include
+    an ExpandedFromGroup column showing the originating DL address.
 
 PARAMETERS
     -UseCurrentSession  Use the current Exchange session instead of prompting to connect.
@@ -1400,64 +1436,52 @@ NOTES
         $MailboxSMTP         = $mbx.PrimarySmtpAddress
         $MailboxType         = $mbx.RecipientTypeDetails
 
+        $dlTypes = @('MailUniversalDistributionGroup','MailUniversalSecurityGroup')
+
+        function Add-PermissionRow ([string]$AccessType, $r, [string]$rawId, [string]$expandedFrom) {
+            $smtp = if ($r) { $r.PrimarySmtpAddress } else { $rawId }
+            $key  = "$MailboxSMTP|$smtp|$AccessType"
+            if ($SeenKeys.Add($key)) {
+                $Results.Add([PSCustomObject]@{
+                    DisplayName                = $mbx.DisplayName
+                    UserPrincipalName          = $MailboxSMTP
+                    MailboxType                = $MailboxType
+                    MailboxExchangeGuid        = $MailboxExchangeGuid
+                    AccessType                 = $AccessType
+                    UserWithAccess             = $smtp
+                    UserWithAccessType         = if ($r) { $r.RecipientTypeDetails } else { 'Unknown/External' }
+                    UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }         else { $null }
+                    ExpandedFromGroup          = $expandedFrom
+                })
+            }
+        }
+
+        function Resolve-AndAdd ([string]$rawId, [string]$AccessType) {
+            $r = Resolve-Recipient $rawId
+            $smtp = if ($r) { $r.PrimarySmtpAddress } else { $rawId }
+            if ($r -and $r.RecipientTypeDetails -in $dlTypes) {
+                $members = @(Expand-FrankensteinDLMembers -Identity $smtp -Recurse)
+                foreach ($m in $members) { Add-PermissionRow $AccessType $m $m.PrimarySmtpAddress $smtp }
+            } else {
+                Add-PermissionRow $AccessType $r $rawId ''
+            }
+        }
+
         if ($FullAccess) {
             Get-MailboxPermission -Identity $mbx.Identity -ErrorAction SilentlyContinue |
                 Where-Object { -not $_.IsInherited -and $_.User -notlike "NT AUTHORITY\SELF" } |
-                ForEach-Object {
-                    $r   = Resolve-Recipient $_.User
-                    $key = "$MailboxSMTP|$(if ($r) { $r.PrimarySmtpAddress } else { $_.User })|FullAccess"
-                    if ($SeenKeys.Add($key)) {
-                        $Results.Add([PSCustomObject]@{
-                            DisplayName                = $mbx.DisplayName
-                            UserPrincipalName          = $MailboxSMTP
-                            MailboxType                = $MailboxType
-                            MailboxExchangeGuid        = $MailboxExchangeGuid
-                            AccessType                 = "FullAccess"
-                            UserWithAccess             = if ($r) { $r.PrimarySmtpAddress }   else { $_.User }
-                            UserWithAccessType         = if ($r) { $r.RecipientTypeDetails } else { "Unknown/External" }
-                            UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }         else { $null }
-                        })
-                    }
-                }
+                ForEach-Object { Resolve-AndAdd $_.User 'FullAccess' }
         }
 
         if ($SendAs) {
             Get-RecipientPermission -Identity $mbx.Identity -ErrorAction SilentlyContinue |
                 Where-Object { $_.Trustee -ne "NT AUTHORITY\SELF" } |
-                ForEach-Object {
-                    $r   = Resolve-Recipient $_.Trustee
-                    $key = "$MailboxSMTP|$(if ($r) { $r.PrimarySmtpAddress } else { $_.Trustee })|SendAs"
-                    if ($SeenKeys.Add($key)) {
-                        $Results.Add([PSCustomObject]@{
-                            DisplayName                = $mbx.DisplayName
-                            UserPrincipalName          = $MailboxSMTP
-                            MailboxType                = $MailboxType
-                            MailboxExchangeGuid        = $MailboxExchangeGuid
-                            AccessType                 = "SendAs"
-                            UserWithAccess             = if ($r) { $r.PrimarySmtpAddress }   else { $_.Trustee }
-                            UserWithAccessType         = if ($r) { $r.RecipientTypeDetails } else { "Unknown/External" }
-                            UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }         else { $null }
-                        })
-                    }
-                }
+                ForEach-Object { Resolve-AndAdd $_.Trustee 'SendAs' }
         }
 
         if ($SendOnBehalf) {
             foreach ($delegate in $mbx.GrantSendOnBehalfTo) {
-                $r   = Resolve-Recipient $delegate
-                $key = "$MailboxSMTP|$(if ($r) { $r.PrimarySmtpAddress } else { $delegate })|SendOnBehalf"
-                if ($SeenKeys.Add($key)) {
-                    $Results.Add([PSCustomObject]@{
-                        DisplayName                = $mbx.DisplayName
-                        UserPrincipalName          = $MailboxSMTP
-                        MailboxType                = $MailboxType
-                        MailboxExchangeGuid        = $MailboxExchangeGuid
-                        AccessType                 = "SendOnBehalf"
-                        UserWithAccess             = if ($r) { $r.PrimarySmtpAddress }   else { $delegate }
-                        UserWithAccessType         = if ($r) { $r.RecipientTypeDetails } else { "Unknown/External" }
-                        UserWithAccessExchangeGuid = if ($r) { $r.ExchangeGuid }         else { $null }
-                    })
-                }
+                Resolve-AndAdd $delegate 'SendOnBehalf'
             }
         }
     }
@@ -2942,6 +2966,637 @@ NOTES
     } else {
         $Results
     }
+}
+
+function Invoke-FrankensteinPermissionMigrator {
+    [CmdletBinding()]
+    Param ([Switch]$Help)
+
+    if ($Help) {
+        Write-Host @"
+SYNOPSIS
+    GUI-driven delegate permission migration for Exchange Online tenant-to-tenant cutovers.
+
+DESCRIPTION
+    Launches a WinForms interface that drives the full permission migration workflow:
+      1. Load a Source-to-Target identity mapping CSV (mailboxes, delegates, DLs all in one file)
+      2. Connect to the source tenant and pull FullAccess, SendAs, and SendOnBehalf permissions live
+      3. Connect to the target tenant and apply permissions using the mapping
+      4. Export a timestamped log CSV showing Success, Skipped, AlreadyExists, and Failed results
+
+    DL delegates can be resolved to their individual members at read-time, with optional
+    recursive expansion of nested DLs. If a DL maps cleanly through the mapping file it is
+    applied as-is; expansion is only used when -ResolveDLs is chosen in the GUI.
+
+    The mapping CSV must have Source and Target columns. All identities -- mailboxes, delegates,
+    and groups -- should appear in the same file. Any identity not in the mapping is logged as Skipped.
+
+USAGE
+    Invoke-FrankensteinPermissionMigrator
+    Invoke-FrankensteinPermissionMigrator -Help
+
+NOTES
+    Author: Eric D. Frank
+    Requires ExchangeOnlineManagement module.
+"@
+        return
+    }
+
+    if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+        Write-Host "ExchangeOnlineManagement module not found." -ForegroundColor Red
+        Write-Host "Install with: Install-Module ExchangeOnlineManagement -Scope CurrentUser" -ForegroundColor Yellow
+        return
+    }
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    $script:PMSourceConnected = $false
+    $script:PMTargetConnected = $false
+    $script:PMSourceData      = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $script:PMMappingTable    = @{}   # source.ToLower() -> target
+    $script:PMResultLog       = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    #region ---- Helpers ----
+
+    function Write-PMLog {
+        Param ([string]$Message, [System.Drawing.Color]$Color = [System.Drawing.Color]::Silver)
+        $rtbLog.SelectionStart  = $rtbLog.TextLength
+        $rtbLog.SelectionLength = 0
+        $rtbLog.SelectionColor  = $Color
+        $rtbLog.AppendText("$(Get-Date -Format 'HH:mm:ss')  $Message`n")
+        $rtbLog.ScrollToCaret()
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    function Set-PMStatusLabel {
+        Param ($Label, [string]$Text, [System.Drawing.Color]$Color)
+        $Label.Text      = $Text
+        $Label.ForeColor = $Color
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    function Collect-PMSourcePermissions {
+        Param ([string[]]$MailboxList)
+        $script:PMSourceData.Clear()
+        $total   = $MailboxList.Count
+        $idx     = 0
+        $dlTypes = @('MailUniversalDistributionGroup','MailUniversalSecurityGroup')
+
+        foreach ($mbxSmtp in $MailboxList) {
+            $idx++
+            Write-PMLog "  [$idx/$total] $mbxSmtp" ([System.Drawing.Color]::DimGray)
+
+            function Add-PMRecord ([string]$delegate, [string]$type, [string]$expandedFrom) {
+                $script:PMSourceData.Add([PSCustomObject]@{
+                    Mailbox        = $mbxSmtp
+                    Delegate       = $delegate
+                    PermissionType = $type
+                    ExpandedFrom   = $expandedFrom
+                })
+            }
+
+            function Resolve-PMDelegate ([string]$rawId, [string]$permType) {
+                $r = Get-Recipient -Identity $rawId -ErrorAction SilentlyContinue
+                if (-not $r) { return }
+                $smtp = $r.PrimarySmtpAddress
+                if ($r.RecipientTypeDetails -in $dlTypes -and $chkResolveDLs.Checked) {
+                    $members = @(Expand-FrankensteinDLMembers -Identity $smtp -Recurse:($chkNestedDLs.Checked))
+                    if ($members.Count) {
+                        Write-PMLog "    DL '$smtp' -> $($members.Count) member(s)" ([System.Drawing.Color]::DarkCyan)
+                        foreach ($m in $members) { Add-PMRecord $m.PrimarySmtpAddress $permType $smtp }
+                    }
+                } else {
+                    Add-PMRecord $smtp $permType ''
+                }
+            }
+
+            if ($chkFullAccess.Checked) {
+                @(Get-MailboxPermission -Identity $mbxSmtp -ErrorAction SilentlyContinue) |
+                    Where-Object { -not $_.IsInherited -and $_.User -notlike 'NT AUTHORITY\SELF' } |
+                    ForEach-Object { Resolve-PMDelegate $_.User 'FullAccess' }
+            }
+            if ($chkSendAs.Checked) {
+                @(Get-RecipientPermission -Identity $mbxSmtp -ErrorAction SilentlyContinue) |
+                    Where-Object { $_.Trustee -ne 'NT AUTHORITY\SELF' } |
+                    ForEach-Object { Resolve-PMDelegate $_.Trustee 'SendAs' }
+            }
+            if ($chkSendOnBehalf.Checked) {
+                $mbxObj = Get-Mailbox -Identity $mbxSmtp -ErrorAction SilentlyContinue
+                if ($mbxObj) {
+                    foreach ($g in $mbxObj.GrantSendOnBehalfTo) { Resolve-PMDelegate $g 'SendOnBehalf' }
+                }
+            }
+        }
+        Write-PMLog "Source read complete: $($script:PMSourceData.Count) permission record(s) collected." ([System.Drawing.Color]::LimeGreen)
+    }
+
+    function Apply-PMTargetPermissions {
+        $script:PMResultLog.Clear()
+        $sobByMailbox = @{}
+
+        foreach ($perm in $script:PMSourceData) {
+            $mbxTarget = $script:PMMappingTable[$perm.Mailbox.ToLower()]
+            $delTarget = $script:PMMappingTable[$perm.Delegate.ToLower()]
+
+            $log = [ordered]@{
+                SourceMailbox  = $perm.Mailbox
+                TargetMailbox  = if ($mbxTarget) { $mbxTarget } else { 'NOT MAPPED' }
+                SourceDelegate = $perm.Delegate
+                TargetDelegate = if ($delTarget) { $delTarget } else { 'NOT MAPPED' }
+                PermissionType = $perm.PermissionType
+                ExpandedFrom   = $perm.ExpandedFrom
+                Status         = ''
+                Details        = ''
+                Timestamp      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            }
+
+            if (-not $mbxTarget) {
+                $log.Status = 'Skipped'; $log.Details = 'Mailbox not in mapping'
+                Write-PMLog "  SKIP  [$($perm.PermissionType)] Mailbox not mapped: $($perm.Mailbox)" ([System.Drawing.Color]::DarkGoldenrod)
+                $script:PMResultLog.Add([PSCustomObject]$log); continue
+            }
+            if (-not $delTarget) {
+                $log.Status = 'Skipped'; $log.Details = 'Delegate not in mapping'
+                Write-PMLog "  SKIP  [$($perm.PermissionType)] Delegate not mapped: $($perm.Delegate)" ([System.Drawing.Color]::DarkGoldenrod)
+                $script:PMResultLog.Add([PSCustomObject]$log); continue
+            }
+
+            try {
+                switch ($perm.PermissionType) {
+                    'FullAccess' {
+                        Add-MailboxPermission -Identity $mbxTarget -User $delTarget -AccessRights FullAccess `
+                            -InheritanceType All -AutoMapping $false -ErrorAction Stop | Out-Null
+                        $log.Status = 'Success'; $log.Details = 'FullAccess granted'
+                        Write-PMLog "  OK    [FullAccess] $delTarget -> $mbxTarget" ([System.Drawing.Color]::LimeGreen)
+                    }
+                    'SendAs' {
+                        Add-RecipientPermission -Identity $mbxTarget -Trustee $delTarget `
+                            -AccessRights SendAs -Confirm:$false -ErrorAction Stop | Out-Null
+                        $log.Status = 'Success'; $log.Details = 'SendAs granted'
+                        Write-PMLog "  OK    [SendAs] $delTarget -> $mbxTarget" ([System.Drawing.Color]::LimeGreen)
+                    }
+                    'SendOnBehalf' {
+                        if (-not $sobByMailbox[$mbxTarget]) {
+                            $sobByMailbox[$mbxTarget] = [System.Collections.Generic.List[string]]::new()
+                        }
+                        $sobByMailbox[$mbxTarget].Add($delTarget)
+                        $log.Status = 'Queued'; $log.Details = 'SendOnBehalf queued for bulk apply'
+                        Write-PMLog "  QUE   [SendOnBehalf] $delTarget -> $mbxTarget" ([System.Drawing.Color]::DimGray)
+                    }
+                }
+            } catch {
+                $err = $_.Exception.Message
+                if ($err -match 'already|exists|present') {
+                    $log.Status = 'AlreadyExists'; $log.Details = 'Permission already present'
+                    Write-PMLog "  DUP   [$($perm.PermissionType)] Already exists: $delTarget -> $mbxTarget" ([System.Drawing.Color]::SteelBlue)
+                } else {
+                    $log.Status = 'Failed'; $log.Details = $err
+                    Write-PMLog "  ERR   [$($perm.PermissionType)] $err" ([System.Drawing.Color]::Tomato)
+                }
+            }
+            $script:PMResultLog.Add([PSCustomObject]$log)
+        }
+
+        foreach ($mbxTarget in $sobByMailbox.Keys) {
+            try {
+                Set-Mailbox -Identity $mbxTarget -GrantSendOnBehalfTo @{Add = $sobByMailbox[$mbxTarget].ToArray()} -ErrorAction Stop
+                Write-PMLog "  OK    [SendOnBehalf] Applied to $mbxTarget ($($sobByMailbox[$mbxTarget].Count) delegate(s))" ([System.Drawing.Color]::LimeGreen)
+                $script:PMResultLog | Where-Object { $_.TargetMailbox -eq $mbxTarget -and $_.PermissionType -eq 'SendOnBehalf' -and $_.Status -eq 'Queued' } |
+                    ForEach-Object { $_.Status = 'Success'; $_.Details = 'SendOnBehalf granted' }
+            } catch {
+                $err = $_.Exception.Message
+                Write-PMLog "  ERR   [SendOnBehalf] Failed on $mbxTarget`: $err" ([System.Drawing.Color]::Tomato)
+                $script:PMResultLog | Where-Object { $_.TargetMailbox -eq $mbxTarget -and $_.PermissionType -eq 'SendOnBehalf' -and $_.Status -eq 'Queued' } |
+                    ForEach-Object { $_.Status = 'Failed'; $_.Details = $err }
+            }
+        }
+    }
+
+    #endregion
+
+    #region ---- Build Form ----
+
+    $form                 = New-Object System.Windows.Forms.Form
+    $form.Text            = "Frankenstein - Permission Migrator"
+    $form.ClientSize      = New-Object System.Drawing.Size(700, 756)
+    $form.StartPosition   = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedSingle'
+    $form.MaximizeBox     = $false
+    $form.Font            = New-Object System.Drawing.Font("Segoe UI", 9)
+    $form.BackColor       = [System.Drawing.Color]::FromArgb(245, 245, 248)
+
+    $lblHeader           = New-Object System.Windows.Forms.Label
+    $lblHeader.Text      = "Frankenstein - Permission Migrator"
+    $lblHeader.Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
+    $lblHeader.ForeColor = [System.Drawing.Color]::FromArgb(28, 28, 72)
+    $lblHeader.Location  = New-Object System.Drawing.Point(14, 12)
+    $lblHeader.Size      = New-Object System.Drawing.Size(660, 28)
+    $form.Controls.Add($lblHeader)
+
+    # --- 1. Identity Mapping ---
+    $grpMap           = New-Object System.Windows.Forms.GroupBox
+    $grpMap.Text      = "1. Identity Mapping CSV  (Source + Target columns — mailboxes, delegates, and groups)"
+    $grpMap.Location  = New-Object System.Drawing.Point(12, 46)
+    $grpMap.Size      = New-Object System.Drawing.Size(676, 66)
+    $form.Controls.Add($grpMap)
+
+    $btnBrowseMap           = New-Object System.Windows.Forms.Button
+    $btnBrowseMap.Text      = "Browse..."
+    $btnBrowseMap.Location  = New-Object System.Drawing.Point(580, 18)
+    $btnBrowseMap.Size      = New-Object System.Drawing.Size(84, 26)
+    $grpMap.Controls.Add($btnBrowseMap)
+
+    $lblMapPath             = New-Object System.Windows.Forms.Label
+    $lblMapPath.Text        = "No file loaded"
+    $lblMapPath.ForeColor   = [System.Drawing.Color]::Gray
+    $lblMapPath.Location    = New-Object System.Drawing.Point(10, 22)
+    $lblMapPath.Size        = New-Object System.Drawing.Size(560, 18)
+    $grpMap.Controls.Add($lblMapPath)
+
+    $lblMapCount            = New-Object System.Windows.Forms.Label
+    $lblMapCount.Text       = ""
+    $lblMapCount.ForeColor  = [System.Drawing.Color]::DarkGreen
+    $lblMapCount.Location   = New-Object System.Drawing.Point(10, 42)
+    $lblMapCount.Size       = New-Object System.Drawing.Size(560, 16)
+    $grpMap.Controls.Add($lblMapCount)
+
+    # --- 2. Connections ---
+    $grpConn           = New-Object System.Windows.Forms.GroupBox
+    $grpConn.Text      = "2. Connections"
+    $grpConn.Location  = New-Object System.Drawing.Point(12, 120)
+    $grpConn.Size      = New-Object System.Drawing.Size(676, 100)
+    $form.Controls.Add($grpConn)
+
+    $btnConnSrc              = New-Object System.Windows.Forms.Button
+    $btnConnSrc.Text         = "Connect + Read Source"
+    $btnConnSrc.Location     = New-Object System.Drawing.Point(10, 24)
+    $btnConnSrc.Size         = New-Object System.Drawing.Size(168, 30)
+    $grpConn.Controls.Add($btnConnSrc)
+
+    $lblSrcStatus            = New-Object System.Windows.Forms.Label
+    $lblSrcStatus.Text       = "Not connected"
+    $lblSrcStatus.ForeColor  = [System.Drawing.Color]::Gray
+    $lblSrcStatus.Location   = New-Object System.Drawing.Point(188, 30)
+    $lblSrcStatus.Size       = New-Object System.Drawing.Size(476, 18)
+    $grpConn.Controls.Add($lblSrcStatus)
+
+    $btnConnTgt              = New-Object System.Windows.Forms.Button
+    $btnConnTgt.Text         = "Connect to Target"
+    $btnConnTgt.Location     = New-Object System.Drawing.Point(10, 62)
+    $btnConnTgt.Size         = New-Object System.Drawing.Size(168, 30)
+    $btnConnTgt.Enabled      = $false
+    $grpConn.Controls.Add($btnConnTgt)
+
+    $lblTgtStatus            = New-Object System.Windows.Forms.Label
+    $lblTgtStatus.Text       = "Connect source first"
+    $lblTgtStatus.ForeColor  = [System.Drawing.Color]::Gray
+    $lblTgtStatus.Location   = New-Object System.Drawing.Point(188, 68)
+    $lblTgtStatus.Size       = New-Object System.Drawing.Size(476, 18)
+    $grpConn.Controls.Add($lblTgtStatus)
+
+    # --- 3. Scope ---
+    $grpScope           = New-Object System.Windows.Forms.GroupBox
+    $grpScope.Text      = "3. Scope"
+    $grpScope.Location  = New-Object System.Drawing.Point(12, 228)
+    $grpScope.Size      = New-Object System.Drawing.Size(676, 72)
+    $form.Controls.Add($grpScope)
+
+    $radAll                  = New-Object System.Windows.Forms.RadioButton
+    $radAll.Text             = "All source identities in mapping CSV"
+    $radAll.Checked          = $true
+    $radAll.Location         = New-Object System.Drawing.Point(10, 22)
+    $radAll.Size             = New-Object System.Drawing.Size(260, 22)
+    $grpScope.Controls.Add($radAll)
+
+    $radSingle               = New-Object System.Windows.Forms.RadioButton
+    $radSingle.Text          = "Single mailbox:"
+    $radSingle.Location      = New-Object System.Drawing.Point(10, 48)
+    $radSingle.Size          = New-Object System.Drawing.Size(120, 22)
+    $grpScope.Controls.Add($radSingle)
+
+    $txtSingleMbx            = New-Object System.Windows.Forms.TextBox
+    $txtSingleMbx.Location   = New-Object System.Drawing.Point(136, 46)
+    $txtSingleMbx.Size       = New-Object System.Drawing.Size(524, 22)
+    $txtSingleMbx.Enabled    = $false
+    $txtSingleMbx.ForeColor  = [System.Drawing.Color]::Gray
+    $txtSingleMbx.Text       = "source@domain.com"
+    $grpScope.Controls.Add($txtSingleMbx)
+
+    # --- 4. Permission Types ---
+    $grpPerms           = New-Object System.Windows.Forms.GroupBox
+    $grpPerms.Text      = "4. Permission Types"
+    $grpPerms.Location  = New-Object System.Drawing.Point(12, 308)
+    $grpPerms.Size      = New-Object System.Drawing.Size(676, 56)
+    $form.Controls.Add($grpPerms)
+
+    $chkFullAccess            = New-Object System.Windows.Forms.CheckBox
+    $chkFullAccess.Text       = "Full Access"
+    $chkFullAccess.Checked    = $true
+    $chkFullAccess.Location   = New-Object System.Drawing.Point(10, 22)
+    $chkFullAccess.Size       = New-Object System.Drawing.Size(120, 22)
+    $grpPerms.Controls.Add($chkFullAccess)
+
+    $chkSendAs                = New-Object System.Windows.Forms.CheckBox
+    $chkSendAs.Text           = "Send As"
+    $chkSendAs.Checked        = $true
+    $chkSendAs.Location       = New-Object System.Drawing.Point(220, 22)
+    $chkSendAs.Size           = New-Object System.Drawing.Size(120, 22)
+    $grpPerms.Controls.Add($chkSendAs)
+
+    $chkSendOnBehalf          = New-Object System.Windows.Forms.CheckBox
+    $chkSendOnBehalf.Text     = "Send on Behalf"
+    $chkSendOnBehalf.Checked  = $true
+    $chkSendOnBehalf.Location = New-Object System.Drawing.Point(430, 22)
+    $chkSendOnBehalf.Size     = New-Object System.Drawing.Size(160, 22)
+    $grpPerms.Controls.Add($chkSendOnBehalf)
+
+    # --- 5. Options ---
+    $grpOpts           = New-Object System.Windows.Forms.GroupBox
+    $grpOpts.Text      = "5. Options"
+    $grpOpts.Location  = New-Object System.Drawing.Point(12, 372)
+    $grpOpts.Size      = New-Object System.Drawing.Size(676, 90)
+    $form.Controls.Add($grpOpts)
+
+    $chkResolveDLs            = New-Object System.Windows.Forms.CheckBox
+    $chkResolveDLs.Text       = "Resolve DL delegates to members"
+    $chkResolveDLs.Checked    = $true
+    $chkResolveDLs.Location   = New-Object System.Drawing.Point(10, 22)
+    $chkResolveDLs.Size       = New-Object System.Drawing.Size(240, 22)
+    $grpOpts.Controls.Add($chkResolveDLs)
+
+    $chkNestedDLs             = New-Object System.Windows.Forms.CheckBox
+    $chkNestedDLs.Text        = "Recurse nested DLs"
+    $chkNestedDLs.Checked     = $true
+    $chkNestedDLs.Location    = New-Object System.Drawing.Point(264, 22)
+    $chkNestedDLs.Size        = New-Object System.Drawing.Size(180, 22)
+    $grpOpts.Controls.Add($chkNestedDLs)
+
+    $lblOutPath               = New-Object System.Windows.Forms.Label
+    $lblOutPath.Text          = "Log output path:"
+    $lblOutPath.Location      = New-Object System.Drawing.Point(10, 58)
+    $lblOutPath.Size          = New-Object System.Drawing.Size(112, 22)
+    $grpOpts.Controls.Add($lblOutPath)
+
+    $txtOutPath               = New-Object System.Windows.Forms.TextBox
+    $txtOutPath.Text          = (Get-Location).Path
+    $txtOutPath.Location      = New-Object System.Drawing.Point(126, 56)
+    $txtOutPath.Size          = New-Object System.Drawing.Size(434, 22)
+    $grpOpts.Controls.Add($txtOutPath)
+
+    $btnBrowseOut             = New-Object System.Windows.Forms.Button
+    $btnBrowseOut.Text        = "Browse..."
+    $btnBrowseOut.Location    = New-Object System.Drawing.Point(570, 54)
+    $btnBrowseOut.Size        = New-Object System.Drawing.Size(94, 26)
+    $grpOpts.Controls.Add($btnBrowseOut)
+
+    # --- Action Buttons ---
+    $btnPreview               = New-Object System.Windows.Forms.Button
+    $btnPreview.Text          = "Preview"
+    $btnPreview.Location      = New-Object System.Drawing.Point(12, 472)
+    $btnPreview.Size          = New-Object System.Drawing.Size(130, 34)
+    $btnPreview.Enabled       = $false
+    $form.Controls.Add($btnPreview)
+
+    $btnRun                   = New-Object System.Windows.Forms.Button
+    $btnRun.Text              = "Run Migration"
+    $btnRun.Location          = New-Object System.Drawing.Point(260, 472)
+    $btnRun.Size              = New-Object System.Drawing.Size(180, 34)
+    $btnRun.BackColor         = [System.Drawing.Color]::FromArgb(0, 120, 212)
+    $btnRun.ForeColor         = [System.Drawing.Color]::White
+    $btnRun.FlatStyle         = 'Flat'
+    $btnRun.Enabled           = $false
+    $form.Controls.Add($btnRun)
+
+    $btnExportLog             = New-Object System.Windows.Forms.Button
+    $btnExportLog.Text        = "Export Log"
+    $btnExportLog.Location    = New-Object System.Drawing.Point(558, 472)
+    $btnExportLog.Size        = New-Object System.Drawing.Size(130, 34)
+    $btnExportLog.Enabled     = $false
+    $form.Controls.Add($btnExportLog)
+
+    # --- Status Log ---
+    $grpLog           = New-Object System.Windows.Forms.GroupBox
+    $grpLog.Text      = "Status Log"
+    $grpLog.Location  = New-Object System.Drawing.Point(12, 516)
+    $grpLog.Size      = New-Object System.Drawing.Size(676, 232)
+    $form.Controls.Add($grpLog)
+
+    $rtbLog                   = New-Object System.Windows.Forms.RichTextBox
+    $rtbLog.Location          = New-Object System.Drawing.Point(8, 18)
+    $rtbLog.Size              = New-Object System.Drawing.Size(660, 206)
+    $rtbLog.ReadOnly          = $true
+    $rtbLog.BackColor         = [System.Drawing.Color]::FromArgb(18, 18, 28)
+    $rtbLog.ForeColor         = [System.Drawing.Color]::Silver
+    $rtbLog.Font              = New-Object System.Drawing.Font("Consolas", 8.5)
+    $rtbLog.ScrollBars        = 'Vertical'
+    $rtbLog.BorderStyle       = 'None'
+    $grpLog.Controls.Add($rtbLog)
+
+    #endregion
+
+    #region ---- Event Handlers ----
+
+    # Radio buttons
+    $radSingle.Add_CheckedChanged({
+        $txtSingleMbx.Enabled = $radSingle.Checked
+        if ($radSingle.Checked) {
+            if ($txtSingleMbx.Text -eq 'source@domain.com') { $txtSingleMbx.Text = ''; $txtSingleMbx.ForeColor = [System.Drawing.Color]::Black }
+        }
+    })
+    $radAll.Add_CheckedChanged({
+        $txtSingleMbx.Enabled = -not $radAll.Checked
+    })
+
+    # DL checkbox dependency
+    $chkResolveDLs.Add_CheckedChanged({ $chkNestedDLs.Enabled = $chkResolveDLs.Checked })
+
+    # Browse mapping CSV
+    $btnBrowseMap.Add_Click({
+        $dlg        = New-Object System.Windows.Forms.OpenFileDialog
+        $dlg.Title  = "Select Source-to-Target Identity Mapping CSV"
+        $dlg.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+        if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+
+        $rows = Import-Csv $dlg.FileName
+        if (-not ($rows | Get-Member -Name 'Source') -or -not ($rows | Get-Member -Name 'Target')) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "CSV is missing required columns.`n`nRequired: Source, Target",
+                "Invalid CSV", 'OK', 'Error') | Out-Null
+            return
+        }
+        $script:PMMappingTable = @{}
+        foreach ($row in $rows) {
+            if ($row.Source -and $row.Target) {
+                $script:PMMappingTable[$row.Source.Trim().ToLower()] = $row.Target.Trim()
+            }
+        }
+        $lblMapPath.Text      = $dlg.FileName
+        $lblMapPath.ForeColor = [System.Drawing.Color]::DarkGreen
+        $lblMapCount.Text     = "$($script:PMMappingTable.Count) identities loaded"
+        Write-PMLog "Mapping CSV loaded: $($script:PMMappingTable.Count) entries" ([System.Drawing.Color]::LimeGreen)
+    })
+
+    # Browse output folder
+    $btnBrowseOut.Add_Click({
+        $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dlg.Description = "Select log output folder"
+        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $txtOutPath.Text = $dlg.SelectedPath
+        }
+    })
+
+    # Connect + Read Source
+    $btnConnSrc.Add_Click({
+        if (-not $script:PMMappingTable.Count) {
+            [System.Windows.Forms.MessageBox]::Show("Load the identity mapping CSV first.", "No Mapping Loaded", 'OK', 'Warning') | Out-Null
+            return
+        }
+        if (-not $chkFullAccess.Checked -and -not $chkSendAs.Checked -and -not $chkSendOnBehalf.Checked) {
+            [System.Windows.Forms.MessageBox]::Show("Select at least one permission type.", "No Permission Types", 'OK', 'Warning') | Out-Null
+            return
+        }
+
+        $mailboxList = if ($radSingle.Checked) {
+            $addr = $txtSingleMbx.Text.Trim()
+            if (-not $addr -or $addr -eq 'source@domain.com') {
+                [System.Windows.Forms.MessageBox]::Show("Enter a source mailbox SMTP address.", "No Address", 'OK', 'Warning') | Out-Null
+                return
+            }
+            if (-not $script:PMMappingTable[$addr.ToLower()]) {
+                Write-PMLog "Warning: '$addr' is not in the mapping file. Permissions will be collected but cannot be applied." ([System.Drawing.Color]::DarkGoldenrod)
+            }
+            @($addr)
+        } else {
+            @($script:PMMappingTable.Keys)
+        }
+
+        Set-PMStatusLabel $lblSrcStatus "Connecting..." ([System.Drawing.Color]::DarkGoldenrod)
+        $form.UseWaitCursor = $true
+        $btnConnSrc.Enabled = $false
+
+        try {
+            Write-PMLog "Connecting to source tenant..." ([System.Drawing.Color]::Silver)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            $script:PMSourceConnected = $true
+            Set-PMStatusLabel $lblSrcStatus "Connected. Reading $($mailboxList.Count) mailbox(es)..." ([System.Drawing.Color]::DarkOrange)
+            Write-PMLog "Source connected. Collecting permissions..." ([System.Drawing.Color]::LimeGreen)
+
+            Collect-PMSourcePermissions -MailboxList $mailboxList
+
+            Set-PMStatusLabel $lblSrcStatus "Connected - $($script:PMSourceData.Count) record(s) read" ([System.Drawing.Color]::DarkGreen)
+            $btnConnTgt.Enabled  = $true
+            $btnPreview.Enabled  = $true
+            $lblTgtStatus.Text   = "Ready to connect"
+            $lblTgtStatus.ForeColor = [System.Drawing.Color]::Gray
+        } catch {
+            Set-PMStatusLabel $lblSrcStatus "Connection failed" ([System.Drawing.Color]::Tomato)
+            Write-PMLog "ERROR: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally {
+            $form.UseWaitCursor = $false
+            $btnConnSrc.Enabled = $true
+        }
+    })
+
+    # Connect Target
+    $btnConnTgt.Add_Click({
+        Set-PMStatusLabel $lblTgtStatus "Connecting..." ([System.Drawing.Color]::DarkGoldenrod)
+        $form.UseWaitCursor = $true
+        $btnConnTgt.Enabled = $false
+
+        try {
+            Write-PMLog "Connecting to target tenant..." ([System.Drawing.Color]::Silver)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            $script:PMTargetConnected = $true
+            Set-PMStatusLabel $lblTgtStatus "Connected - ready to migrate" ([System.Drawing.Color]::DarkGreen)
+            Write-PMLog "Target connected. Run Migration is now available." ([System.Drawing.Color]::LimeGreen)
+            $btnRun.Enabled = $true
+        } catch {
+            Set-PMStatusLabel $lblTgtStatus "Connection failed" ([System.Drawing.Color]::Tomato)
+            Write-PMLog "ERROR: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally {
+            $form.UseWaitCursor = $false
+            $btnConnTgt.Enabled = $true
+        }
+    })
+
+    # Preview
+    $btnPreview.Add_Click({
+        if (-not $script:PMSourceData.Count) {
+            Write-PMLog "No source data. Connect to source first." ([System.Drawing.Color]::DarkGoldenrod)
+            return
+        }
+        Write-PMLog "---- PREVIEW ($($script:PMSourceData.Count) records) ----" ([System.Drawing.Color]::CornflowerBlue)
+        $wouldApply = 0; $wouldSkip = 0
+        foreach ($perm in $script:PMSourceData) {
+            $mbxT = $script:PMMappingTable[$perm.Mailbox.ToLower()]
+            $delT = $script:PMMappingTable[$perm.Delegate.ToLower()]
+            if ($mbxT -and $delT) {
+                Write-PMLog "  APPLY [$($perm.PermissionType)] $delT -> $mbxT" ([System.Drawing.Color]::LimeGreen)
+                $wouldApply++
+            } else {
+                $miss = if (-not $mbxT) { "mailbox '$($perm.Mailbox)'" } else { "delegate '$($perm.Delegate)'" }
+                Write-PMLog "  SKIP  [$($perm.PermissionType)] No mapping for $miss" ([System.Drawing.Color]::DarkGoldenrod)
+                $wouldSkip++
+            }
+        }
+        Write-PMLog "---- Preview: $wouldApply would apply, $wouldSkip would skip ----" ([System.Drawing.Color]::CornflowerBlue)
+    })
+
+    # Run Migration
+    $btnRun.Add_Click({
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Apply $($script:PMSourceData.Count) permission record(s) to the target tenant?`n`nThis will set permissions on target mailboxes.",
+            "Confirm Migration",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+
+        $btnRun.Enabled = $false
+        $form.UseWaitCursor = $true
+        Write-PMLog "---- MIGRATION STARTED ($($script:PMSourceData.Count) records) ----" ([System.Drawing.Color]::CornflowerBlue)
+
+        try {
+            Apply-PMTargetPermissions
+
+            $cSuccess  = @($script:PMResultLog | Where-Object { $_.Status -eq 'Success' }).Count
+            $cSkipped  = @($script:PMResultLog | Where-Object { $_.Status -eq 'Skipped' }).Count
+            $cDupe     = @($script:PMResultLog | Where-Object { $_.Status -eq 'AlreadyExists' }).Count
+            $cFailed   = @($script:PMResultLog | Where-Object { $_.Status -eq 'Failed' }).Count
+            Write-PMLog "---- COMPLETE: $cSuccess applied | $cSkipped skipped | $cDupe already existed | $cFailed failed ----" ([System.Drawing.Color]::CornflowerBlue)
+            $btnExportLog.Enabled = $true
+        } catch {
+            Write-PMLog "FATAL: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally {
+            $btnRun.Enabled = $true
+            $form.UseWaitCursor = $false
+        }
+    })
+
+    # Export Log
+    $btnExportLog.Add_Click({
+        $outPath = $txtOutPath.Text.Trim()
+        if (-not (Test-Path $outPath)) {
+            Write-PMLog "Output path not found: $outPath" ([System.Drawing.Color]::Tomato)
+            return
+        }
+        $file = Join-Path $outPath "PermissionMigrationLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+        try {
+            $script:PMResultLog | Export-Csv $file -NoTypeInformation -Encoding UTF8
+            Write-PMLog "Log exported: $file" ([System.Drawing.Color]::LimeGreen)
+        } catch {
+            Write-PMLog "Export failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        }
+    })
+
+    #endregion
+
+    Write-PMLog "Ready. Load a mapping CSV, then click 'Connect + Read Source'." ([System.Drawing.Color]::Silver)
+    Write-PMLog "Note: Source connection reads permissions into memory. You then re-authenticate to the target." ([System.Drawing.Color]::DimGray)
+
+    $form.ShowDialog() | Out-Null
+    $form.Dispose()
 }
 
 function Set-FrankensteinPSWindowTitle {

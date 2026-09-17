@@ -3932,6 +3932,12 @@ function Invoke-FrankensteinDLMigrator {
         $copyRejectFrom   = $chkPropRejectFrom.Checked
 
         $tgtManagedBy    = if ($copyManagedBy)    { Map-ListToTarget $Meta.ManagedBy }       else { @() }
+        if ($copyManagedBy -and $Meta.ManagedBy.Count) {
+            $unmapped = @($Meta.ManagedBy | Where-Object { $_ -and -not $script:DLMappingTable.ContainsKey($_.ToLower()) })
+            foreach ($u in $unmapped) {
+                Write-DLLog "    WARNING: Owner '$u' not in mapping CSV -- skipped (add a user row for this address to copy it)" ([System.Drawing.Color]::DarkGoldenrod)
+            }
+        }
         if ($copyManagedBy -and $DefaultOwner -and $tgtManagedBy -notcontains $DefaultOwner) { $tgtManagedBy += $DefaultOwner }
         $tgtModBy        = if ($copyModeration)   { Map-ListToTarget $Meta.ModeratedBy }     else { @() }
         $tgtSendOnBehalf = if ($copySendOnBehalf) { Map-ListToTarget $Meta.GrantSendOnBehalf } else { @() }

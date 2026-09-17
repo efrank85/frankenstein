@@ -3946,7 +3946,8 @@ function Invoke-FrankensteinDLMigrator {
                 Write-DLLog "    WARNING: Owner '$u' not in mapping CSV -- skipped (add a user row for this address to copy it)" ([System.Drawing.Color]::DarkGoldenrod)
             }
         }
-        if ($copyManagedBy -and $DefaultOwner -and $tgtManagedBy -notcontains $DefaultOwner) { $tgtManagedBy += $DefaultOwner }
+        if ($DefaultOwner -and $tgtManagedBy -notcontains $DefaultOwner) { $tgtManagedBy += $DefaultOwner }
+        Write-DLLog "    Owners mapped: $($tgtManagedBy -join ', ')$(if (-not $tgtManagedBy.Count) { ' (none)' })" ([System.Drawing.Color]::DimGray)
         $tgtModBy        = if ($copyModeration)   { Map-ListToTarget $Meta.ModeratedBy }     else { @() }
         $tgtSendOnBehalf = if ($copySendOnBehalf) { Map-ListToTarget $Meta.GrantSendOnBehalf } else { @() }
         $tgtAcceptFrom   = if ($copyAcceptFrom)   { Map-ListToTarget $Meta.AcceptFrom }      else { @() }
@@ -4001,12 +4002,23 @@ function Invoke-FrankensteinDLMigrator {
 
         function Resolve-ToSmtp ([string]$identity) {
             if (-not $identity) { return $null }
+            # Strip smtp:/SMTP: prefix if the value comes back that way
+            if ($identity -match '^smtp:(.+)$') { $identity = $Matches[1] }
             $r = Get-Recipient -Identity $identity -ErrorAction SilentlyContinue
-            if ($r) { return $r.PrimarySmtpAddress } else { return $null }
+            if ($r) { return [string]$r.PrimarySmtpAddress }
+            # If Get-Recipient failed but the string is already an email, keep it as-is so
+            # Map-ListToTarget can still look it up against the proxy index
+            if ($identity -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') { return $identity }
+            return $null
         }
 
         function Get-SmtpList ([object[]]$identities) {
-            @($identities | Where-Object { $_ } | ForEach-Object { Resolve-ToSmtp "$_" } | Where-Object { $_ })
+            @($identities | Where-Object { $_ } | ForEach-Object {
+                $raw = "$_"
+                $s   = Resolve-ToSmtp $raw
+                if (-not $s) { Write-DLLog "    (warn) Could not resolve identity to SMTP: '$raw'" ([System.Drawing.Color]::DarkGoldenrod) }
+                $s
+            } | Where-Object { $_ })
         }
 
         Write-DLLog "Scanning mapping for source groups..." ([System.Drawing.Color]::DimGray)
@@ -4022,6 +4034,8 @@ function Invoke-FrankensteinDLMigrator {
                     Write-DLLog "  SKIP $srcSmtp ($typeDetail) -- type filter" ([System.Drawing.Color]::DimGray)
                     continue
                 }
+                $resolvedManagedBy = Get-SmtpList $grp.ManagedBy
+                Write-DLLog "  $srcSmtp  owners-raw=$($grp.ManagedBy.Count)  owners-resolved=$($resolvedManagedBy.Count)" ([System.Drawing.Color]::DimGray)
                 $script:DLGroupMeta[$srcSmtp.ToLower()] = @{
                     Name              = $grp.Name
                     DisplayName       = $grp.DisplayName
@@ -4031,7 +4045,7 @@ function Invoke-FrankensteinDLMigrator {
                     RequireSenderAuth = $grp.RequireSenderAuthenticationEnabled
                     HiddenFromGAL     = $grp.HiddenFromAddressListsEnabled
                     ModerationEnabled = $grp.ModerationEnabled
-                    ManagedBy         = Get-SmtpList $grp.ManagedBy
+                    ManagedBy         = $resolvedManagedBy
                     ModeratedBy       = Get-SmtpList $grp.ModeratedBy
                     GrantSendOnBehalf = Get-SmtpList $grp.GrantSendOnBehalfTo
                     AcceptFrom        = Get-SmtpList $grp.AcceptMessagesOnlyFromSendersOrMembers
@@ -4048,6 +4062,7 @@ function Invoke-FrankensteinDLMigrator {
                 }
                 $ugOwners = @(Get-UnifiedGroupLinks -Identity $ug.Identity -LinkType Owners -ErrorAction SilentlyContinue |
                     ForEach-Object { $_.PrimarySmtpAddress } | Where-Object { $_ })
+                Write-DLLog "  $srcSmtp  owners-resolved=$($ugOwners.Count)" ([System.Drawing.Color]::DimGray)
                 $script:DLGroupMeta[$srcSmtp.ToLower()] = @{
                     Name              = $ug.DisplayName
                     DisplayName       = $ug.DisplayName

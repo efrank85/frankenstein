@@ -3828,6 +3828,10 @@ function Invoke-FrankensteinDLMigrator {
     $script:DLSourceConnected = $false
     $script:DLTargetConnected = $false
     $script:DLOnPremSession   = $null
+    $script:DLSourceUpn       = ''
+    $script:DLSourceOrg       = ''
+    $script:DLTargetUpn       = ''
+    $script:DLTargetOrg       = ''
     $script:DLMappingTable    = @{}
     $script:DLMappingCsvPath  = ''
     $script:DLGroupMeta       = @{}   # source.ToLower() -> {DisplayName, Alias, Type, DLType}
@@ -4975,9 +4979,14 @@ Supported group types: MailUniversalDistributionGroup,
         try {
             Write-DLLog "Connecting to source M365 tenant..." ([System.Drawing.Color]::Silver)
             Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue
+            if ($conn) {
+                $script:DLSourceUpn = $conn.UserPrincipalName
+                $script:DLSourceOrg = $conn.Organization
+            }
             $script:DLSourceConnected = $true
-            Set-DLStatusLabel $lblSrcStatus "Connected" ([System.Drawing.Color]::DarkGreen)
-            Write-DLLog "Source connected. Load your mapping, then use Preview or Run Migration." ([System.Drawing.Color]::LimeGreen)
+            Set-DLStatusLabel $lblSrcStatus "Connected$(if ($script:DLSourceOrg) { " ($script:DLSourceOrg)" })" ([System.Drawing.Color]::DarkGreen)
+            Write-DLLog "Source connected$(if ($script:DLSourceOrg) { " to $script:DLSourceOrg" }). Load your mapping, then use Preview or Run Migration." ([System.Drawing.Color]::LimeGreen)
             $btnPreview.Enabled = $true
             if ($script:DLTargetConnected) { $btnRun.Enabled = $true }
         } catch {
@@ -4998,8 +5007,13 @@ Supported group types: MailUniversalDistributionGroup,
             if ($radM365.Checked) {
                 Write-DLLog "Connecting to target M365 tenant..." ([System.Drawing.Color]::Silver)
                 Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-                Set-DLStatusLabel $lblTgtStatus "Connected (M365)" ([System.Drawing.Color]::DarkGreen)
-                Write-DLLog "Target M365 connected." ([System.Drawing.Color]::LimeGreen)
+                $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue
+                if ($conn) {
+                    $script:DLTargetUpn = $conn.UserPrincipalName
+                    $script:DLTargetOrg = $conn.Organization
+                }
+                Set-DLStatusLabel $lblTgtStatus "Connected$(if ($script:DLTargetOrg) { " ($script:DLTargetOrg)" })" ([System.Drawing.Color]::DarkGreen)
+                Write-DLLog "Target M365 connected$(if ($script:DLTargetOrg) { " to $script:DLTargetOrg" })." ([System.Drawing.Color]::LimeGreen)
             } else {
                 $uri = $txtOnPremUri.Text.Trim()
                 if ($uri) {
@@ -5025,16 +5039,47 @@ Supported group types: MailUniversalDistributionGroup,
         }
     })
 
-    # Returns $true if an active EXO session exists (no prompt needed)
-    function Test-DLEXOActive {
+    # Returns the current EXO org name, or $null if not connected
+    function Get-DLCurrentOrg {
         try {
             if (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue) {
-                return ($null -ne (Get-ConnectionInformation -ErrorAction SilentlyContinue))
+                $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue
+                if ($conn) { return $conn.Organization }
             }
-            Get-OrganizationConfig -ErrorAction Stop | Out-Null
-            return $true
-        } catch {
-            return $false
+            $org = Get-OrganizationConfig -ErrorAction SilentlyContinue
+            if ($org) { return $org.Name }
+        } catch {}
+        return $null
+    }
+
+    # Connect to EXO using stored UPN (silent if token cached), fall back to interactive
+    function Connect-DLTenant ([string]$Upn) {
+        if ($Upn) {
+            Connect-ExchangeOnline -UserPrincipalName $Upn -ShowBanner:$false -ErrorAction Stop
+        } else {
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+        }
+    }
+
+    # Ensure we are connected to source; reconnect silently if on a different org
+    function Switch-DLToSource {
+        $current = Get-DLCurrentOrg
+        if ($script:DLSourceOrg -and $current -eq $script:DLSourceOrg) {
+            Write-DLLog "Using existing source connection ($current)." ([System.Drawing.Color]::DimGray)
+        } else {
+            Write-DLLog "Connecting to source$(if ($script:DLSourceUpn) { " ($script:DLSourceUpn)" })..." ([System.Drawing.Color]::DimGray)
+            Connect-DLTenant $script:DLSourceUpn
+        }
+    }
+
+    # Ensure we are connected to target; reconnect silently if on a different org
+    function Switch-DLToTarget {
+        $current = Get-DLCurrentOrg
+        if ($script:DLTargetOrg -and $current -eq $script:DLTargetOrg) {
+            Write-DLLog "Using existing target connection ($current)." ([System.Drawing.Color]::DimGray)
+        } else {
+            Write-DLLog "Connecting to target$(if ($script:DLTargetUpn) { " ($script:DLTargetUpn)" })..." ([System.Drawing.Color]::DimGray)
+            Connect-DLTenant $script:DLTargetUpn
         }
     }
 
@@ -5069,12 +5114,7 @@ Supported group types: MailUniversalDistributionGroup,
         $btnPreview.Enabled = $false
         $form.UseWaitCursor = $true
         try {
-            if (Test-DLEXOActive) {
-                Write-DLLog "Using existing source connection." ([System.Drawing.Color]::DimGray)
-            } else {
-                Write-DLLog "Connecting to source M365..." ([System.Drawing.Color]::DimGray)
-                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-            }
+            Switch-DLToSource
             Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
 
             Collect-DLSourceData
@@ -5140,23 +5180,13 @@ Supported group types: MailUniversalDistributionGroup,
         $btnRun.Enabled = $false
         $form.UseWaitCursor = $true
         try {
-            if (Test-DLEXOActive) {
-                Write-DLLog "Using existing source connection." ([System.Drawing.Color]::DimGray)
-            } else {
-                Write-DLLog "Connecting to source M365..." ([System.Drawing.Color]::DimGray)
-                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-            }
+            Switch-DLToSource
             Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
             Collect-DLSourceData
             Set-DLStatusLabel $lblSrcStatus "Connected - $($script:DLSourceData.Count) member record(s) read" ([System.Drawing.Color]::DarkGreen)
 
             if ($radM365.Checked) {
-                if (Test-DLEXOActive) {
-                    Write-DLLog "Using existing target connection." ([System.Drawing.Color]::DimGray)
-                } else {
-                    Write-DLLog "Connecting to target M365..." ([System.Drawing.Color]::DimGray)
-                    Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-                }
+                Switch-DLToTarget
             } elseif ($script:DLOnPremSession -and $script:DLOnPremSession.State -ne 'Opened') {
                 $uri = $txtOnPremUri.Text.Trim()
                 if ($uri) {
@@ -5175,6 +5205,22 @@ Supported group types: MailUniversalDistributionGroup,
             $cConf    = @($script:DLResultLog | Where-Object { $_.Status -eq 'Conflict' }).Count
             $cFailed  = @($script:DLResultLog | Where-Object { $_.Status -eq 'Failed' }).Count
             Write-DLLog "---- COMPLETE: $cCreated created | $cSuccess added | $cDupe already members | $cConf conflicts | $cFailed failed ----" ([System.Drawing.Color]::CornflowerBlue)
+
+            # Flag any groups that were not created
+            $notCreated = @($script:DLResultLog | Where-Object {
+                $_.Operation -eq 'CreateGroup' -and $_.Status -in @('Conflict','Failed')
+            })
+            if ($notCreated.Count) {
+                Write-DLLog "!!!! $($notCreated.Count) GROUP(S) NOT CREATED -- members for these groups were skipped !!!!" ([System.Drawing.Color]::OrangeRed)
+                foreach ($nc in $notCreated) {
+                    $tag = if ($nc.Status -eq 'Conflict') { 'CONFLICT' } else { 'FAILED' }
+                    Write-DLLog "  [$tag]  $($nc.SourceGroup)  ->  $($nc.TargetGroup)" ([System.Drawing.Color]::OrangeRed)
+                    if ($nc.Details) {
+                        Write-DLLog "           $($nc.Details)" ([System.Drawing.Color]::DarkSalmon)
+                    }
+                }
+                Write-DLLog "!!!! Adjust prefix/domain or fix conflicts, then re-run !!!!" ([System.Drawing.Color]::OrangeRed)
+            }
             Set-DLStatusLabel $lblTgtStatus "Connected - migration complete" ([System.Drawing.Color]::DarkGreen)
             $btnExportLog.Enabled = $true
         } catch {

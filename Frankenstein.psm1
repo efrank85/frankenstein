@@ -3292,12 +3292,12 @@ Important rules:
     $radManualEntry         = New-Object System.Windows.Forms.RadioButton
     $radManualEntry.Text    = "Enter source/target pairs manually  (no CSV needed -- useful for single-user migrations)"
     $radManualEntry.Location = New-Object System.Drawing.Point(10, 62)
-    $radManualEntry.Size    = New-Object System.Drawing.Size(654, 20)
+    $radManualEntry.Size    = New-Object System.Drawing.Size(754, 20)
     $grpMap.Controls.Add($radManualEntry)
 
     $txtManualSrc                 = New-Object System.Windows.Forms.TextBox
     $txtManualSrc.Location        = New-Object System.Drawing.Point(10, 86)
-    $txtManualSrc.Size            = New-Object System.Drawing.Size(284, 22)
+    $txtManualSrc.Size            = New-Object System.Drawing.Size(334, 22)
     $txtManualSrc.PlaceholderText = "source@domain.com"
     $txtManualSrc.Enabled         = $false
     $grpMap.Controls.Add($txtManualSrc)
@@ -3305,20 +3305,20 @@ Important rules:
     $lblArrow                = New-Object System.Windows.Forms.Label
     $lblArrow.Text           = "->"
     $lblArrow.TextAlign      = 'MiddleCenter'
-    $lblArrow.Location       = New-Object System.Drawing.Point(300, 88)
+    $lblArrow.Location       = New-Object System.Drawing.Point(350, 88)
     $lblArrow.Size           = New-Object System.Drawing.Size(16, 18)
     $grpMap.Controls.Add($lblArrow)
 
     $txtManualTgt                 = New-Object System.Windows.Forms.TextBox
-    $txtManualTgt.Location        = New-Object System.Drawing.Point(322, 86)
-    $txtManualTgt.Size            = New-Object System.Drawing.Size(272, 22)
+    $txtManualTgt.Location        = New-Object System.Drawing.Point(372, 86)
+    $txtManualTgt.Size            = New-Object System.Drawing.Size(312, 22)
     $txtManualTgt.PlaceholderText = "target@domain.com"
     $txtManualTgt.Enabled         = $false
     $grpMap.Controls.Add($txtManualTgt)
 
     $btnAddPair             = New-Object System.Windows.Forms.Button
     $btnAddPair.Text        = "Add"
-    $btnAddPair.Location    = New-Object System.Drawing.Point(602, 84)
+    $btnAddPair.Location    = New-Object System.Drawing.Point(692, 84)
     $btnAddPair.Size        = New-Object System.Drawing.Size(62, 26)
     $btnAddPair.Enabled     = $false
     $grpMap.Controls.Add($btnAddPair)
@@ -3328,10 +3328,10 @@ Important rules:
     $lvPairs.FullRowSelect  = $true
     $lvPairs.GridLines      = $true
     $lvPairs.Location       = New-Object System.Drawing.Point(10, 116)
-    $lvPairs.Size           = New-Object System.Drawing.Size(654, 62)
+    $lvPairs.Size           = New-Object System.Drawing.Size(754, 62)
     $lvPairs.Enabled        = $false
-    $lvPairs.Columns.Add("Source SMTP", 320) | Out-Null
-    $lvPairs.Columns.Add("Target SMTP", 320) | Out-Null
+    $lvPairs.Columns.Add("Source SMTP", 370) | Out-Null
+    $lvPairs.Columns.Add("Target SMTP", 370) | Out-Null
     $grpMap.Controls.Add($lvPairs)
 
     $btnRemovePair          = New-Object System.Windows.Forms.Button
@@ -3345,7 +3345,7 @@ Important rules:
     $lblMapCount.Text       = ""
     $lblMapCount.ForeColor  = [System.Drawing.Color]::DarkGreen
     $lblMapCount.Location   = New-Object System.Drawing.Point(144, 186)
-    $lblMapCount.Size       = New-Object System.Drawing.Size(500, 16)
+    $lblMapCount.Size       = New-Object System.Drawing.Size(600, 16)
     $grpMap.Controls.Add($lblMapCount)
 
     # --- 1. Connections ---
@@ -3825,18 +3825,21 @@ function Invoke-FrankensteinDLMigrator {
     [System.Windows.Forms.Application]::EnableVisualStyles()
 
     #region ---- State ----
-    $script:DLSourceConnected = $false
-    $script:DLTargetConnected = $false
-    $script:DLOnPremSession   = $null
-    $script:DLSourceUpn       = ''
-    $script:DLSourceOrg       = ''
-    $script:DLTargetUpn       = ''
-    $script:DLTargetOrg       = ''
-    $script:DLMappingTable    = @{}
-    $script:DLMappingCsvPath  = ''
-    $script:DLGroupMeta       = @{}   # source.ToLower() -> {DisplayName, Alias, Type, DLType}
-    $script:DLSourceData      = [System.Collections.Generic.List[PSCustomObject]]::new()
-    $script:DLResultLog       = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $script:DLSourceConnected    = $false
+    $script:DLTargetConnected    = $false
+    $script:DLOnPremSession      = $null
+    $script:DLSourceUpn          = ''
+    $script:DLSourceOrg          = ''
+    $script:DLSourceConnectionId = $null
+    $script:DLTargetUpn          = ''
+    $script:DLTargetOrg          = ''
+    $script:DLTargetConnectionId = $null
+    $script:DLMappingTable       = @{}
+    $script:DLMappingCsvPath     = ''
+    $script:DLGroupMeta          = @{}   # source.ToLower() -> {DisplayName, Alias, Type, DLType}
+    $script:DLSourceData         = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $script:DLResultLog          = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $script:DLLiveLogPath        = ''
     #endregion
 
     #region ---- Inner Functions ----
@@ -3849,6 +3852,17 @@ function Invoke-FrankensteinDLMigrator {
         $rtbLog.AppendText("[$ts] $msg`n")
         $rtbLog.ScrollToCaret()
         $rtbLog.Refresh()
+        if ($script:DLLiveLogPath) {
+            try { "[$ts] $msg" | Out-File -Append -FilePath $script:DLLiveLogPath -Encoding UTF8 } catch {}
+        }
+    }
+
+    function Update-DLProgress ([int]$done, [int]$total) {
+        if ($total -le 0) { $progressBar.Value = 0; return }
+        $pct = [math]::Min(100, [math]::Round(($done / $total) * 100))
+        $progressBar.Value = $pct
+        $progressBar.Refresh()
+        [System.Windows.Forms.Application]::DoEvents()
     }
 
     function Set-DLStatusLabel ([System.Windows.Forms.Label]$lbl, [string]$text, [System.Drawing.Color]$color) {
@@ -4123,7 +4137,10 @@ function Invoke-FrankensteinDLMigrator {
         # Phase 1: Create groups
         if ($createMode) {
             Write-DLLog "---- Phase 1: Creating groups ----" ([System.Drawing.Color]::CornflowerBlue)
+            $p1Total = [math]::Max(1, $script:DLGroupMeta.Count); $p1Done = 0
             foreach ($srcSmtp in @($script:DLGroupMeta.Keys)) {
+                $p1Done++
+                Update-DLProgress ([int]($p1Done / $p1Total * 40)) 100
                 $meta    = $script:DLGroupMeta[$srcSmtp]
                 $srcType = $meta.Type
 
@@ -4221,8 +4238,11 @@ function Invoke-FrankensteinDLMigrator {
         }
 
         # Phase 2: Add members
-        Write-DLLog "---- Phase 2: Adding members ($($script:DLSourceData.Count) record(s)) ----" ([System.Drawing.Color]::CornflowerBlue)
+        $p2Total = $script:DLSourceData.Count; $p2Done = 0
+        Write-DLLog "---- Phase 2: Adding members ($p2Total record(s)) ----" ([System.Drawing.Color]::CornflowerBlue)
         foreach ($rec in $script:DLSourceData) {
+            $p2Done++
+            Update-DLProgress (40 + [int]($p2Done / [math]::Max(1,$p2Total) * 60)) 100
             $tgtGroup  = $script:DLMappingTable[$rec.SourceGroup.ToLower()]
             if (-not $tgtGroup) { $tgtGroup = $rec.TargetGroup }
             # Re-resolve TargetMember in case it was a nested group pending creation at collection time
@@ -4287,6 +4307,8 @@ function Invoke-FrankensteinDLMigrator {
             }
             $script:DLResultLog.Add([PSCustomObject]$log)
         }
+        $progressBar.Value = 100
+        $progressBar.Refresh()
     }
 
     #endregion
@@ -4295,7 +4317,7 @@ function Invoke-FrankensteinDLMigrator {
 
     $form                 = New-Object System.Windows.Forms.Form
     $form.Text            = "Frankenstein - DL Migrator"
-    $form.ClientSize      = New-Object System.Drawing.Size(700, 994)
+    $form.ClientSize      = New-Object System.Drawing.Size(800, 994)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedSingle'
     $form.MaximizeBox     = $false
@@ -4314,7 +4336,7 @@ function Invoke-FrankensteinDLMigrator {
     $grpConn           = New-Object System.Windows.Forms.GroupBox
     $grpConn.Text      = "1. Connections  (source is always M365 -- connect to both first to validate credentials)"
     $grpConn.Location  = New-Object System.Drawing.Point(12, 46)
-    $grpConn.Size      = New-Object System.Drawing.Size(676, 148)
+    $grpConn.Size      = New-Object System.Drawing.Size(776, 148)
     $form.Controls.Add($grpConn)
 
     $btnConnSrc              = New-Object System.Windows.Forms.Button
@@ -4327,7 +4349,7 @@ function Invoke-FrankensteinDLMigrator {
     $lblSrcStatus.Text       = "Not connected"
     $lblSrcStatus.ForeColor  = [System.Drawing.Color]::Gray
     $lblSrcStatus.Location   = New-Object System.Drawing.Point(188, 28)
-    $lblSrcStatus.Size       = New-Object System.Drawing.Size(476, 18)
+    $lblSrcStatus.Size       = New-Object System.Drawing.Size(576, 18)
     $grpConn.Controls.Add($lblSrcStatus)
 
     $lblTargetType           = New-Object System.Windows.Forms.Label
@@ -4351,7 +4373,7 @@ function Invoke-FrankensteinDLMigrator {
 
     $txtOnPremUri                 = New-Object System.Windows.Forms.TextBox
     $txtOnPremUri.Location        = New-Object System.Drawing.Point(10, 86)
-    $txtOnPremUri.Size            = New-Object System.Drawing.Size(654, 22)
+    $txtOnPremUri.Size            = New-Object System.Drawing.Size(754, 22)
     $txtOnPremUri.PlaceholderText = "On-prem URI: https://mailserver.domain.com/PowerShell/  (leave blank to use current Exchange session)"
     $txtOnPremUri.Enabled         = $false
     $grpConn.Controls.Add($txtOnPremUri)
@@ -4366,26 +4388,26 @@ function Invoke-FrankensteinDLMigrator {
     $lblTgtStatus.Text       = "Not connected"
     $lblTgtStatus.ForeColor  = [System.Drawing.Color]::Gray
     $lblTgtStatus.Location   = New-Object System.Drawing.Point(188, 120)
-    $lblTgtStatus.Size       = New-Object System.Drawing.Size(476, 18)
+    $lblTgtStatus.Size       = New-Object System.Drawing.Size(576, 18)
     $grpConn.Controls.Add($lblTgtStatus)
 
     # --- 2. Identity Mapping ---
     $grpMap           = New-Object System.Windows.Forms.GroupBox
     $grpMap.Text      = "2. Identity Mapping"
     $grpMap.Location  = New-Object System.Drawing.Point(12, 202)
-    $grpMap.Size      = New-Object System.Drawing.Size(676, 214)
+    $grpMap.Size      = New-Object System.Drawing.Size(776, 214)
     $form.Controls.Add($grpMap)
 
     $radCsvMapping          = New-Object System.Windows.Forms.RadioButton
     $radCsvMapping.Text     = "Load CSV mapping file  (Source + Target columns -- include both groups AND their members)"
     $radCsvMapping.Checked  = $true
     $radCsvMapping.Location = New-Object System.Drawing.Point(10, 20)
-    $radCsvMapping.Size     = New-Object System.Drawing.Size(570, 20)
+    $radCsvMapping.Size     = New-Object System.Drawing.Size(670, 20)
     $grpMap.Controls.Add($radCsvMapping)
 
     $btnBrowseMap           = New-Object System.Windows.Forms.Button
     $btnBrowseMap.Text      = "Browse..."
-    $btnBrowseMap.Location  = New-Object System.Drawing.Point(582, 16)
+    $btnBrowseMap.Location  = New-Object System.Drawing.Point(682, 16)
     $btnBrowseMap.Size      = New-Object System.Drawing.Size(82, 26)
     $grpMap.Controls.Add($btnBrowseMap)
 
@@ -4393,7 +4415,7 @@ function Invoke-FrankensteinDLMigrator {
     $lblMapPath.Text        = "No file loaded"
     $lblMapPath.ForeColor   = [System.Drawing.Color]::Gray
     $lblMapPath.Location    = New-Object System.Drawing.Point(10, 42)
-    $lblMapPath.Size        = New-Object System.Drawing.Size(654, 16)
+    $lblMapPath.Size        = New-Object System.Drawing.Size(754, 16)
     $grpMap.Controls.Add($lblMapPath)
 
     $ttDLMap = New-Object System.Windows.Forms.ToolTip
@@ -4437,12 +4459,12 @@ Supported group types: MailUniversalDistributionGroup,
     $radManualEntry         = New-Object System.Windows.Forms.RadioButton
     $radManualEntry.Text    = "Enter source/target pairs manually"
     $radManualEntry.Location = New-Object System.Drawing.Point(10, 62)
-    $radManualEntry.Size    = New-Object System.Drawing.Size(654, 20)
+    $radManualEntry.Size    = New-Object System.Drawing.Size(754, 20)
     $grpMap.Controls.Add($radManualEntry)
 
     $txtManualSrc                 = New-Object System.Windows.Forms.TextBox
     $txtManualSrc.Location        = New-Object System.Drawing.Point(10, 86)
-    $txtManualSrc.Size            = New-Object System.Drawing.Size(284, 22)
+    $txtManualSrc.Size            = New-Object System.Drawing.Size(334, 22)
     $txtManualSrc.PlaceholderText = "source@domain.com"
     $txtManualSrc.Enabled         = $false
     $grpMap.Controls.Add($txtManualSrc)
@@ -4450,20 +4472,20 @@ Supported group types: MailUniversalDistributionGroup,
     $lblArrow                = New-Object System.Windows.Forms.Label
     $lblArrow.Text           = "->"
     $lblArrow.TextAlign      = 'MiddleCenter'
-    $lblArrow.Location       = New-Object System.Drawing.Point(300, 88)
+    $lblArrow.Location       = New-Object System.Drawing.Point(350, 88)
     $lblArrow.Size           = New-Object System.Drawing.Size(16, 18)
     $grpMap.Controls.Add($lblArrow)
 
     $txtManualTgt                 = New-Object System.Windows.Forms.TextBox
-    $txtManualTgt.Location        = New-Object System.Drawing.Point(322, 86)
-    $txtManualTgt.Size            = New-Object System.Drawing.Size(272, 22)
+    $txtManualTgt.Location        = New-Object System.Drawing.Point(372, 86)
+    $txtManualTgt.Size            = New-Object System.Drawing.Size(312, 22)
     $txtManualTgt.PlaceholderText = "target@domain.com"
     $txtManualTgt.Enabled         = $false
     $grpMap.Controls.Add($txtManualTgt)
 
     $btnAddPair             = New-Object System.Windows.Forms.Button
     $btnAddPair.Text        = "Add"
-    $btnAddPair.Location    = New-Object System.Drawing.Point(602, 84)
+    $btnAddPair.Location    = New-Object System.Drawing.Point(692, 84)
     $btnAddPair.Size        = New-Object System.Drawing.Size(62, 26)
     $btnAddPair.Enabled     = $false
     $grpMap.Controls.Add($btnAddPair)
@@ -4473,10 +4495,10 @@ Supported group types: MailUniversalDistributionGroup,
     $lvPairs.FullRowSelect  = $true
     $lvPairs.GridLines      = $true
     $lvPairs.Location       = New-Object System.Drawing.Point(10, 116)
-    $lvPairs.Size           = New-Object System.Drawing.Size(654, 62)
+    $lvPairs.Size           = New-Object System.Drawing.Size(754, 62)
     $lvPairs.Enabled        = $false
-    $lvPairs.Columns.Add("Source SMTP", 320) | Out-Null
-    $lvPairs.Columns.Add("Target SMTP", 320) | Out-Null
+    $lvPairs.Columns.Add("Source SMTP", 370) | Out-Null
+    $lvPairs.Columns.Add("Target SMTP", 370) | Out-Null
     $grpMap.Controls.Add($lvPairs)
 
     $btnRemovePair          = New-Object System.Windows.Forms.Button
@@ -4490,14 +4512,14 @@ Supported group types: MailUniversalDistributionGroup,
     $lblMapCount.Text       = ""
     $lblMapCount.ForeColor  = [System.Drawing.Color]::DarkGreen
     $lblMapCount.Location   = New-Object System.Drawing.Point(144, 186)
-    $lblMapCount.Size       = New-Object System.Drawing.Size(500, 16)
+    $lblMapCount.Size       = New-Object System.Drawing.Size(600, 16)
     $grpMap.Controls.Add($lblMapCount)
 
     # --- 3. Operation ---
     $grpOp           = New-Object System.Windows.Forms.GroupBox
     $grpOp.Text      = "3. Operation"
     $grpOp.Location  = New-Object System.Drawing.Point(12, 424)
-    $grpOp.Size      = New-Object System.Drawing.Size(676, 294)
+    $grpOp.Size      = New-Object System.Drawing.Size(776, 294)
     $form.Controls.Add($grpOp)
 
     # Group type filter -- always active, both modes
@@ -4590,7 +4612,7 @@ Supported group types: MailUniversalDistributionGroup,
 
     $txtNewDomain                 = New-Object System.Windows.Forms.TextBox
     $txtNewDomain.Location        = New-Object System.Drawing.Point(332, 110)
-    $txtNewDomain.Size            = New-Object System.Drawing.Size(244, 22)
+    $txtNewDomain.Size            = New-Object System.Drawing.Size(344, 22)
     $txtNewDomain.PlaceholderText = "target.com"
     $txtNewDomain.Enabled         = $false
     $grpOp.Controls.Add($txtNewDomain)
@@ -4635,7 +4657,7 @@ Supported group types: MailUniversalDistributionGroup,
 
     $txtOU                    = New-Object System.Windows.Forms.TextBox
     $txtOU.Location           = New-Object System.Drawing.Point(156, 164)
-    $txtOU.Size               = New-Object System.Drawing.Size(506, 22)
+    $txtOU.Size               = New-Object System.Drawing.Size(606, 22)
     $txtOU.PlaceholderText    = "OU=Groups,DC=domain,DC=com  (optional -- leave blank for Exchange default)"
     $txtOU.Enabled            = $false
     $grpOp.Controls.Add($txtOU)
@@ -4649,7 +4671,7 @@ Supported group types: MailUniversalDistributionGroup,
 
     $txtDefaultOwner                 = New-Object System.Windows.Forms.TextBox
     $txtDefaultOwner.Location        = New-Object System.Drawing.Point(128, 190)
-    $txtDefaultOwner.Size            = New-Object System.Drawing.Size(534, 22)
+    $txtDefaultOwner.Size            = New-Object System.Drawing.Size(634, 22)
     $txtDefaultOwner.PlaceholderText = "admin@target.com  (added as owner on all created groups)"
     $txtDefaultOwner.Enabled         = $false
     $grpOp.Controls.Add($txtDefaultOwner)
@@ -4730,7 +4752,7 @@ Supported group types: MailUniversalDistributionGroup,
     $grpOpts           = New-Object System.Windows.Forms.GroupBox
     $grpOpts.Text      = "4. Options"
     $grpOpts.Location  = New-Object System.Drawing.Point(12, 726)
-    $grpOpts.Size      = New-Object System.Drawing.Size(676, 52)
+    $grpOpts.Size      = New-Object System.Drawing.Size(776, 52)
     $form.Controls.Add($grpOpts)
 
     $lblOutPath               = New-Object System.Windows.Forms.Label
@@ -4742,12 +4764,12 @@ Supported group types: MailUniversalDistributionGroup,
     $txtOutPath               = New-Object System.Windows.Forms.TextBox
     $txtOutPath.Text          = (Get-Location).Path
     $txtOutPath.Location      = New-Object System.Drawing.Point(126, 16)
-    $txtOutPath.Size          = New-Object System.Drawing.Size(434, 22)
+    $txtOutPath.Size          = New-Object System.Drawing.Size(534, 22)
     $grpOpts.Controls.Add($txtOutPath)
 
     $btnBrowseOut             = New-Object System.Windows.Forms.Button
     $btnBrowseOut.Text        = "Browse..."
-    $btnBrowseOut.Location    = New-Object System.Drawing.Point(570, 14)
+    $btnBrowseOut.Location    = New-Object System.Drawing.Point(670, 14)
     $btnBrowseOut.Size        = New-Object System.Drawing.Size(94, 26)
     $grpOpts.Controls.Add($btnBrowseOut)
 
@@ -4771,21 +4793,31 @@ Supported group types: MailUniversalDistributionGroup,
 
     $btnExportLog             = New-Object System.Windows.Forms.Button
     $btnExportLog.Text        = "Export Log"
-    $btnExportLog.Location    = New-Object System.Drawing.Point(558, 788)
+    $btnExportLog.Location    = New-Object System.Drawing.Point(658, 788)
     $btnExportLog.Size        = New-Object System.Drawing.Size(130, 34)
     $btnExportLog.Enabled     = $false
     $form.Controls.Add($btnExportLog)
 
+    # --- Progress Bar ---
+    $progressBar               = New-Object System.Windows.Forms.ProgressBar
+    $progressBar.Location      = New-Object System.Drawing.Point(12, 828)
+    $progressBar.Size          = New-Object System.Drawing.Size(776, 18)
+    $progressBar.Minimum       = 0
+    $progressBar.Maximum       = 100
+    $progressBar.Value         = 0
+    $progressBar.Style         = 'Continuous'
+    $form.Controls.Add($progressBar)
+
     # --- Status Log ---
     $grpLog           = New-Object System.Windows.Forms.GroupBox
     $grpLog.Text      = "Status Log"
-    $grpLog.Location  = New-Object System.Drawing.Point(12, 832)
-    $grpLog.Size      = New-Object System.Drawing.Size(676, 152)
+    $grpLog.Location  = New-Object System.Drawing.Point(12, 852)
+    $grpLog.Size      = New-Object System.Drawing.Size(776, 132)
     $form.Controls.Add($grpLog)
 
     $rtbLog                   = New-Object System.Windows.Forms.RichTextBox
     $rtbLog.Location          = New-Object System.Drawing.Point(8, 18)
-    $rtbLog.Size              = New-Object System.Drawing.Size(660, 126)
+    $rtbLog.Size              = New-Object System.Drawing.Size(760, 106)
     $rtbLog.ReadOnly          = $true
     $rtbLog.BackColor         = [System.Drawing.Color]::FromArgb(18, 18, 28)
     $rtbLog.ForeColor         = [System.Drawing.Color]::Silver
@@ -5030,11 +5062,15 @@ Supported group types: MailUniversalDistributionGroup,
         $btnConnSrc.Enabled = $false
         try {
             Write-DLLog "Connecting to source M365 tenant..." ([System.Drawing.Color]::Silver)
+            $beforeIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | ForEach-Object { $_.ConnectionId })
             Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-            $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($conn) {
-                $script:DLSourceUpn = [string]$conn.UserPrincipalName
-                $script:DLSourceOrg = [string]$conn.Organization
+            $allConns = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+            $newConn  = $allConns | Where-Object { $_.ConnectionId -notin $beforeIds } | Select-Object -First 1
+            if (-not $newConn) { $newConn = $allConns | Select-Object -First 1 }
+            if ($newConn) {
+                $script:DLSourceUpn          = [string]$newConn.UserPrincipalName
+                $script:DLSourceOrg          = [string]$newConn.Organization
+                $script:DLSourceConnectionId = $newConn.ConnectionId
             }
             if (-not $script:DLSourceOrg) {
                 $script:DLSourceOrg = [string](Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
@@ -5062,11 +5098,15 @@ Supported group types: MailUniversalDistributionGroup,
         try {
             if ($radM365.Checked) {
                 Write-DLLog "Connecting to target M365 tenant..." ([System.Drawing.Color]::Silver)
+                $beforeIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | ForEach-Object { $_.ConnectionId })
                 Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-                $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($conn) {
-                    $script:DLTargetUpn = [string]$conn.UserPrincipalName
-                    $script:DLTargetOrg = [string]$conn.Organization
+                $allConns = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+                $newConn  = $allConns | Where-Object { $_.ConnectionId -notin $beforeIds } | Select-Object -First 1
+                if (-not $newConn) { $newConn = $allConns | Select-Object -First 1 }
+                if ($newConn) {
+                    $script:DLTargetUpn          = [string]$newConn.UserPrincipalName
+                    $script:DLTargetOrg          = [string]$newConn.Organization
+                    $script:DLTargetConnectionId = $newConn.ConnectionId
                 }
                 if (-not $script:DLTargetOrg) {
                     $script:DLTargetOrg = [string](Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
@@ -5112,8 +5152,15 @@ Supported group types: MailUniversalDistributionGroup,
         return $null
     }
 
-    # Ensure we are connected to source; skip reconnect if already on the right org
+    # Ensure we are connected to source; use Set-ConnectionContext for silent switching
     function Switch-DLToSource {
+        if ($script:DLSourceConnectionId -and (Get-Command Set-ConnectionContext -ErrorAction SilentlyContinue)) {
+            try {
+                Set-ConnectionContext -ConnectionId $script:DLSourceConnectionId -ErrorAction Stop
+                Write-DLLog "Switched to source ($script:DLSourceOrg)." ([System.Drawing.Color]::DimGray)
+                return
+            } catch {}
+        }
         $current = Get-DLCurrentOrg
         if ($script:DLSourceOrg -and $current -eq $script:DLSourceOrg) {
             Write-DLLog "Using existing source connection ($current)." ([System.Drawing.Color]::DimGray)
@@ -5123,8 +5170,15 @@ Supported group types: MailUniversalDistributionGroup,
         }
     }
 
-    # Ensure we are connected to target; skip reconnect if already on the right org
+    # Ensure we are connected to target; use Set-ConnectionContext for silent switching
     function Switch-DLToTarget {
+        if ($script:DLTargetConnectionId -and (Get-Command Set-ConnectionContext -ErrorAction SilentlyContinue)) {
+            try {
+                Set-ConnectionContext -ConnectionId $script:DLTargetConnectionId -ErrorAction Stop
+                Write-DLLog "Switched to target ($script:DLTargetOrg)." ([System.Drawing.Color]::DimGray)
+                return
+            } catch {}
+        }
         $current = Get-DLCurrentOrg
         if ($script:DLTargetOrg -and $current -eq $script:DLTargetOrg) {
             Write-DLLog "Using existing target connection ($current)." ([System.Drawing.Color]::DimGray)
@@ -5164,6 +5218,11 @@ Supported group types: MailUniversalDistributionGroup,
         if (-not (Confirm-DLReadyState)) { return }
         $btnPreview.Enabled = $false
         $form.UseWaitCursor = $true
+        $progressBar.Value  = 0
+        $outPath = $txtOutPath.Text.Trim()
+        $script:DLLiveLogPath = if ($outPath -and (Test-Path $outPath)) {
+            Join-Path $outPath "DLPreviewLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).txt"
+        } else { '' }
         try {
             Switch-DLToSource
             Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
@@ -5201,13 +5260,18 @@ Supported group types: MailUniversalDistributionGroup,
             }
 
             $wouldAdd = 0; $wouldSkip = 0
-            Write-DLLog "  [Member Phase -- $($script:DLSourceData.Count) record(s)]" ([System.Drawing.Color]::CornflowerBlue)
+            $total = $script:DLSourceData.Count
+            Write-DLLog "  [Member Phase -- $total record(s)]" ([System.Drawing.Color]::CornflowerBlue)
+            $idx = 0
             foreach ($rec in $script:DLSourceData) {
+                $idx++
                 $tgt = $script:DLMappingTable[$rec.SourceGroup.ToLower()]
                 if (-not $tgt) { $tgt = $rec.TargetGroup }
                 Write-DLLog "  ADD   $($rec.TargetMember) -> $tgt$(if ($rec.ExpandedFrom) { " (from $($rec.ExpandedFrom))" })" ([System.Drawing.Color]::LimeGreen)
                 $wouldAdd++
+                Update-DLProgress $idx $total
             }
+            $progressBar.Value = 100
             Write-DLLog "---- Preview: $wouldAdd member(s) would be added ----" ([System.Drawing.Color]::CornflowerBlue)
         } catch {
             Write-DLLog "ERROR: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
@@ -5228,8 +5292,14 @@ Supported group types: MailUniversalDistributionGroup,
             [System.Windows.Forms.MessageBoxIcon]::Question)
         if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
 
-        $btnRun.Enabled = $false
+        $btnRun.Enabled     = $false
         $form.UseWaitCursor = $true
+        $progressBar.Value  = 0
+        $outPath = $txtOutPath.Text.Trim()
+        $script:DLLiveLogPath = if ($outPath -and (Test-Path $outPath)) {
+            Join-Path $outPath "DLMigrationLog_$((Get-Date).ToString('yyyyMMdd_HHmmss'))_live.txt"
+        } else { '' }
+        if ($script:DLLiveLogPath) { Write-DLLog "Live log: $script:DLLiveLogPath" ([System.Drawing.Color]::DimGray) }
         try {
             Switch-DLToSource
             Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
@@ -5291,11 +5361,20 @@ Supported group types: MailUniversalDistributionGroup,
         }
         $stamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
 
-        # Result log
+        # Status log (full RichTextBox content as plain text)
+        $txtFile = Join-Path $outPath "DLStatusLog_$stamp.txt"
+        try {
+            $rtbLog.Text | Out-File $txtFile -Encoding UTF8 -Force
+            Write-DLLog "Status log exported: $txtFile" ([System.Drawing.Color]::LimeGreen)
+        } catch {
+            Write-DLLog "ERROR exporting status log: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        }
+
+        # Result log (CSV of every operation)
         $logFile = Join-Path $outPath "DLMigrationLog_$stamp.csv"
         try {
             $script:DLResultLog | Export-Csv $logFile -NoTypeInformation -Encoding UTF8
-            Write-DLLog "Log exported: $logFile" ([System.Drawing.Color]::LimeGreen)
+            Write-DLLog "Operation log exported: $logFile" ([System.Drawing.Color]::LimeGreen)
         } catch {
             Write-DLLog "ERROR exporting log: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         }

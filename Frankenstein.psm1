@@ -3901,7 +3901,11 @@ function Invoke-FrankensteinDLMigrator {
 
     function New-TargetDLGroup ([string]$Name, [string]$DisplayName, [string]$Alias, [string]$PrimarySmtp, [string]$DLType, [string]$GroupType, [string]$OU) {
         if ($GroupType -eq 'GroupMailbox') {
-            New-UnifiedGroup -DisplayName $DisplayName -Alias $Alias -PrimarySmtpAddress $PrimarySmtp -SuppressWarmupMessage:$chkSuppressWelcome.Checked -ErrorAction Stop | Out-Null
+            New-UnifiedGroup -DisplayName $DisplayName -Alias $Alias -PrimarySmtpAddress $PrimarySmtp -ErrorAction Stop | Out-Null
+            # SuppressWarmupMessage is deprecated; suppress by disabling WelcomeMessageEnabled before members are added
+            if ($chkSuppressWelcome.Checked) {
+                Set-UnifiedGroup -Identity $PrimarySmtp -WelcomeMessageEnabled:$false -ErrorAction SilentlyContinue
+            }
         } elseif ($radOnPrem.Checked -and $script:DLOnPremSession) {
             Invoke-Command -Session $script:DLOnPremSession -ScriptBlock {
                 param($n, $dn, $a, $s, $t, $o)
@@ -3960,32 +3964,54 @@ function Invoke-FrankensteinDLMigrator {
             if ($tgtSendOnBehalf.Count)           { $p['GrantSendOnBehalfTo']           = $tgtSendOnBehalf }
             Set-UnifiedGroup @p -ErrorAction Stop
         } elseif ($radOnPrem.Checked -and $script:DLOnPremSession) {
-            $applyHidden   = $copyHidden
-            $applyModEn    = $copyModeration
-            $applyReqAuth  = $copyReqAuth
-            $hiddenVal     = $Meta.HiddenFromGAL
-            $modEnabledVal = $Meta.ModerationEnabled
-            $reqAuthVal    = $Meta.RequireSenderAuth
+            $onpremMeta = @{
+                applyHidden      = $copyHidden;   hiddenVal      = $Meta.HiddenFromGAL
+                applyModEn       = $copyModeration; modEnabledVal = $Meta.ModerationEnabled
+                applyReqAuth     = $copyReqAuth;  reqAuthVal     = $Meta.RequireSenderAuth
+                modNotify        = if ($copyModeration) { $Meta.ModerationNotify } else { $null }
+                bypassNested     = if ($copyModeration) { $Meta.BypassNestedMod } else { $null }
+                joinRestriction  = $Meta.MemberJoinRestriction
+                departRestrict   = $Meta.MemberDepartRestriction
+                rptManager       = $Meta.ReportToManager
+                rptOriginator    = $Meta.ReportToOriginator
+                sendOof          = $Meta.SendOofToOriginator
+            }
             Invoke-Command -Session $script:DLOnPremSession -ScriptBlock {
-                param($id, $managedBy, $modBy, $sob, $accept, $reject,
-                      $applyHidden, $hiddenVal, $applyModEn, $modEnabledVal, $applyReqAuth, $reqAuthVal)
+                param($id, $managedBy, $modBy, $sob, $accept, $reject, $m)
                 $p = @{ Identity = $id }
-                if ($applyHidden)  { $p['HiddenFromAddressListsEnabled']      = $hiddenVal }
-                if ($applyModEn)   { $p['ModerationEnabled']                  = $modEnabledVal }
-                if ($applyReqAuth) { $p['RequireSenderAuthenticationEnabled'] = $reqAuthVal }
+                if ($m.applyHidden)  { $p['HiddenFromAddressListsEnabled']      = $m.hiddenVal }
+                if ($m.applyReqAuth) { $p['RequireSenderAuthenticationEnabled'] = $m.reqAuthVal }
+                if ($m.applyModEn) {
+                    $p['ModerationEnabled'] = $m.modEnabledVal
+                    if ($m.modNotify)    { $p['SendModerationNotifications']    = $m.modNotify }
+                    if ($null -ne $m.bypassNested) { $p['BypassNestedModerationEnabled'] = $m.bypassNested }
+                }
+                if ($m.joinRestriction)      { $p['MemberJoinRestriction']            = $m.joinRestriction }
+                if ($m.departRestrict)       { $p['MemberDepartRestriction']          = $m.departRestrict }
+                if ($null -ne $m.rptManager)    { $p['ReportToManagerEnabled']           = $m.rptManager }
+                if ($null -ne $m.rptOriginator) { $p['ReportToOriginatorEnabled']        = $m.rptOriginator }
+                if ($null -ne $m.sendOof)       { $p['SendOofMessageToOriginatorEnabled'] = $m.sendOof }
                 if ($managedBy.Count) { $p['ManagedBy']                              = $managedBy }
                 if ($modBy.Count)     { $p['ModeratedBy']                            = $modBy }
                 if ($sob.Count)       { $p['GrantSendOnBehalfTo']                    = $sob }
                 if ($accept.Count)    { $p['AcceptMessagesOnlyFromSendersOrMembers'] = $accept }
                 if ($reject.Count)    { $p['RejectMessagesFromSendersOrMembers']     = $reject }
                 Set-DistributionGroup @p -ErrorAction Stop
-            } -ArgumentList $TargetIdentity, $tgtManagedBy, $tgtModBy, $tgtSendOnBehalf, $tgtAcceptFrom, $tgtRejectFrom,
-                            $applyHidden, $hiddenVal, $applyModEn, $modEnabledVal, $applyReqAuth, $reqAuthVal
+            } -ArgumentList $TargetIdentity, $tgtManagedBy, $tgtModBy, $tgtSendOnBehalf, $tgtAcceptFrom, $tgtRejectFrom, $onpremMeta
         } else {
             $p = @{ Identity = $TargetIdentity }
             if ($copyHidden)        { $p['HiddenFromAddressListsEnabled']      = $Meta.HiddenFromGAL }
-            if ($copyModeration)    { $p['ModerationEnabled']                  = $Meta.ModerationEnabled }
             if ($copyReqAuth)       { $p['RequireSenderAuthenticationEnabled'] = $Meta.RequireSenderAuth }
+            if ($copyModeration) {
+                $p['ModerationEnabled'] = $Meta.ModerationEnabled
+                if ($Meta.ModerationNotify) { $p['SendModerationNotifications']  = $Meta.ModerationNotify }
+                if ($null -ne $Meta.BypassNestedMod) { $p['BypassNestedModerationEnabled'] = $Meta.BypassNestedMod }
+            }
+            if ($Meta.MemberJoinRestriction)   { $p['MemberJoinRestriction']   = $Meta.MemberJoinRestriction }
+            if ($Meta.MemberDepartRestriction) { $p['MemberDepartRestriction'] = $Meta.MemberDepartRestriction }
+            if ($null -ne $Meta.ReportToManager)     { $p['ReportToManagerEnabled']           = $Meta.ReportToManager }
+            if ($null -ne $Meta.ReportToOriginator)  { $p['ReportToOriginatorEnabled']        = $Meta.ReportToOriginator }
+            if ($null -ne $Meta.SendOofToOriginator) { $p['SendOofMessageToOriginatorEnabled'] = $Meta.SendOofToOriginator }
             if ($tgtManagedBy.Count)    { $p['ManagedBy']                              = $tgtManagedBy }
             if ($tgtModBy.Count)        { $p['ModeratedBy']                            = $tgtModBy }
             if ($tgtSendOnBehalf.Count) { $p['GrantSendOnBehalfTo']                    = $tgtSendOnBehalf }
@@ -4002,23 +4028,18 @@ function Invoke-FrankensteinDLMigrator {
 
         function Resolve-ToSmtp ([string]$identity) {
             if (-not $identity) { return $null }
-            # Strip smtp:/SMTP: prefix if the value comes back that way
+            # Strip smtp:/SMTP: prefix if EXO returns addresses in that form
             if ($identity -match '^smtp:(.+)$') { $identity = $Matches[1] }
             $r = Get-Recipient -Identity $identity -ErrorAction SilentlyContinue
             if ($r) { return [string]$r.PrimarySmtpAddress }
-            # If Get-Recipient failed but the string is already an email, keep it as-is so
-            # Map-ListToTarget can still look it up against the proxy index
-            if ($identity -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') { return $identity }
-            return $null
+            # EXO often returns ManagedBy as display names (e.g. "Mollohan, Darren").
+            # Return the raw string so Map-ListToTarget can still find it via the proxy index,
+            # which is also keyed by Name and DisplayName.
+            return $identity
         }
 
         function Get-SmtpList ([object[]]$identities) {
-            @($identities | Where-Object { $_ } | ForEach-Object {
-                $raw = "$_"
-                $s   = Resolve-ToSmtp $raw
-                if (-not $s) { Write-DLLog "    (warn) Could not resolve identity to SMTP: '$raw'" ([System.Drawing.Color]::DarkGoldenrod) }
-                $s
-            } | Where-Object { $_ })
+            @($identities | Where-Object { $_ } | ForEach-Object { Resolve-ToSmtp "$_" } | Where-Object { $_ })
         }
 
         Write-DLLog "Scanning mapping for source groups..." ([System.Drawing.Color]::DimGray)
@@ -4037,19 +4058,26 @@ function Invoke-FrankensteinDLMigrator {
                 $resolvedManagedBy = Get-SmtpList $grp.ManagedBy
                 Write-DLLog "  $srcSmtp  owners-raw=$($grp.ManagedBy.Count)  owners-resolved=$($resolvedManagedBy.Count)" ([System.Drawing.Color]::DimGray)
                 $script:DLGroupMeta[$srcSmtp.ToLower()] = @{
-                    Name              = $grp.Name
-                    DisplayName       = $grp.DisplayName
-                    Alias             = $grp.Alias
-                    Type              = $typeDetail
-                    DLType            = if ($typeDetail -eq 'MailUniversalSecurityGroup') { 'Security' } else { 'Distribution' }
-                    RequireSenderAuth = $grp.RequireSenderAuthenticationEnabled
-                    HiddenFromGAL     = $grp.HiddenFromAddressListsEnabled
-                    ModerationEnabled = $grp.ModerationEnabled
-                    ManagedBy         = $resolvedManagedBy
-                    ModeratedBy       = Get-SmtpList $grp.ModeratedBy
-                    GrantSendOnBehalf = Get-SmtpList $grp.GrantSendOnBehalfTo
-                    AcceptFrom        = Get-SmtpList $grp.AcceptMessagesOnlyFromSendersOrMembers
-                    RejectFrom        = Get-SmtpList $grp.RejectMessagesFromSendersOrMembers
+                    Name                    = $grp.Name
+                    DisplayName             = $grp.DisplayName
+                    Alias                   = $grp.Alias
+                    Type                    = $typeDetail
+                    DLType                  = if ($typeDetail -eq 'MailUniversalSecurityGroup') { 'Security' } else { 'Distribution' }
+                    RequireSenderAuth       = $grp.RequireSenderAuthenticationEnabled
+                    HiddenFromGAL           = $grp.HiddenFromAddressListsEnabled
+                    ModerationEnabled       = $grp.ModerationEnabled
+                    ModerationNotify        = [string]$grp.SendModerationNotifications
+                    BypassNestedMod         = $grp.BypassNestedModerationEnabled
+                    MemberJoinRestriction   = [string]$grp.MemberJoinRestriction
+                    MemberDepartRestriction = [string]$grp.MemberDepartRestriction
+                    ReportToManager         = $grp.ReportToManagerEnabled
+                    ReportToOriginator      = $grp.ReportToOriginatorEnabled
+                    SendOofToOriginator     = $grp.SendOofMessageToOriginatorEnabled
+                    ManagedBy               = $resolvedManagedBy
+                    ModeratedBy             = Get-SmtpList $grp.ModeratedBy
+                    GrantSendOnBehalf       = Get-SmtpList $grp.GrantSendOnBehalfTo
+                    AcceptFrom              = Get-SmtpList $grp.AcceptMessagesOnlyFromSendersOrMembers
+                    RejectFrom              = Get-SmtpList $grp.RejectMessagesFromSendersOrMembers
                 }
                 $sourceGroups.Add([PSCustomObject]@{ Smtp = $srcSmtp; Type = $typeDetail })
                 continue
@@ -4165,7 +4193,8 @@ function Invoke-FrankensteinDLMigrator {
             foreach ($srcKey in $mappedSources) {
                 $tgtSmtpVal = $script:DLMappingTable[$srcKey]
                 $r = Get-Recipient -Identity $srcKey -ErrorAction SilentlyContinue
-                if ($r -and $r.EmailAddresses) {
+                if ($r) {
+                    # Index every SMTP proxy address
                     foreach ($addr in $r.EmailAddresses) {
                         if ($addr.ToString() -match '^smtp:(.+)$') {
                             $proxyKey = $Matches[1].ToLower()
@@ -4174,6 +4203,10 @@ function Invoke-FrankensteinDLMigrator {
                             }
                         }
                     }
+                    # Also index by Name and DisplayName so ManagedBy display-name strings resolve
+                    if ($r.Name        -and -not $script:DLProxyIndex.ContainsKey($r.Name.ToLower()))        { $script:DLProxyIndex[$r.Name.ToLower()]        = $tgtSmtpVal }
+                    if ($r.DisplayName -and -not $script:DLProxyIndex.ContainsKey($r.DisplayName.ToLower())) { $script:DLProxyIndex[$r.DisplayName.ToLower()] = $tgtSmtpVal }
+                    if ($r.Alias       -and -not $script:DLProxyIndex.ContainsKey($r.Alias.ToLower()))       { $script:DLProxyIndex[$r.Alias.ToLower()]       = $tgtSmtpVal }
                 }
             }
             Write-DLLog "Address alias index built ($($script:DLProxyIndex.Count) entries)." ([System.Drawing.Color]::DimGray)
@@ -4228,7 +4261,7 @@ function Invoke-FrankensteinDLMigrator {
                     Write-DLLog "  CREATED $tgtDisplayName ($tgtSmtp)" ([System.Drawing.Color]::LimeGreen)
                     try {
                         Set-TargetDLProperties -TargetIdentity $tgtSmtp -Meta $meta -GroupType $srcType -DefaultOwner $txtDefaultOwner.Text.Trim()
-                        Write-DLLog "    Properties applied (Hidden=$($meta.HiddenFromGAL) ExtSenders=$(-not $meta.RequireSenderAuth) Moderated=$($meta.ModerationEnabled) Owners=$($meta.ManagedBy.Count))" ([System.Drawing.Color]::DimGray)
+                        Write-DLLog "    Properties applied (Hidden=$($meta.HiddenFromGAL) ExtSenders=$(-not $meta.RequireSenderAuth) Moderated=$($meta.ModerationEnabled) JoinRestriction=$($meta.MemberJoinRestriction) Owners=$($meta.ManagedBy.Count))" ([System.Drawing.Color]::DimGray)
                     } catch {
                         Write-DLLog "    WARNING: Group created but properties failed -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
                     }
@@ -4623,7 +4656,7 @@ Supported group types: MailUniversalDistributionGroup,
     $chkSkipTeams.Text     = "Skip Team provisioning"
     $chkSkipTeams.Checked  = $true
     $chkSkipTeams.Location = New-Object System.Drawing.Point(600, 38)
-    $chkSkipTeams.Size     = New-Object System.Drawing.Size(60, 20)
+    $chkSkipTeams.Size     = New-Object System.Drawing.Size(200, 20)
     $chkSkipTeams.Visible  = $false
     $chkSkipTeams.Enabled  = $false
     $grpOp.Controls.Add($chkSkipTeams)

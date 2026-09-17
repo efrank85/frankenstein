@@ -4984,9 +4984,13 @@ Supported group types: MailUniversalDistributionGroup,
                 $script:DLSourceUpn = $conn.UserPrincipalName
                 $script:DLSourceOrg = $conn.Organization
             }
+            if (-not $script:DLSourceOrg) {
+                $script:DLSourceOrg = (Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
+            }
+            $srcDisplay = @($script:DLSourceOrg, $script:DLSourceUpn) | Where-Object { $_ }
             $script:DLSourceConnected = $true
-            Set-DLStatusLabel $lblSrcStatus "Connected$(if ($script:DLSourceOrg) { " ($script:DLSourceOrg)" })" ([System.Drawing.Color]::DarkGreen)
-            Write-DLLog "Source connected$(if ($script:DLSourceOrg) { " to $script:DLSourceOrg" }). Load your mapping, then use Preview or Run Migration." ([System.Drawing.Color]::LimeGreen)
+            Set-DLStatusLabel $lblSrcStatus "Connected  --  $($srcDisplay -join '  |  ')" ([System.Drawing.Color]::DarkGreen)
+            Write-DLLog "Source connected: $($srcDisplay -join ' | ')" ([System.Drawing.Color]::LimeGreen)
             $btnPreview.Enabled = $true
             if ($script:DLTargetConnected) { $btnRun.Enabled = $true }
         } catch {
@@ -5012,8 +5016,12 @@ Supported group types: MailUniversalDistributionGroup,
                     $script:DLTargetUpn = $conn.UserPrincipalName
                     $script:DLTargetOrg = $conn.Organization
                 }
-                Set-DLStatusLabel $lblTgtStatus "Connected$(if ($script:DLTargetOrg) { " ($script:DLTargetOrg)" })" ([System.Drawing.Color]::DarkGreen)
-                Write-DLLog "Target M365 connected$(if ($script:DLTargetOrg) { " to $script:DLTargetOrg" })." ([System.Drawing.Color]::LimeGreen)
+                if (-not $script:DLTargetOrg) {
+                    $script:DLTargetOrg = (Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
+                }
+                $tgtDisplay = @($script:DLTargetOrg, $script:DLTargetUpn) | Where-Object { $_ }
+                Set-DLStatusLabel $lblTgtStatus "Connected  --  $($tgtDisplay -join '  |  ')" ([System.Drawing.Color]::DarkGreen)
+                Write-DLLog "Target M365 connected: $($tgtDisplay -join ' | ')" ([System.Drawing.Color]::LimeGreen)
             } else {
                 $uri = $txtOnPremUri.Text.Trim()
                 if ($uri) {

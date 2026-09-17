@@ -4979,13 +4979,13 @@ Supported group types: MailUniversalDistributionGroup,
         try {
             Write-DLLog "Connecting to source M365 tenant..." ([System.Drawing.Color]::Silver)
             Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-            $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue
+            $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($conn) {
-                $script:DLSourceUpn = $conn.UserPrincipalName
-                $script:DLSourceOrg = $conn.Organization
+                $script:DLSourceUpn = [string]$conn.UserPrincipalName
+                $script:DLSourceOrg = [string]$conn.Organization
             }
             if (-not $script:DLSourceOrg) {
-                $script:DLSourceOrg = (Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
+                $script:DLSourceOrg = [string](Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
             }
             $srcDisplay = @($script:DLSourceOrg, $script:DLSourceUpn) | Where-Object { $_ }
             $script:DLSourceConnected = $true
@@ -5011,13 +5011,13 @@ Supported group types: MailUniversalDistributionGroup,
             if ($radM365.Checked) {
                 Write-DLLog "Connecting to target M365 tenant..." ([System.Drawing.Color]::Silver)
                 Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-                $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue
+                $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
                 if ($conn) {
-                    $script:DLTargetUpn = $conn.UserPrincipalName
-                    $script:DLTargetOrg = $conn.Organization
+                    $script:DLTargetUpn = [string]$conn.UserPrincipalName
+                    $script:DLTargetOrg = [string]$conn.Organization
                 }
                 if (-not $script:DLTargetOrg) {
-                    $script:DLTargetOrg = (Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
+                    $script:DLTargetOrg = [string](Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
                 }
                 $tgtDisplay = @($script:DLTargetOrg, $script:DLTargetUpn) | Where-Object { $_ }
                 Set-DLStatusLabel $lblTgtStatus "Connected  --  $($tgtDisplay -join '  |  ')" ([System.Drawing.Color]::DarkGreen)
@@ -5051,11 +5051,11 @@ Supported group types: MailUniversalDistributionGroup,
     function Get-DLCurrentOrg {
         try {
             if (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue) {
-                $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue
-                if ($conn) { return $conn.Organization }
+                $conn = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($conn) { return [string]$conn.Organization }
             }
             $org = Get-OrganizationConfig -ErrorAction SilentlyContinue
-            if ($org) { return $org.Name }
+            if ($org) { return [string]$org.Name }
         } catch {}
         return $null
     }

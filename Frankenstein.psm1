@@ -4058,7 +4058,8 @@ function Invoke-FrankensteinDLMigrator {
                 $mTarget = Find-DLMapping $m
 
                 if ($mType -in $dlTypes) {
-                    if ($mTarget) {
+                    if ($null -ne $mTarget) {
+                        # $mTarget may be '' if this nested group is pending creation -- Phase 2 will re-resolve
                         $script:DLSourceData.Add([PSCustomObject]@{
                             SourceGroup     = $srcSmtp
                             TargetGroup     = $tgtSmtp
@@ -4205,7 +4206,11 @@ function Invoke-FrankensteinDLMigrator {
         foreach ($rec in $script:DLSourceData) {
             $tgtGroup  = $script:DLMappingTable[$rec.SourceGroup.ToLower()]
             if (-not $tgtGroup) { $tgtGroup = $rec.TargetGroup }
-            $tgtMember    = $rec.TargetMember
+            # Re-resolve TargetMember in case it was a nested group pending creation at collection time
+            $tgtMember = $rec.TargetMember
+            if (-not $tgtMember -and $rec.SourceMember) {
+                $tgtMember = $script:DLMappingTable[$rec.SourceMember.ToLower()]
+            }
             $srcGroupType = $rec.SourceGroupType
 
             $log = [ordered]@{
@@ -4224,6 +4229,14 @@ function Invoke-FrankensteinDLMigrator {
                 $log.Status  = 'Skipped'
                 $log.Details = 'No target group identity -- group was not created or target mapping is missing'
                 Write-DLLog "  SKIP  $tgtMember -- target group for '$($rec.SourceGroup)' unknown" ([System.Drawing.Color]::DarkGoldenrod)
+                $script:DLResultLog.Add([PSCustomObject]$log)
+                continue
+            }
+
+            if (-not $tgtMember) {
+                $log.Status  = 'Skipped'
+                $log.Details = 'Nested group target could not be resolved -- creation may have failed'
+                Write-DLLog "  SKIP  $($rec.SourceMember) -> $tgtGroup -- nested group was not created" ([System.Drawing.Color]::DarkGoldenrod)
                 $script:DLResultLog.Add([PSCustomObject]$log)
                 continue
             }
@@ -4263,7 +4276,7 @@ function Invoke-FrankensteinDLMigrator {
 
     $form                 = New-Object System.Windows.Forms.Form
     $form.Text            = "Frankenstein - DL Migrator"
-    $form.ClientSize      = New-Object System.Drawing.Size(700, 946)
+    $form.ClientSize      = New-Object System.Drawing.Size(700, 972)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedSingle'
     $form.MaximizeBox     = $false
@@ -4465,7 +4478,7 @@ Supported group types: MailUniversalDistributionGroup,
     $grpOp           = New-Object System.Windows.Forms.GroupBox
     $grpOp.Text      = "3. Operation"
     $grpOp.Location  = New-Object System.Drawing.Point(12, 424)
-    $grpOp.Size      = New-Object System.Drawing.Size(676, 246)
+    $grpOp.Size      = New-Object System.Drawing.Size(676, 272)
     $form.Controls.Add($grpOp)
 
     # Group type filter -- always active, both modes
@@ -4678,7 +4691,7 @@ Supported group types: MailUniversalDistributionGroup,
     # --- 4. Options ---
     $grpOpts           = New-Object System.Windows.Forms.GroupBox
     $grpOpts.Text      = "4. Options"
-    $grpOpts.Location  = New-Object System.Drawing.Point(12, 678)
+    $grpOpts.Location  = New-Object System.Drawing.Point(12, 704)
     $grpOpts.Size      = New-Object System.Drawing.Size(676, 52)
     $form.Controls.Add($grpOpts)
 
@@ -4703,14 +4716,14 @@ Supported group types: MailUniversalDistributionGroup,
     # --- Action Buttons ---
     $btnPreview               = New-Object System.Windows.Forms.Button
     $btnPreview.Text          = "Preview"
-    $btnPreview.Location      = New-Object System.Drawing.Point(12, 740)
+    $btnPreview.Location      = New-Object System.Drawing.Point(12, 766)
     $btnPreview.Size          = New-Object System.Drawing.Size(130, 34)
     $btnPreview.Enabled       = $false
     $form.Controls.Add($btnPreview)
 
     $btnRun                   = New-Object System.Windows.Forms.Button
     $btnRun.Text              = "Run Migration"
-    $btnRun.Location          = New-Object System.Drawing.Point(260, 740)
+    $btnRun.Location          = New-Object System.Drawing.Point(260, 766)
     $btnRun.Size              = New-Object System.Drawing.Size(180, 34)
     $btnRun.BackColor         = [System.Drawing.Color]::FromArgb(0, 120, 212)
     $btnRun.ForeColor         = [System.Drawing.Color]::White
@@ -4720,7 +4733,7 @@ Supported group types: MailUniversalDistributionGroup,
 
     $btnExportLog             = New-Object System.Windows.Forms.Button
     $btnExportLog.Text        = "Export Log"
-    $btnExportLog.Location    = New-Object System.Drawing.Point(558, 740)
+    $btnExportLog.Location    = New-Object System.Drawing.Point(558, 766)
     $btnExportLog.Size        = New-Object System.Drawing.Size(130, 34)
     $btnExportLog.Enabled     = $false
     $form.Controls.Add($btnExportLog)
@@ -4728,7 +4741,7 @@ Supported group types: MailUniversalDistributionGroup,
     # --- Status Log ---
     $grpLog           = New-Object System.Windows.Forms.GroupBox
     $grpLog.Text      = "Status Log"
-    $grpLog.Location  = New-Object System.Drawing.Point(12, 784)
+    $grpLog.Location  = New-Object System.Drawing.Point(12, 810)
     $grpLog.Size      = New-Object System.Drawing.Size(676, 152)
     $form.Controls.Add($grpLog)
 
@@ -5012,6 +5025,19 @@ Supported group types: MailUniversalDistributionGroup,
         }
     })
 
+    # Returns $true if an active EXO session exists (no prompt needed)
+    function Test-DLEXOActive {
+        try {
+            if (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue) {
+                return ($null -ne (Get-ConnectionInformation -ErrorAction SilentlyContinue))
+            }
+            Get-OrganizationConfig -ErrorAction Stop | Out-Null
+            return $true
+        } catch {
+            return $false
+        }
+    }
+
     # Shared validation -- returns $true if ready to proceed
     function Confirm-DLReadyState {
         if (-not $script:DLMappingTable.Count) {
@@ -5043,8 +5069,12 @@ Supported group types: MailUniversalDistributionGroup,
         $btnPreview.Enabled = $false
         $form.UseWaitCursor = $true
         try {
-            Write-DLLog "Re-connecting to source for member read..." ([System.Drawing.Color]::DimGray)
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            if (Test-DLEXOActive) {
+                Write-DLLog "Using existing source connection." ([System.Drawing.Color]::DimGray)
+            } else {
+                Write-DLLog "Connecting to source M365..." ([System.Drawing.Color]::DimGray)
+                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            }
             Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
 
             Collect-DLSourceData
@@ -5110,15 +5140,23 @@ Supported group types: MailUniversalDistributionGroup,
         $btnRun.Enabled = $false
         $form.UseWaitCursor = $true
         try {
-            Write-DLLog "Re-connecting to source..." ([System.Drawing.Color]::DimGray)
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            if (Test-DLEXOActive) {
+                Write-DLLog "Using existing source connection." ([System.Drawing.Color]::DimGray)
+            } else {
+                Write-DLLog "Connecting to source M365..." ([System.Drawing.Color]::DimGray)
+                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            }
             Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
             Collect-DLSourceData
             Set-DLStatusLabel $lblSrcStatus "Connected - $($script:DLSourceData.Count) member record(s) read" ([System.Drawing.Color]::DarkGreen)
 
             if ($radM365.Checked) {
-                Write-DLLog "Re-connecting to target M365..." ([System.Drawing.Color]::DimGray)
-                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+                if (Test-DLEXOActive) {
+                    Write-DLLog "Using existing target connection." ([System.Drawing.Color]::DimGray)
+                } else {
+                    Write-DLLog "Connecting to target M365..." ([System.Drawing.Color]::DimGray)
+                    Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+                }
             } elseif ($script:DLOnPremSession -and $script:DLOnPremSession.State -ne 'Opened') {
                 $uri = $txtOnPremUri.Text.Trim()
                 if ($uri) {

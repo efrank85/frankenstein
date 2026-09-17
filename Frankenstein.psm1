@@ -5191,36 +5191,46 @@ Supported group types: MailUniversalDistributionGroup,
 
     # Ensure we are connected to source; use Set-ConnectionContext for silent switching
     function Switch-DLToSource {
+        # Best path: Set-ConnectionContext (EXO 3.2+) is truly silent
         if ($script:DLSourceConnectionId -and (Get-Command Set-ConnectionContext -ErrorAction SilentlyContinue)) {
             try {
                 Set-ConnectionContext -ConnectionId $script:DLSourceConnectionId -ErrorAction Stop
-                Write-DLLog "Switched to source ($script:DLSourceOrg)." ([System.Drawing.Color]::DimGray)
                 return
             } catch {}
         }
-        $current = Get-DLCurrentOrg
-        if ($script:DLSourceOrg -and $current -eq $script:DLSourceOrg) {
-            Write-DLLog "Using existing source connection ($current)." ([System.Drawing.Color]::DimGray)
+        # Fast path: single active connection and it is already source
+        if ($script:DLSourceOrg -and (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue)) {
+            $active = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+            if ($active.Count -eq 1 -and [string]$active[0].Organization -eq $script:DLSourceOrg) { return }
+        }
+        # Reconnect -- pass stored UPN so MSAL can serve the cached token silently
+        Write-DLLog "Switching to source$(if ($script:DLSourceOrg) { " ($script:DLSourceOrg)" })..." ([System.Drawing.Color]::DimGray)
+        if ($script:DLSourceUpn) {
+            Connect-ExchangeOnline -UserPrincipalName $script:DLSourceUpn -ShowBanner:$false -ErrorAction Stop
         } else {
-            Write-DLLog "Connecting to source$(if ($script:DLSourceOrg) { " ($script:DLSourceOrg)" })..." ([System.Drawing.Color]::DimGray)
             Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
         }
     }
 
     # Ensure we are connected to target; use Set-ConnectionContext for silent switching
     function Switch-DLToTarget {
+        # Best path: Set-ConnectionContext (EXO 3.2+) is truly silent
         if ($script:DLTargetConnectionId -and (Get-Command Set-ConnectionContext -ErrorAction SilentlyContinue)) {
             try {
                 Set-ConnectionContext -ConnectionId $script:DLTargetConnectionId -ErrorAction Stop
-                Write-DLLog "Switched to target ($script:DLTargetOrg)." ([System.Drawing.Color]::DimGray)
                 return
             } catch {}
         }
-        $current = Get-DLCurrentOrg
-        if ($script:DLTargetOrg -and $current -eq $script:DLTargetOrg) {
-            Write-DLLog "Using existing target connection ($current)." ([System.Drawing.Color]::DimGray)
+        # Fast path: single active connection and it is already target
+        if ($script:DLTargetOrg -and (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue)) {
+            $active = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+            if ($active.Count -eq 1 -and [string]$active[0].Organization -eq $script:DLTargetOrg) { return }
+        }
+        # Reconnect -- pass stored UPN so MSAL can serve the cached token silently
+        Write-DLLog "Switching to target$(if ($script:DLTargetOrg) { " ($script:DLTargetOrg)" })..." ([System.Drawing.Color]::DimGray)
+        if ($script:DLTargetUpn) {
+            Connect-ExchangeOnline -UserPrincipalName $script:DLTargetUpn -ShowBanner:$false -ErrorAction Stop
         } else {
-            Write-DLLog "Connecting to target$(if ($script:DLTargetOrg) { " ($script:DLTargetOrg)" })..." ([System.Drawing.Color]::DimGray)
             Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
         }
     }

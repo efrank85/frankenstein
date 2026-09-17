@@ -4079,10 +4079,16 @@ function Invoke-FrankensteinDLMigrator {
             @($identities | Where-Object { $_ } | ForEach-Object { Resolve-ToSmtp "$_" } | Where-Object { $_ })
         }
 
+        $progressBar.Value = 0
+        $progressBar.Refresh()
         Write-DLLog "Scanning mapping for source groups..." ([System.Drawing.Color]::DimGray)
         $sourceGroups = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $scanTotal = [math]::Max(1, $script:DLMappingTable.Keys.Count)
+        $scanDone  = 0
 
         foreach ($srcSmtp in @($script:DLMappingTable.Keys)) {
+            $scanDone++
+            Update-DLProgress ([int]($scanDone / $scanTotal * 20)) 100
             $grp = Get-DistributionGroup -Identity $srcSmtp -ErrorAction SilentlyContinue
             if ($grp) {
                 $typeDetail = $grp.RecipientTypeDetails
@@ -4154,6 +4160,7 @@ function Invoke-FrankensteinDLMigrator {
 
         foreach ($grpEntry in $sourceGroups) {
             $idx++
+            Update-DLProgress (20 + [int]($idx / [math]::Max(1,$total) * 15)) 100
             $srcSmtp = $grpEntry.Smtp
             $srcType = $grpEntry.Type
             $tgtSmtp = $script:DLMappingTable[$srcSmtp.ToLower()]
@@ -4247,6 +4254,7 @@ function Invoke-FrankensteinDLMigrator {
                 }
             }
             Write-DLLog "Address alias index built ($($script:DLProxyIndex.Count) entries)." ([System.Drawing.Color]::DimGray)
+            Update-DLProgress 40 100
         }
     }
 
@@ -4255,6 +4263,8 @@ function Invoke-FrankensteinDLMigrator {
         $createMode = $radCreateGroups.Checked
         $prefix     = $txtPrefix.Text.Trim()
         $newDomain  = $txtNewDomain.Text.Trim().TrimStart('@')
+        # If user pasted a full email address (user@domain.com) instead of just the domain, extract the domain part
+        if ($newDomain -match '@') { $newDomain = ($newDomain -split '@')[-1] }
 
         # Phase 1: Create groups
         if ($createMode) {
@@ -4262,7 +4272,7 @@ function Invoke-FrankensteinDLMigrator {
             $p1Total = [math]::Max(1, $script:DLGroupMeta.Count); $p1Done = 0
             foreach ($srcSmtp in @($script:DLGroupMeta.Keys)) {
                 $p1Done++
-                Update-DLProgress ([int]($p1Done / $p1Total * 40)) 100
+                Update-DLProgress (40 + [int]($p1Done / $p1Total * 30)) 100
                 $meta    = $script:DLGroupMeta[$srcSmtp]
                 $srcType = $meta.Type
 
@@ -4378,7 +4388,7 @@ function Invoke-FrankensteinDLMigrator {
         Write-DLLog "---- Phase 2: Adding members ($p2Total record(s)) ----" ([System.Drawing.Color]::CornflowerBlue)
         foreach ($rec in $script:DLSourceData) {
             $p2Done++
-            Update-DLProgress (40 + [int]($p2Done / [math]::Max(1,$p2Total) * 60)) 100
+            Update-DLProgress (70 + [int]($p2Done / [math]::Max(1,$p2Total) * 30)) 100
             $tgtGroup  = $script:DLMappingTable[$rec.SourceGroup.ToLower()]
             if (-not $tgtGroup) { $tgtGroup = $rec.TargetGroup }
             # Re-resolve TargetMember in case it was a nested group pending creation at collection time

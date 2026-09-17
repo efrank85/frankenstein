@@ -4266,11 +4266,24 @@ function Invoke-FrankensteinDLMigrator {
                 $meta    = $script:DLGroupMeta[$srcSmtp]
                 $srcType = $meta.Type
 
-                # Mixed CSV: if a non-blank target was already in the mapping, skip creation
+                # Mixed CSV: if a non-blank target was already in the mapping, verify it exists in EXO
                 $existingTarget = $script:DLMappingTable[$srcSmtp.ToLower()]
                 if ($existingTarget) {
-                    Write-DLLog "  EXISTING $srcSmtp -> $existingTarget (target already mapped -- skipping creation)" ([System.Drawing.Color]::DarkCyan)
-                    continue
+                    $existsInEXO = Get-Recipient -Identity $existingTarget -ErrorAction SilentlyContinue
+                    if (-not $existsInEXO) {
+                        Write-DLLog "  STALE  $srcSmtp -> $existingTarget (in CSV but not found in EXO -- re-creating)" ([System.Drawing.Color]::DarkGoldenrod)
+                        $script:DLMappingTable.Remove($srcSmtp.ToLower())
+                        # fall through to creation logic below
+                    } else {
+                        Write-DLLog "  EXISTING $srcSmtp -> $existingTarget (target already mapped -- applying properties)" ([System.Drawing.Color]::DarkCyan)
+                        try {
+                            Set-TargetDLProperties -TargetIdentity $existingTarget -Meta $meta -GroupType $srcType -DefaultOwner $txtDefaultOwner.Text.Trim()
+                            Write-DLLog "    Properties applied" ([System.Drawing.Color]::DimGray)
+                        } catch {
+                            Write-DLLog "    WARNING: Properties failed for existing group -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
+                        }
+                        continue
+                    }
                 }
 
                 if ($srcType -eq 'GroupMailbox' -and $radOnPrem.Checked) {
@@ -4361,6 +4374,7 @@ function Invoke-FrankensteinDLMigrator {
 
         # Phase 2: Add members
         $p2Total = $script:DLSourceData.Count; $p2Done = 0
+        $groupNotFoundInEXO = @{}   # tracks target groups that returned "couldn't be found" -- skip remaining members fast
         Write-DLLog "---- Phase 2: Adding members ($p2Total record(s)) ----" ([System.Drawing.Color]::CornflowerBlue)
         foreach ($rec in $script:DLSourceData) {
             $p2Done++
@@ -4410,6 +4424,15 @@ function Invoke-FrankensteinDLMigrator {
                 continue
             }
 
+            # If this target group already failed with "not found", skip without hitting EXO again
+            if ($groupNotFoundInEXO[$tgtGroup]) {
+                $log.Status  = 'Failed'
+                $log.Details = "Target group not found in EXO (skipped -- group was not found for an earlier member add)"
+                Write-DLLog "  SKIP  $tgtMember -> $tgtGroup (group not found in EXO)" ([System.Drawing.Color]::DarkGoldenrod)
+                $script:DLResultLog.Add([PSCustomObject]$log)
+                continue
+            }
+
             try {
                 Add-TargetDLMember -TargetGroup $tgtGroup -TargetMember $tgtMember -GroupType $srcGroupType
                 $log.Status  = 'Success'
@@ -4417,7 +4440,13 @@ function Invoke-FrankensteinDLMigrator {
                 Write-DLLog "  OK    $tgtMember -> $tgtGroup$(if ($rec.ExpandedFrom) { " (from $($rec.ExpandedFrom))" })" ([System.Drawing.Color]::LimeGreen)
             } catch {
                 $err = $_.Exception.Message
-                if ($err -match 'already|member|exists') {
+                if ($err -match "couldn't be found on|could not be found on") {
+                    # Target group doesn't exist in EXO -- mark it and skip all remaining members for this group
+                    $groupNotFoundInEXO[$tgtGroup] = $true
+                    $log.Status  = 'Failed'
+                    $log.Details = $err
+                    Write-DLLog "  ERR   $tgtMember -> $tgtGroup -- group not found in EXO (remaining members for this group will be skipped)" ([System.Drawing.Color]::Tomato)
+                } elseif ($err -match 'already|member|exists') {
                     $log.Status  = 'AlreadyMember'
                     $log.Details = 'Already a member'
                     Write-DLLog "  DUP   $tgtMember already in $tgtGroup" ([System.Drawing.Color]::SteelBlue)

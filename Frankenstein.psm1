@@ -165,7 +165,7 @@ function Connect-M365 {
         # Required for SharePoint and PnP connections
         [string]$SharePointAdminUrl,
 
-        # Optional — defaults to a broad read/write admin scope set
+        # Optional -- defaults to a broad read/write admin scope set
         [string[]]$GraphScopes = @(
             "Directory.ReadWrite.All",
             "User.ReadWrite.All",
@@ -608,7 +608,7 @@ function Get-FrankensteinEntraDiscovery {
     Push-Location $OutputDir
     Start-Transcript ".\EntraDiscovery_Transcript_$DateStamp.txt"
 
-    # ── Organization ─────────────────────────────────────────────────────────
+    # -- Organization ---------------------------------------------------------
     Get-Linebreak
     Write-Host "Organization Info" -ForegroundColor Cyan
     $Org = Get-MgOrganization
@@ -639,7 +639,7 @@ function Get-FrankensteinEntraDiscovery {
         } | Export-Csv ".\Organization_$DateStamp.csv" -NoTypeInformation
     }
 
-    # ── Domains ──────────────────────────────────────────────────────────────
+    # -- Domains --------------------------------------------------------------
     Get-Linebreak
     Write-Host "Domains" -ForegroundColor Cyan
     $Domains = Get-MgDomain -All
@@ -650,7 +650,7 @@ function Get-FrankensteinEntraDiscovery {
             Export-Csv ".\Domains_$DateStamp.csv" -NoTypeInformation
     }
 
-    # ── Licenses ─────────────────────────────────────────────────────────────
+    # -- Licenses -------------------------------------------------------------
     Get-Linebreak
     Write-Host "License Summary" -ForegroundColor Cyan
     $Skus = Get-MgSubscribedSku -All
@@ -671,7 +671,7 @@ function Get-FrankensteinEntraDiscovery {
             Export-Csv ".\Licenses_$DateStamp.csv" -NoTypeInformation
     }
 
-    # ── Users ─────────────────────────────────────────────────────────────────
+    # -- Users -----------------------------------------------------------------
     Get-Linebreak
     Write-Host "Gathering Users..." -ForegroundColor Cyan
     $AllUsers = Get-MgUser -All -Property `
@@ -722,7 +722,7 @@ function Get-FrankensteinEntraDiscovery {
             Export-Csv ".\Users_$DateStamp.csv" -NoTypeInformation
     }
 
-    # ── MFA & Authentication Registration ────────────────────────────────────
+    # -- MFA & Authentication Registration ------------------------------------
     Get-Linebreak
     Write-Host "MFA & Authentication Registration..." -ForegroundColor Cyan
     try {
@@ -761,7 +761,7 @@ function Get-FrankensteinEntraDiscovery {
         Write-Warning "Could not retrieve MFA registration data. Ensure UserAuthenticationMethod.Read.All or Reports.Read.All is consented."
     }
 
-    # ── Admin Role Assignments ────────────────────────────────────────────────
+    # -- Admin Role Assignments ------------------------------------------------
     Get-Linebreak
     Write-Host "Admin Role Assignments..." -ForegroundColor Cyan
     $Roles = Get-MgDirectoryRole -All
@@ -784,7 +784,7 @@ function Get-FrankensteinEntraDiscovery {
         $RoleAssignments | Export-Csv ".\AdminRoleAssignments_$DateStamp.csv" -NoTypeInformation
     }
 
-    # ── Groups ────────────────────────────────────────────────────────────────
+    # -- Groups ----------------------------------------------------------------
     Get-Linebreak
     Write-Host "Gathering Groups..." -ForegroundColor Cyan
     $AllGroups = Get-MgGroup -All -Property `
@@ -824,7 +824,7 @@ function Get-FrankensteinEntraDiscovery {
             Export-Csv ".\Groups_$DateStamp.csv" -NoTypeInformation
     }
 
-    # ── Devices ───────────────────────────────────────────────────────────────
+    # -- Devices ---------------------------------------------------------------
     Get-Linebreak
     Write-Host "Gathering Devices..." -ForegroundColor Cyan
     $Devices = Get-MgDevice -All -Property `
@@ -868,7 +868,7 @@ function Get-FrankensteinEntraDiscovery {
             Export-Csv ".\Devices_$DateStamp.csv" -NoTypeInformation
     }
 
-    # ── Conditional Access ────────────────────────────────────────────────────
+    # -- Conditional Access ----------------------------------------------------
     Get-Linebreak
     Write-Host "Conditional Access Policies..." -ForegroundColor Cyan
     $CAPolicies   = Get-MgIdentityConditionalAccessPolicy -All
@@ -899,7 +899,7 @@ function Get-FrankensteinEntraDiscovery {
             Export-Csv ".\ConditionalAccessPolicies_$DateStamp.csv" -NoTypeInformation
     }
 
-    # ── Applications ─────────────────────────────────────────────────────────
+    # -- Applications ---------------------------------------------------------
     Get-Linebreak
     Write-Host "Applications..." -ForegroundColor Cyan
     $AppRegs = Get-MgApplication -All -Property Id, DisplayName, CreatedDateTime, SignInAudience, PublisherDomain
@@ -920,7 +920,7 @@ function Get-FrankensteinEntraDiscovery {
             Export-Csv ".\EnterpriseApps_$DateStamp.csv" -NoTypeInformation
     }
 
-    # ── Security Posture ─────────────────────────────────────────────────────
+    # -- Security Posture -----------------------------------------------------
     Get-Linebreak
     Write-Host "Security Posture..." -ForegroundColor Cyan
 
@@ -943,7 +943,7 @@ function Get-FrankensteinEntraDiscovery {
     }
     catch {}
 
-    # ── Discovery Summary ─────────────────────────────────────────────────────
+    # -- Discovery Summary -----------------------------------------------------
     Get-Linebreak
     Write-Host "ENTRA ID DISCOVERY SUMMARY" -ForegroundColor Green
     Write-Host ""
@@ -953,7 +953,7 @@ function Get-FrankensteinEntraDiscovery {
     Write-Host "  Devices : $($Devices.Count) total  |  $($EntraJoined.Count) Entra joined  |  $($HybridJoined.Count) hybrid  |  $($Compliant.Count) compliant"
     Write-Host "  CA      : $($CAPolicies.Count) policies  ($($CAEnabled.Count) enabled)"
     Write-Host "  Apps    : $($AppRegs.Count) registrations  |  $($EntApps.Count) enterprise apps"
-    Write-Host "  DirSync : $(if($OnPremSync){'Enabled — Last sync: ' + $LastSync}else{'Cloud-Only'})"
+    Write-Host "  DirSync : $(if($OnPremSync){'Enabled -- Last sync: ' + $LastSync}else{'Cloud-Only'})"
     Write-Host ""
     Write-Host "Output saved to: $OutputDir" -ForegroundColor Gray
 
@@ -2744,7 +2744,7 @@ OUTPUT COLUMNS
       SIP    - SIP address (requires -SIP)
 
     TargetAddress is only present when -ImportMappingCSV is used. It contains the
-    Target value from the mapping file — typically the object's identity in the target tenant.
+    Target value from the mapping file -- typically the object's identity in the target tenant.
 
 EXAMPLE
     Get-FrankensteinAliasReport -UseCurrentSession -CSV
@@ -2926,7 +2926,7 @@ NOTES
             Add-AddressRows $recip
         }
     } else {
-        # Bulk path: use type-specific cmdlets directly — they carry LegacyExchangeDN natively.
+        # Bulk path: use type-specific cmdlets directly -- they carry LegacyExchangeDN natively.
         # Get-Recipient is avoided here because EXO's REST module returns LegacyExchangeDN as null.
         $AllRecipients = [System.Collections.Generic.List[object]]::new()
 
@@ -3071,14 +3071,14 @@ NOTES
                 $isDL       = $r.RecipientTypeDetails -in $dlTypes
                 $dlIsMapped = $script:PMMappingTable.ContainsKey($smtp.ToLower())
                 if ($isDL -and $chkResolveDLs.Checked -and -not $dlIsMapped) {
-                    # DL has no mapping entry — expand members and grant individually
+                    # DL has no mapping entry -- expand members and grant individually
                     $members = @(Expand-FrankensteinDLMembers -Identity $smtp -Recurse:($chkNestedDLs.Checked))
                     if ($members.Count) {
                         Write-PMLog "    DL '$smtp' (unmapped, expanding) -> $($members.Count) member(s)" ([System.Drawing.Color]::DarkCyan)
                         foreach ($m in $members) { Add-PMRecord $m.PrimarySmtpAddress $permType $smtp }
                     }
                 } else {
-                    # Non-DL, DL expansion off, or DL is mapped — record as direct delegate
+                    # Non-DL, DL expansion off, or DL is mapped -- record as direct delegate
                     Add-PMRecord $smtp $permType ''
                 }
             }
@@ -3215,7 +3215,7 @@ NOTES
 
     # CSV option
     $radCsvMapping          = New-Object System.Windows.Forms.RadioButton
-    $radCsvMapping.Text     = "Load CSV mapping file  (Source + Target columns — mailboxes, delegates, groups)"
+    $radCsvMapping.Text     = "Load CSV mapping file  (Source + Target columns -- mailboxes, delegates, groups)"
     $radCsvMapping.Checked  = $true
     $radCsvMapping.Location = New-Object System.Drawing.Point(10, 20)
     $radCsvMapping.Size     = New-Object System.Drawing.Size(570, 20)
@@ -3241,34 +3241,34 @@ NOTES
     $ttMap.ShowAlways   = $true
     $csvTip = @"
 CSV Requirements
-────────────────────────────────────────────────
+------------------------------------------------
 Column headers (exact, case-insensitive):
-  Source  — the identity in the SOURCE tenant
-  Target  — the corresponding identity in the TARGET tenant
+  Source  -- the identity in the SOURCE tenant
+  Target  -- the corresponding identity in the TARGET tenant
 
 Accepted identity formats:
-  • Primary SMTP address  (user@source.com)
-  • User Principal Name   (user@source.com)
-  • Any value Exchange PowerShell can resolve
+  * Primary SMTP address  (user@source.com)
+  * User Principal Name   (user@source.com)
+  * Any value Exchange PowerShell can resolve
 
 Supported object types per row:
-  • User mailbox / Shared mailbox / Room / Equipment
-  • Mail-enabled security group or distribution group
-  • Mail user  •  Mail contact
+  * User mailbox / Shared mailbox / Room / Equipment
+  * Mail-enabled security group or distribution group
+  * Mail user  *  Mail contact
 
 Important rules:
-  • A permission is only migrated when BOTH the mailbox owner
+  * A permission is only migrated when BOTH the mailbox owner
     AND the delegate have a row in this file.
-  • DL delegates are automatically expanded to their members at
-    collection time — include individual members, not the DL itself.
-  • onmicrosoft.com addresses are fine as Target values.
+  * DL delegates are automatically expanded to their members at
+    collection time -- include individual members, not the DL itself.
+  * onmicrosoft.com addresses are fine as Target values.
 "@
     $ttMap.SetToolTip($radCsvMapping, $csvTip)
     $ttMap.SetToolTip($btnBrowseMap,  $csvTip)
 
     # Manual option
     $radManualEntry         = New-Object System.Windows.Forms.RadioButton
-    $radManualEntry.Text    = "Enter source/target pairs manually  (no CSV needed — useful for single-user migrations)"
+    $radManualEntry.Text    = "Enter source/target pairs manually  (no CSV needed -- useful for single-user migrations)"
     $radManualEntry.Location = New-Object System.Drawing.Point(10, 62)
     $radManualEntry.Size    = New-Object System.Drawing.Size(654, 20)
     $grpMap.Controls.Add($radManualEntry)
@@ -3610,7 +3610,7 @@ Important rules:
         }
     })
 
-    # Connect Source — auth validation only, no data collection
+    # Connect Source -- auth validation only, no data collection
     $btnConnSrc.Add_Click({
         Set-PMStatusLabel $lblSrcStatus "Connecting..." ([System.Drawing.Color]::DarkGoldenrod)
         $form.UseWaitCursor = $true
@@ -3632,7 +3632,7 @@ Important rules:
         }
     })
 
-    # Connect Target — auth validation only
+    # Connect Target -- auth validation only
     $btnConnTgt.Add_Click({
         Set-PMStatusLabel $lblTgtStatus "Connecting..." ([System.Drawing.Color]::DarkGoldenrod)
         $form.UseWaitCursor = $true
@@ -3653,7 +3653,7 @@ Important rules:
         }
     })
 
-    # Preview — re-connects to source, collects, then shows what would be applied
+    # Preview -- re-connects to source, collects, then shows what would be applied
     $btnPreview.Add_Click({
         if (-not $script:PMMappingTable.Count) {
             $msg = if ($radCsvMapping.Checked) { "Load a mapping CSV first." } else { "Add at least one source/target pair first." }
@@ -3706,7 +3706,7 @@ Important rules:
         }
     })
 
-    # Run Migration — re-connects to source to collect, then to target to apply
+    # Run Migration -- re-connects to source to collect, then to target to apply
     $btnRun.Add_Click({
         if (-not $script:PMMappingTable.Count) {
             $msg = if ($radCsvMapping.Checked) { "Load a mapping CSV first." } else { "Add at least one source/target pair first." }
@@ -3928,7 +3928,7 @@ function Invoke-FrankensteinDLMigrator {
                             SourceGroupType = $srcType
                         })
                     } else {
-                        Write-DLLog "    Nested '$mSmtp' unmapped — expanding members" ([System.Drawing.Color]::DarkCyan)
+                        Write-DLLog "    Nested '$mSmtp' unmapped -- expanding members" ([System.Drawing.Color]::DarkCyan)
                         $expanded = @(Expand-FrankensteinDLMembers -Identity $mSmtp -Recurse)
                         foreach ($em in $expanded) {
                             $emTarget = $script:DLMappingTable[$em.PrimarySmtpAddress.ToLower()]
@@ -3943,7 +3943,7 @@ function Invoke-FrankensteinDLMigrator {
                                     SourceGroupType = $srcType
                                 })
                             } else {
-                                Write-DLLog "      SKIP $($em.PrimarySmtpAddress) (expanded from $mSmtp) — not mapped" ([System.Drawing.Color]::DarkGoldenrod)
+                                Write-DLLog "      SKIP $($em.PrimarySmtpAddress) (expanded from $mSmtp) -- not mapped" ([System.Drawing.Color]::DarkGoldenrod)
                             }
                         }
                     }
@@ -3959,7 +3959,7 @@ function Invoke-FrankensteinDLMigrator {
                             SourceGroupType = $srcType
                         })
                     } else {
-                        Write-DLLog "    SKIP $mSmtp — not mapped" ([System.Drawing.Color]::DarkGoldenrod)
+                        Write-DLLog "    SKIP $mSmtp -- not mapped" ([System.Drawing.Color]::DarkGoldenrod)
                     }
                 }
             }
@@ -3983,12 +3983,12 @@ function Invoke-FrankensteinDLMigrator {
                 # Mixed CSV: if a non-blank target was already in the mapping, skip creation
                 $existingTarget = $script:DLMappingTable[$srcSmtp.ToLower()]
                 if ($existingTarget) {
-                    Write-DLLog "  EXISTING $srcSmtp → $existingTarget (target already mapped — skipping creation)" ([System.Drawing.Color]::DarkCyan)
+                    Write-DLLog "  EXISTING $srcSmtp -> $existingTarget (target already mapped -- skipping creation)" ([System.Drawing.Color]::DarkCyan)
                     continue
                 }
 
                 if ($srcType -eq 'GroupMailbox' -and $radOnPrem.Checked) {
-                    Write-DLLog "  SKIP $srcSmtp — M365 Groups cannot be created on-prem" ([System.Drawing.Color]::DarkGoldenrod)
+                    Write-DLLog "  SKIP $srcSmtp -- M365 Groups cannot be created on-prem" ([System.Drawing.Color]::DarkGoldenrod)
                     $script:DLResultLog.Add([PSCustomObject][ordered]@{
                         Operation = 'CreateGroup'; SourceGroup = $srcSmtp; TargetGroup = 'N/A'
                         SourceMember = ''; TargetMember = ''; ExpandedFrom = ''
@@ -4020,7 +4020,7 @@ function Invoke-FrankensteinDLMigrator {
                     $err    = $_.Exception.Message
                     $status = if ($err -match 'already|exists|conflict') { 'Conflict' } else { 'Failed' }
                     $color  = if ($status -eq 'Conflict') { [System.Drawing.Color]::SteelBlue } else { [System.Drawing.Color]::Tomato }
-                    Write-DLLog "  $status $tgtName — $err" $color
+                    Write-DLLog "  $status $tgtName -- $err" $color
                     $script:DLResultLog.Add([PSCustomObject][ordered]@{
                         Operation = 'CreateGroup'; SourceGroup = $srcSmtp; TargetGroup = $tgtSmtp
                         SourceMember = ''; TargetMember = ''; ExpandedFrom = ''
@@ -4049,7 +4049,7 @@ function Invoke-FrankensteinDLMigrator {
                 $csvRows | Export-Csv -Path $script:DLMappingCsvPath -NoTypeInformation -Force
                 Write-DLLog "  $writeCount computed target(s) written back to: $script:DLMappingCsvPath" ([System.Drawing.Color]::LimeGreen)
             } catch {
-                Write-DLLog "  WARNING: Could not update CSV — $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
+                Write-DLLog "  WARNING: Could not update CSV -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
             }
         }
 
@@ -4075,8 +4075,8 @@ function Invoke-FrankensteinDLMigrator {
 
             if (-not $tgtGroup) {
                 $log.Status  = 'Skipped'
-                $log.Details = 'No target group identity — group was not created or target mapping is missing'
-                Write-DLLog "  SKIP  $tgtMember — target group for '$($rec.SourceGroup)' unknown" ([System.Drawing.Color]::DarkGoldenrod)
+                $log.Details = 'No target group identity -- group was not created or target mapping is missing'
+                Write-DLLog "  SKIP  $tgtMember -- target group for '$($rec.SourceGroup)' unknown" ([System.Drawing.Color]::DarkGoldenrod)
                 $script:DLResultLog.Add([PSCustomObject]$log)
                 continue
             }
@@ -4103,7 +4103,7 @@ function Invoke-FrankensteinDLMigrator {
                 } else {
                     $log.Status  = 'Failed'
                     $log.Details = $err
-                    Write-DLLog "  ERR   $tgtMember -> $tgtGroup — $err" ([System.Drawing.Color]::Tomato)
+                    Write-DLLog "  ERR   $tgtMember -> $tgtGroup -- $err" ([System.Drawing.Color]::Tomato)
                 }
             }
             $script:DLResultLog.Add([PSCustomObject]$log)
@@ -4133,7 +4133,7 @@ function Invoke-FrankensteinDLMigrator {
 
     # --- 1. Connections ---
     $grpConn           = New-Object System.Windows.Forms.GroupBox
-    $grpConn.Text      = "1. Connections  (source is always M365 — connect to both first to validate credentials)"
+    $grpConn.Text      = "1. Connections  (source is always M365 -- connect to both first to validate credentials)"
     $grpConn.Location  = New-Object System.Drawing.Point(12, 46)
     $grpConn.Size      = New-Object System.Drawing.Size(676, 148)
     $form.Controls.Add($grpConn)
@@ -4198,7 +4198,7 @@ function Invoke-FrankensteinDLMigrator {
     $form.Controls.Add($grpMap)
 
     $radCsvMapping          = New-Object System.Windows.Forms.RadioButton
-    $radCsvMapping.Text     = "Load CSV mapping file  (Source + Target columns — include both groups AND their members)"
+    $radCsvMapping.Text     = "Load CSV mapping file  (Source + Target columns -- include both groups AND their members)"
     $radCsvMapping.Checked  = $true
     $radCsvMapping.Location = New-Object System.Drawing.Point(10, 20)
     $radCsvMapping.Size     = New-Object System.Drawing.Size(570, 20)
@@ -4224,21 +4224,21 @@ function Invoke-FrankensteinDLMigrator {
     $ttDLMap.ShowAlways   = $true
     $dlCsvTip = @"
 CSV Requirements
-────────────────────────────────────────────────
+------------------------------------------------
 Column headers (exact, case-insensitive):
-  Source  — identity in the SOURCE tenant (M365)
-  Target  — corresponding identity in the TARGET
+  Source  -- identity in the SOURCE tenant (M365)
+  Target  -- corresponding identity in the TARGET
 
 Include BOTH types of rows in one file:
-  • Group rows:  source DL/SG SMTP → target DL/SG SMTP
-  • Member rows: source user SMTP  → target user SMTP
+  * Group rows:  source DL/SG SMTP -> target DL/SG SMTP
+  * Member rows: source user SMTP  -> target user SMTP
 
-Create Groups mode — group rows support three patterns:
-  1. Blank target  → group doesn't exist yet; target SMTP is
+Create Groups mode -- group rows support three patterns:
+  1. Blank target  -> group doesn't exist yet; target SMTP is
      computed from prefix + alias + new domain at run time.
-  2. Target present → group already exists in the target tenant;
+  2. Target present -> group already exists in the target tenant;
      creation is skipped and the provided target is used directly.
-  3. Mixed CSV     → some group rows blank, some with targets.
+  3. Mixed CSV     -> some group rows blank, some with targets.
      Each is handled independently: blank = create, present = use.
   Blank-target rows are flagged with a warning in
   Add Members mode (where targets are required).
@@ -4403,7 +4403,7 @@ Supported group types: MailUniversalDistributionGroup,
     $txtOU                    = New-Object System.Windows.Forms.TextBox
     $txtOU.Location           = New-Object System.Drawing.Point(156, 128)
     $txtOU.Size               = New-Object System.Drawing.Size(506, 22)
-    $txtOU.PlaceholderText    = "OU=Groups,DC=domain,DC=com  (optional — leave blank for Exchange default)"
+    $txtOU.PlaceholderText    = "OU=Groups,DC=domain,DC=com  (optional -- leave blank for Exchange default)"
     $txtOU.Enabled            = $false
     $grpOp.Controls.Add($txtOU)
 
@@ -4602,7 +4602,7 @@ Supported group types: MailUniversalDistributionGroup,
         $script:DLMappingCsvPath = $dlg.FileName
         $lblMapPath.Text         = $dlg.FileName
         $lblMapPath.ForeColor    = [System.Drawing.Color]::DarkGreen
-        $lblMapCount.Text        = "$($script:DLMappingTable.Count) entries loaded$(if ($blankTargetCount) { " ($blankTargetCount with no target — OK for Create mode)" })"
+        $lblMapCount.Text        = "$($script:DLMappingTable.Count) entries loaded$(if ($blankTargetCount) { " ($blankTargetCount with no target -- OK for Create mode)" })"
         Write-DLLog "Mapping CSV loaded: $($script:DLMappingTable.Count) entries$(if ($blankTargetCount) { ", $blankTargetCount with blank target (valid in Create Groups mode)" })" ([System.Drawing.Color]::LimeGreen)
     })
 
@@ -4671,7 +4671,7 @@ Supported group types: MailUniversalDistributionGroup,
         }
     })
 
-    # Shared validation — returns $true if ready to proceed
+    # Shared validation -- returns $true if ready to proceed
     function Confirm-DLReadyState {
         if (-not $script:DLMappingTable.Count) {
             $msg = if ($radCsvMapping.Checked) { "Load a mapping CSV first." } else { "Add at least one source/target pair first." }
@@ -4714,12 +4714,12 @@ Supported group types: MailUniversalDistributionGroup,
             if ($radCreateGroups.Checked) {
                 $prefix    = $txtPrefix.Text.Trim()
                 $newDomain = $txtNewDomain.Text.Trim().TrimStart('@')
-                Write-DLLog "  [Create Phase — $($script:DLGroupMeta.Count) group(s)]" ([System.Drawing.Color]::CornflowerBlue)
+                Write-DLLog "  [Create Phase -- $($script:DLGroupMeta.Count) group(s)]" ([System.Drawing.Color]::CornflowerBlue)
                 foreach ($srcSmtp in @($script:DLGroupMeta.Keys)) {
                     $meta           = $script:DLGroupMeta[$srcSmtp]
                     $existingTarget = $script:DLMappingTable[$srcSmtp.ToLower()]
                     if ($existingTarget) {
-                        Write-DLLog "  EXISTING $srcSmtp → $existingTarget (already mapped — skipping creation)" ([System.Drawing.Color]::DarkCyan)
+                        Write-DLLog "  EXISTING $srcSmtp -> $existingTarget (already mapped -- skipping creation)" ([System.Drawing.Color]::DarkCyan)
                         continue
                     }
                     $pfxAlias       = if ($chkPrefixAlias.Checked       -and $prefix) { $prefix } else { '' }
@@ -4730,7 +4730,7 @@ Supported group types: MailUniversalDistributionGroup,
                     $tgtDisplayName = "$pfxDisplayName$($meta.DisplayName)"
                     $tgtSmtp        = "$tgtAlias@$newDomain"
                     if ($meta.Type -eq 'GroupMailbox' -and $radOnPrem.Checked) {
-                        Write-DLLog "  SKIP   $srcSmtp — M365 Group cannot be created on-prem" ([System.Drawing.Color]::DarkGoldenrod)
+                        Write-DLLog "  SKIP   $srcSmtp -- M365 Group cannot be created on-prem" ([System.Drawing.Color]::DarkGoldenrod)
                     } else {
                         $ouInfo = if ($txtOU.Text.Trim()) { "  OU=$($txtOU.Text.Trim())" } else { '' }
                         Write-DLLog "  CREATE $tgtDisplayName ($tgtSmtp)  [Name: $tgtName | Alias: $tgtAlias | $($meta.Type)]$ouInfo" ([System.Drawing.Color]::LimeGreen)
@@ -4739,7 +4739,7 @@ Supported group types: MailUniversalDistributionGroup,
             }
 
             $wouldAdd = 0; $wouldSkip = 0
-            Write-DLLog "  [Member Phase — $($script:DLSourceData.Count) record(s)]" ([System.Drawing.Color]::CornflowerBlue)
+            Write-DLLog "  [Member Phase -- $($script:DLSourceData.Count) record(s)]" ([System.Drawing.Color]::CornflowerBlue)
             foreach ($rec in $script:DLSourceData) {
                 $tgt = $script:DLMappingTable[$rec.SourceGroup.ToLower()]
                 if (-not $tgt) { $tgt = $rec.TargetGroup }

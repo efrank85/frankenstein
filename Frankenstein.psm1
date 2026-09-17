@@ -3921,13 +3921,31 @@ function Invoke-FrankensteinDLMigrator {
     }
 
     function Set-TargetDLProperties ([string]$TargetIdentity, [hashtable]$Meta, [string]$GroupType, [string]$DefaultOwner) {
+        # Resolve a source identity to a target SMTP.
+        # Priority: mapping CSV → proxy alias index → direct Get-Recipient in current (target) tenant.
+        # Also tries reversing "Last, First" display-name format to "First Last".
+        function Resolve-ToTargetSmtp ([string]$name) {
+            if (-not $name) { return $null }
+            $key = $name.ToLower()
+            $t = $script:DLMappingTable[$key]
+            if (-not $t) { $t = $script:DLProxyIndex[$key] }
+            if (-not $t) {
+                $r = Get-Recipient -Identity $name -ErrorAction SilentlyContinue
+                if (-not $r -and $name -match '^([^,]+),\s*(.+)$') {
+                    # "Last, First" format from EXO ManagedBy → try "First Last"
+                    $r = Get-Recipient -Identity "$($Matches[2]) $($Matches[1])" -ErrorAction SilentlyContinue
+                }
+                if ($r) { $t = [string]$r.PrimarySmtpAddress }
+            }
+            return $t
+        }
+
         function Map-ListToTarget ([string[]]$sourceList) {
             $seen = @{}
-            @($sourceList | ForEach-Object {
-                $key = $_.ToLower()
-                $t   = $script:DLMappingTable[$key]
-                if (-not $t) { $t = $script:DLProxyIndex[$key] }
+            @($sourceList | Where-Object { $_ } | ForEach-Object {
+                $t = Resolve-ToTargetSmtp $_
                 if ($t -and -not $seen[$t]) { $seen[$t] = $true; $t }
+                elseif (-not $t) { Write-DLLog "    WARNING: Could not resolve '$_' to a target recipient -- skipped" ([System.Drawing.Color]::DarkGoldenrod) }
             })
         }
 
@@ -3939,85 +3957,104 @@ function Invoke-FrankensteinDLMigrator {
         $copyAcceptFrom   = $chkPropAcceptFrom.Checked
         $copyRejectFrom   = $chkPropRejectFrom.Checked
 
-        $tgtManagedBy    = if ($copyManagedBy)    { Map-ListToTarget $Meta.ManagedBy }       else { @() }
-        if ($copyManagedBy -and $Meta.ManagedBy.Count) {
-            $unmapped = @($Meta.ManagedBy | Where-Object {
-                $_ -and
-                -not $script:DLMappingTable.ContainsKey($_.ToLower()) -and
-                -not $script:DLProxyIndex.ContainsKey($_.ToLower())
-            })
-            foreach ($u in $unmapped) {
-                Write-DLLog "    WARNING: Owner '$u' not in mapping CSV -- skipped (add a user row for this address to copy it)" ([System.Drawing.Color]::DarkGoldenrod)
-            }
-        }
+        $tgtManagedBy    = if ($copyManagedBy)    { Map-ListToTarget $Meta.ManagedBy }         else { @() }
         if ($DefaultOwner -and $tgtManagedBy -notcontains $DefaultOwner) { $tgtManagedBy += $DefaultOwner }
-        Write-DLLog "    Owners mapped: $($tgtManagedBy -join ', ')$(if (-not $tgtManagedBy.Count) { ' (none)' })" ([System.Drawing.Color]::DimGray)
-        $tgtModBy        = if ($copyModeration)   { Map-ListToTarget $Meta.ModeratedBy }     else { @() }
+        Write-DLLog "    Owners to set: $($tgtManagedBy -join ', ')$(if (-not $tgtManagedBy.Count) { ' (none -- no default owner set and no source owners resolved)' })" ([System.Drawing.Color]::DimGray)
+        $tgtModBy        = if ($copyModeration)   { Map-ListToTarget $Meta.ModeratedBy }       else { @() }
         $tgtSendOnBehalf = if ($copySendOnBehalf) { Map-ListToTarget $Meta.GrantSendOnBehalf } else { @() }
-        $tgtAcceptFrom   = if ($copyAcceptFrom)   { Map-ListToTarget $Meta.AcceptFrom }      else { @() }
-        $tgtRejectFrom   = if ($copyRejectFrom)   { Map-ListToTarget $Meta.RejectFrom }      else { @() }
+        $tgtAcceptFrom   = if ($copyAcceptFrom)   { Map-ListToTarget $Meta.AcceptFrom }        else { @() }
+        $tgtRejectFrom   = if ($copyRejectFrom)   { Map-ListToTarget $Meta.RejectFrom }        else { @() }
 
         if ($GroupType -eq 'GroupMailbox') {
+            # M365 Group: properties
             $p = @{ Identity = $TargetIdentity }
-            if ($copyHidden)                      { $p['HiddenFromAddressListsEnabled'] = $Meta.HiddenFromGAL }
-            if ($tgtManagedBy.Count)              { $p['Owners']                        = $tgtManagedBy }
-            if ($tgtSendOnBehalf.Count)           { $p['GrantSendOnBehalfTo']           = $tgtSendOnBehalf }
-            Set-UnifiedGroup @p -ErrorAction Stop
+            if ($copyHidden) { $p['HiddenFromAddressListsEnabled'] = $Meta.HiddenFromGAL }
+            if ($copyReqAuth) { $p['RequireSenderAuthenticationEnabled'] = $Meta.RequireSenderAuth }
+            if ($p.Count -gt 1) {
+                try { Set-UnifiedGroup @p -ErrorAction Stop }
+                catch { Write-DLLog "    WARNING: M365 Group properties failed -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod) }
+            }
+            # M365 Group: recipients/owners (separate call so property failures are independent)
+            $pr = @{ Identity = $TargetIdentity }
+            if ($tgtManagedBy.Count)    { $pr['Owners']            = $tgtManagedBy }
+            if ($tgtSendOnBehalf.Count) { $pr['GrantSendOnBehalfTo'] = $tgtSendOnBehalf }
+            if ($pr.Count -gt 1) {
+                try { Set-UnifiedGroup @pr -ErrorAction Stop }
+                catch { Write-DLLog "    WARNING: M365 Group owners failed -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod) }
+            }
         } elseif ($radOnPrem.Checked -and $script:DLOnPremSession) {
             $onpremMeta = @{
-                applyHidden      = $copyHidden;   hiddenVal      = $Meta.HiddenFromGAL
-                applyModEn       = $copyModeration; modEnabledVal = $Meta.ModerationEnabled
-                applyReqAuth     = $copyReqAuth;  reqAuthVal     = $Meta.RequireSenderAuth
-                modNotify        = if ($copyModeration) { $Meta.ModerationNotify } else { $null }
-                bypassNested     = if ($copyModeration) { $Meta.BypassNestedMod } else { $null }
-                joinRestriction  = $Meta.MemberJoinRestriction
-                departRestrict   = $Meta.MemberDepartRestriction
-                rptManager       = $Meta.ReportToManager
-                rptOriginator    = $Meta.ReportToOriginator
-                sendOof          = $Meta.SendOofToOriginator
+                applyHidden   = $copyHidden;      hiddenVal   = $Meta.HiddenFromGAL
+                applyModEn    = $copyModeration;  modEnabled  = $Meta.ModerationEnabled
+                applyReqAuth  = $copyReqAuth;     reqAuthVal  = $Meta.RequireSenderAuth
+                modNotify     = if ($copyModeration -and $Meta.ModerationEnabled) { $Meta.ModerationNotify } else { $null }
+                bypassNested  = if ($copyModeration -and $Meta.ModerationEnabled) { $Meta.BypassNestedMod } else { $null }
+                joinRestrict  = $Meta.MemberJoinRestriction
+                departRestrict = $Meta.MemberDepartRestriction
+                rptManager    = $Meta.ReportToManager
+                rptOriginator = $Meta.ReportToOriginator
+                sendOof       = $Meta.SendOofToOriginator
             }
             Invoke-Command -Session $script:DLOnPremSession -ScriptBlock {
                 param($id, $managedBy, $modBy, $sob, $accept, $reject, $m)
+                # Properties call
                 $p = @{ Identity = $id }
                 if ($m.applyHidden)  { $p['HiddenFromAddressListsEnabled']      = $m.hiddenVal }
                 if ($m.applyReqAuth) { $p['RequireSenderAuthenticationEnabled'] = $m.reqAuthVal }
                 if ($m.applyModEn) {
-                    $p['ModerationEnabled'] = $m.modEnabledVal
-                    if ($m.modNotify)    { $p['SendModerationNotifications']    = $m.modNotify }
+                    $p['ModerationEnabled'] = $m.modEnabled
+                    if ($m.modNotify)              { $p['SendModerationNotifications']    = $m.modNotify }
                     if ($null -ne $m.bypassNested) { $p['BypassNestedModerationEnabled'] = $m.bypassNested }
                 }
-                if ($m.joinRestriction)      { $p['MemberJoinRestriction']            = $m.joinRestriction }
-                if ($m.departRestrict)       { $p['MemberDepartRestriction']          = $m.departRestrict }
-                if ($null -ne $m.rptManager)    { $p['ReportToManagerEnabled']           = $m.rptManager }
-                if ($null -ne $m.rptOriginator) { $p['ReportToOriginatorEnabled']        = $m.rptOriginator }
-                if ($null -ne $m.sendOof)       { $p['SendOofMessageToOriginatorEnabled'] = $m.sendOof }
-                if ($managedBy.Count) { $p['ManagedBy']                              = $managedBy }
-                if ($modBy.Count)     { $p['ModeratedBy']                            = $modBy }
-                if ($sob.Count)       { $p['GrantSendOnBehalfTo']                    = $sob }
-                if ($accept.Count)    { $p['AcceptMessagesOnlyFromSendersOrMembers'] = $accept }
-                if ($reject.Count)    { $p['RejectMessagesFromSendersOrMembers']     = $reject }
-                Set-DistributionGroup @p -ErrorAction Stop
+                if ($m.joinRestrict)              { $p['MemberJoinRestriction']            = $m.joinRestrict }
+                if ($m.departRestrict)            { $p['MemberDepartRestriction']          = $m.departRestrict }
+                if ($null -ne $m.rptManager)      { $p['ReportToManagerEnabled']           = $m.rptManager }
+                if ($null -ne $m.rptOriginator)   { $p['ReportToOriginatorEnabled']        = $m.rptOriginator }
+                if ($null -ne $m.sendOof)         { $p['SendOofMessageToOriginatorEnabled'] = $m.sendOof }
+                if ($p.Count -gt 1) { Set-DistributionGroup @p -ErrorAction Stop }
+                # Recipients call (separate so a bad address doesn't block properties)
+                $pr = @{ Identity = $id }
+                if ($managedBy.Count) { $pr['ManagedBy']                              = $managedBy }
+                if ($modBy.Count)     { $pr['ModeratedBy']                            = $modBy }
+                if ($sob.Count)       { $pr['GrantSendOnBehalfTo']                    = $sob }
+                if ($accept.Count)    { $pr['AcceptMessagesOnlyFromSendersOrMembers'] = $accept }
+                if ($reject.Count)    { $pr['RejectMessagesFromSendersOrMembers']     = $reject }
+                if ($pr.Count -gt 1) { Set-DistributionGroup @pr -ErrorAction Stop }
             } -ArgumentList $TargetIdentity, $tgtManagedBy, $tgtModBy, $tgtSendOnBehalf, $tgtAcceptFrom, $tgtRejectFrom, $onpremMeta
         } else {
+            # EXO cloud DL: properties call first
             $p = @{ Identity = $TargetIdentity }
-            if ($copyHidden)        { $p['HiddenFromAddressListsEnabled']      = $Meta.HiddenFromGAL }
-            if ($copyReqAuth)       { $p['RequireSenderAuthenticationEnabled'] = $Meta.RequireSenderAuth }
+            if ($copyHidden)  { $p['HiddenFromAddressListsEnabled']      = $Meta.HiddenFromGAL }
+            if ($copyReqAuth) { $p['RequireSenderAuthenticationEnabled'] = $Meta.RequireSenderAuth }
             if ($copyModeration) {
                 $p['ModerationEnabled'] = $Meta.ModerationEnabled
-                if ($Meta.ModerationNotify) { $p['SendModerationNotifications']  = $Meta.ModerationNotify }
-                if ($null -ne $Meta.BypassNestedMod) { $p['BypassNestedModerationEnabled'] = $Meta.BypassNestedMod }
+                # Only set these sub-params when moderation is actually on
+                if ($Meta.ModerationEnabled) {
+                    if ($Meta.ModerationNotify)          { $p['SendModerationNotifications']    = $Meta.ModerationNotify }
+                    if ($null -ne $Meta.BypassNestedMod) { $p['BypassNestedModerationEnabled'] = $Meta.BypassNestedMod }
+                }
             }
-            if ($Meta.MemberJoinRestriction)   { $p['MemberJoinRestriction']   = $Meta.MemberJoinRestriction }
-            if ($Meta.MemberDepartRestriction) { $p['MemberDepartRestriction'] = $Meta.MemberDepartRestriction }
-            if ($null -ne $Meta.ReportToManager)     { $p['ReportToManagerEnabled']           = $Meta.ReportToManager }
-            if ($null -ne $Meta.ReportToOriginator)  { $p['ReportToOriginatorEnabled']        = $Meta.ReportToOriginator }
-            if ($null -ne $Meta.SendOofToOriginator) { $p['SendOofMessageToOriginatorEnabled'] = $Meta.SendOofToOriginator }
-            if ($tgtManagedBy.Count)    { $p['ManagedBy']                              = $tgtManagedBy }
-            if ($tgtModBy.Count)        { $p['ModeratedBy']                            = $tgtModBy }
-            if ($tgtSendOnBehalf.Count) { $p['GrantSendOnBehalfTo']                    = $tgtSendOnBehalf }
-            if ($tgtAcceptFrom.Count)   { $p['AcceptMessagesOnlyFromSendersOrMembers'] = $tgtAcceptFrom }
-            if ($tgtRejectFrom.Count)   { $p['RejectMessagesFromSendersOrMembers']     = $tgtRejectFrom }
-            Set-DistributionGroup @p -ErrorAction Stop
+            if ($Meta.MemberJoinRestriction)             { $p['MemberJoinRestriction']            = $Meta.MemberJoinRestriction }
+            if ($Meta.MemberDepartRestriction)           { $p['MemberDepartRestriction']          = $Meta.MemberDepartRestriction }
+            if ($null -ne $Meta.ReportToManager)         { $p['ReportToManagerEnabled']           = $Meta.ReportToManager }
+            if ($null -ne $Meta.ReportToOriginator)      { $p['ReportToOriginatorEnabled']        = $Meta.ReportToOriginator }
+            if ($null -ne $Meta.SendOofToOriginator)     { $p['SendOofMessageToOriginatorEnabled'] = $Meta.SendOofToOriginator }
+            Write-DLLog "    Setting properties: $(($p.Keys | Where-Object {$_ -ne 'Identity'}) -join ', ')" ([System.Drawing.Color]::DimGray)
+            try { Set-DistributionGroup @p -ErrorAction Stop }
+            catch { Write-DLLog "    WARNING: Properties failed -- $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+
+            # EXO cloud DL: recipients call second (isolated so a bad address never blocks properties)
+            $pr = @{ Identity = $TargetIdentity }
+            if ($tgtManagedBy.Count)    { $pr['ManagedBy']                              = $tgtManagedBy }
+            if ($tgtModBy.Count)        { $pr['ModeratedBy']                            = $tgtModBy }
+            if ($tgtSendOnBehalf.Count) { $pr['GrantSendOnBehalfTo']                    = $tgtSendOnBehalf }
+            if ($tgtAcceptFrom.Count)   { $pr['AcceptMessagesOnlyFromSendersOrMembers'] = $tgtAcceptFrom }
+            if ($tgtRejectFrom.Count)   { $pr['RejectMessagesFromSendersOrMembers']     = $tgtRejectFrom }
+            if ($pr.Count -gt 1) {
+                Write-DLLog "    Setting recipients: ManagedBy=$($tgtManagedBy -join ';') ModBy=$($tgtModBy -join ';')" ([System.Drawing.Color]::DimGray)
+                try { Set-DistributionGroup @pr -ErrorAction Stop }
+                catch { Write-DLLog "    WARNING: Owners/recipients failed -- $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+            }
         }
     }
 

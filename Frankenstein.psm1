@@ -3835,6 +3835,7 @@ function Invoke-FrankensteinDLMigrator {
     $script:DLTargetOrg          = ''
     $script:DLTargetConnectionId = $null
     $script:DLMappingTable       = @{}
+    $script:DLProxyIndex         = @{}   # proxySmtp.ToLower() -> targetSmtp (all aliases of every mapped source)
     $script:DLMappingCsvPath     = ''
     $script:DLGroupMeta          = @{}   # source.ToLower() -> {DisplayName, Alias, Type, DLType}
     $script:DLSourceData         = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -3917,9 +3918,12 @@ function Invoke-FrankensteinDLMigrator {
 
     function Set-TargetDLProperties ([string]$TargetIdentity, [hashtable]$Meta, [string]$GroupType, [string]$DefaultOwner) {
         function Map-ListToTarget ([string[]]$sourceList) {
+            $seen = @{}
             @($sourceList | ForEach-Object {
-                $t = $script:DLMappingTable[$_.ToLower()]
-                if ($t) { $t }
+                $key = $_.ToLower()
+                $t   = $script:DLMappingTable[$key]
+                if (-not $t) { $t = $script:DLProxyIndex[$key] }
+                if ($t -and -not $seen[$t]) { $seen[$t] = $true; $t }
             })
         }
 
@@ -3933,7 +3937,11 @@ function Invoke-FrankensteinDLMigrator {
 
         $tgtManagedBy    = if ($copyManagedBy)    { Map-ListToTarget $Meta.ManagedBy }       else { @() }
         if ($copyManagedBy -and $Meta.ManagedBy.Count) {
-            $unmapped = @($Meta.ManagedBy | Where-Object { $_ -and -not $script:DLMappingTable.ContainsKey($_.ToLower()) })
+            $unmapped = @($Meta.ManagedBy | Where-Object {
+                $_ -and
+                -not $script:DLMappingTable.ContainsKey($_.ToLower()) -and
+                -not $script:DLProxyIndex.ContainsKey($_.ToLower())
+            })
             foreach ($u in $unmapped) {
                 Write-DLLog "    WARNING: Owner '$u' not in mapping CSV -- skipped (add a user row for this address to copy it)" ([System.Drawing.Color]::DarkGoldenrod)
             }
@@ -4132,6 +4140,29 @@ function Invoke-FrankensteinDLMigrator {
             }
         }
         Write-DLLog "Collection complete: $($script:DLSourceData.Count) member record(s) across $total group(s)." ([System.Drawing.Color]::LimeGreen)
+
+        # Build proxy address index: maps every SMTP alias of each mapped source identity → its target.
+        # Needed because CSV may use onmicrosoft.com addresses while ManagedBy/etc. resolve to vanity-domain SMTPs.
+        $script:DLProxyIndex.Clear()
+        $mappedSources = @($script:DLMappingTable.Keys | Where-Object { $script:DLMappingTable[$_] })
+        if ($mappedSources.Count) {
+            Write-DLLog "Building address alias index for $($mappedSources.Count) mapped identities..." ([System.Drawing.Color]::DimGray)
+            foreach ($srcKey in $mappedSources) {
+                $tgtSmtpVal = $script:DLMappingTable[$srcKey]
+                $r = Get-Recipient -Identity $srcKey -ErrorAction SilentlyContinue
+                if ($r -and $r.EmailAddresses) {
+                    foreach ($addr in $r.EmailAddresses) {
+                        if ($addr.ToString() -match '^smtp:(.+)$') {
+                            $proxyKey = $Matches[1].ToLower()
+                            if (-not $script:DLProxyIndex.ContainsKey($proxyKey)) {
+                                $script:DLProxyIndex[$proxyKey] = $tgtSmtpVal
+                            }
+                        }
+                    }
+                }
+            }
+            Write-DLLog "Address alias index built ($($script:DLProxyIndex.Count) entries)." ([System.Drawing.Color]::DimGray)
+        }
     }
 
     function Apply-DLTargetData {

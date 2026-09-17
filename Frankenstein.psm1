@@ -3886,7 +3886,7 @@ function Invoke-FrankensteinDLMigrator {
 
     function New-TargetDLGroup ([string]$Name, [string]$DisplayName, [string]$Alias, [string]$PrimarySmtp, [string]$DLType, [string]$GroupType, [string]$OU) {
         if ($GroupType -eq 'GroupMailbox') {
-            New-UnifiedGroup -DisplayName $DisplayName -Alias $Alias -PrimarySmtpAddress $PrimarySmtp -ErrorAction Stop | Out-Null
+            New-UnifiedGroup -DisplayName $DisplayName -Alias $Alias -PrimarySmtpAddress $PrimarySmtp -SuppressWarmupMessage:$chkSuppressWelcome.Checked -ErrorAction Stop | Out-Null
         } elseif ($radOnPrem.Checked -and $script:DLOnPremSession) {
             Invoke-Command -Session $script:DLOnPremSession -ScriptBlock {
                 param($n, $dn, $a, $s, $t, $o)
@@ -4034,6 +4034,7 @@ function Invoke-FrankensteinDLMigrator {
                     GrantSendOnBehalf = Get-SmtpList $ug.GrantSendOnBehalfTo
                     AcceptFrom        = @()
                     RejectFrom        = @()
+                    HasTeam           = ($ug.ResourceProvisioningOptions -contains 'Team')
                 }
                 $sourceGroups.Add([PSCustomObject]@{ Smtp = $srcSmtp; Type = 'GroupMailbox' })
             }
@@ -4162,6 +4163,20 @@ function Invoke-FrankensteinDLMigrator {
                     } catch {
                         Write-DLLog "    WARNING: Group created but properties failed -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
                     }
+                    # Team provisioning for M365 Groups
+                    if ($srcType -eq 'GroupMailbox' -and -not $chkSkipTeams.Checked -and $meta.HasTeam) {
+                        if (Get-Command New-Team -ErrorAction SilentlyContinue) {
+                            try {
+                                $newGroup = Get-UnifiedGroup -Identity $tgtSmtp -ErrorAction Stop
+                                New-Team -GroupId $newGroup.ExternalDirectoryObjectId -ErrorAction Stop | Out-Null
+                                Write-DLLog "    Team provisioned for $tgtSmtp" ([System.Drawing.Color]::LimeGreen)
+                            } catch {
+                                Write-DLLog "    WARNING: Team provisioning failed -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
+                            }
+                        } else {
+                            Write-DLLog "    WARNING: Source group has a Team but MicrosoftTeams module not loaded -- skipping Team provisioning for $tgtSmtp" ([System.Drawing.Color]::DarkGoldenrod)
+                        }
+                    }
                     $script:DLResultLog.Add([PSCustomObject][ordered]@{
                         Operation = 'CreateGroup'; SourceGroup = $srcSmtp; TargetGroup = $tgtSmtp
                         SourceMember = ''; TargetMember = ''; ExpandedFrom = ''
@@ -4280,7 +4295,7 @@ function Invoke-FrankensteinDLMigrator {
 
     $form                 = New-Object System.Windows.Forms.Form
     $form.Text            = "Frankenstein - DL Migrator"
-    $form.ClientSize      = New-Object System.Drawing.Size(700, 972)
+    $form.ClientSize      = New-Object System.Drawing.Size(700, 994)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedSingle'
     $form.MaximizeBox     = $false
@@ -4482,7 +4497,7 @@ Supported group types: MailUniversalDistributionGroup,
     $grpOp           = New-Object System.Windows.Forms.GroupBox
     $grpOp.Text      = "3. Operation"
     $grpOp.Location  = New-Object System.Drawing.Point(12, 424)
-    $grpOp.Size      = New-Object System.Drawing.Size(676, 272)
+    $grpOp.Size      = New-Object System.Drawing.Size(676, 294)
     $form.Controls.Add($grpOp)
 
     # Group type filter -- always active, both modes
@@ -4515,33 +4530,52 @@ Supported group types: MailUniversalDistributionGroup,
 
     $chkTypeM365          = New-Object System.Windows.Forms.CheckBox
     $chkTypeM365.Text     = "M365 Group"
-    $chkTypeM365.Checked  = $true
+    $chkTypeM365.Checked  = $false
     $chkTypeM365.Location = New-Object System.Drawing.Point(432, 16)
     $chkTypeM365.Size     = New-Object System.Drawing.Size(96, 20)
     $grpOp.Controls.Add($chkTypeM365)
 
+    # M365-specific options -- visible only when chkTypeM365 is checked, enabled only in Create mode
+    $chkSuppressWelcome          = New-Object System.Windows.Forms.CheckBox
+    $chkSuppressWelcome.Text     = "Suppress welcome email"
+    $chkSuppressWelcome.Checked  = $true
+    $chkSuppressWelcome.Location = New-Object System.Drawing.Point(432, 38)
+    $chkSuppressWelcome.Size     = New-Object System.Drawing.Size(164, 20)
+    $chkSuppressWelcome.Visible  = $false
+    $chkSuppressWelcome.Enabled  = $false
+    $grpOp.Controls.Add($chkSuppressWelcome)
+
+    $chkSkipTeams          = New-Object System.Windows.Forms.CheckBox
+    $chkSkipTeams.Text     = "Skip Team provisioning"
+    $chkSkipTeams.Checked  = $true
+    $chkSkipTeams.Location = New-Object System.Drawing.Point(600, 38)
+    $chkSkipTeams.Size     = New-Object System.Drawing.Size(60, 20)
+    $chkSkipTeams.Visible  = $false
+    $chkSkipTeams.Enabled  = $false
+    $grpOp.Controls.Add($chkSkipTeams)
+
     $radAddMembers          = New-Object System.Windows.Forms.RadioButton
     $radAddMembers.Text     = "Add members to existing groups  (groups must already exist on target)"
     $radAddMembers.Checked  = $true
-    $radAddMembers.Location = New-Object System.Drawing.Point(10, 40)
+    $radAddMembers.Location = New-Object System.Drawing.Point(10, 62)
     $radAddMembers.Size     = New-Object System.Drawing.Size(654, 20)
     $grpOp.Controls.Add($radAddMembers)
 
     $radCreateGroups          = New-Object System.Windows.Forms.RadioButton
     $radCreateGroups.Text     = "Create groups, then add members  (name/alias conflicts are skipped and logged)"
-    $radCreateGroups.Location = New-Object System.Drawing.Point(10, 62)
+    $radCreateGroups.Location = New-Object System.Drawing.Point(10, 84)
     $radCreateGroups.Size     = New-Object System.Drawing.Size(654, 20)
     $grpOp.Controls.Add($radCreateGroups)
 
     $lblPrefix               = New-Object System.Windows.Forms.Label
     $lblPrefix.Text          = "Prefix:"
-    $lblPrefix.Location      = New-Object System.Drawing.Point(28, 90)
+    $lblPrefix.Location      = New-Object System.Drawing.Point(28, 112)
     $lblPrefix.Size          = New-Object System.Drawing.Size(46, 18)
     $lblPrefix.Enabled       = $false
     $grpOp.Controls.Add($lblPrefix)
 
     $txtPrefix                    = New-Object System.Windows.Forms.TextBox
-    $txtPrefix.Location           = New-Object System.Drawing.Point(78, 88)
+    $txtPrefix.Location           = New-Object System.Drawing.Point(78, 110)
     $txtPrefix.Size               = New-Object System.Drawing.Size(120, 22)
     $txtPrefix.PlaceholderText    = "e.g. MIGR-"
     $txtPrefix.Enabled            = $false
@@ -4549,13 +4583,13 @@ Supported group types: MailUniversalDistributionGroup,
 
     $lblNewDomain            = New-Object System.Windows.Forms.Label
     $lblNewDomain.Text       = "New SMTP domain:"
-    $lblNewDomain.Location   = New-Object System.Drawing.Point(216, 90)
+    $lblNewDomain.Location   = New-Object System.Drawing.Point(216, 112)
     $lblNewDomain.Size       = New-Object System.Drawing.Size(112, 18)
     $lblNewDomain.Enabled    = $false
     $grpOp.Controls.Add($lblNewDomain)
 
     $txtNewDomain                 = New-Object System.Windows.Forms.TextBox
-    $txtNewDomain.Location        = New-Object System.Drawing.Point(332, 88)
+    $txtNewDomain.Location        = New-Object System.Drawing.Point(332, 110)
     $txtNewDomain.Size            = New-Object System.Drawing.Size(244, 22)
     $txtNewDomain.PlaceholderText = "target.com"
     $txtNewDomain.Enabled         = $false
@@ -4563,14 +4597,14 @@ Supported group types: MailUniversalDistributionGroup,
 
     $lblPrefixApply          = New-Object System.Windows.Forms.Label
     $lblPrefixApply.Text     = "Apply prefix to:"
-    $lblPrefixApply.Location = New-Object System.Drawing.Point(28, 117)
+    $lblPrefixApply.Location = New-Object System.Drawing.Point(28, 139)
     $lblPrefixApply.Size     = New-Object System.Drawing.Size(96, 18)
     $lblPrefixApply.Enabled  = $false
     $grpOp.Controls.Add($lblPrefixApply)
 
     $chkPrefixName               = New-Object System.Windows.Forms.CheckBox
     $chkPrefixName.Text          = "Name"
-    $chkPrefixName.Location      = New-Object System.Drawing.Point(128, 115)
+    $chkPrefixName.Location      = New-Object System.Drawing.Point(128, 137)
     $chkPrefixName.Size          = New-Object System.Drawing.Size(62, 20)
     $chkPrefixName.Enabled       = $false
     $chkPrefixName.Checked       = $true
@@ -4578,7 +4612,7 @@ Supported group types: MailUniversalDistributionGroup,
 
     $chkPrefixDisplayName               = New-Object System.Windows.Forms.CheckBox
     $chkPrefixDisplayName.Text          = "Display Name"
-    $chkPrefixDisplayName.Location      = New-Object System.Drawing.Point(194, 115)
+    $chkPrefixDisplayName.Location      = New-Object System.Drawing.Point(194, 137)
     $chkPrefixDisplayName.Size          = New-Object System.Drawing.Size(106, 20)
     $chkPrefixDisplayName.Enabled       = $false
     $chkPrefixDisplayName.Checked       = $true
@@ -4586,7 +4620,7 @@ Supported group types: MailUniversalDistributionGroup,
 
     $chkPrefixAlias               = New-Object System.Windows.Forms.CheckBox
     $chkPrefixAlias.Text          = "Alias"
-    $chkPrefixAlias.Location      = New-Object System.Drawing.Point(304, 115)
+    $chkPrefixAlias.Location      = New-Object System.Drawing.Point(304, 137)
     $chkPrefixAlias.Size          = New-Object System.Drawing.Size(62, 20)
     $chkPrefixAlias.Enabled       = $false
     $chkPrefixAlias.Checked       = $true
@@ -4594,13 +4628,13 @@ Supported group types: MailUniversalDistributionGroup,
 
     $lblOU               = New-Object System.Windows.Forms.Label
     $lblOU.Text          = "Organizational Unit:"
-    $lblOU.Location      = New-Object System.Drawing.Point(28, 144)
+    $lblOU.Location      = New-Object System.Drawing.Point(28, 166)
     $lblOU.Size          = New-Object System.Drawing.Size(124, 18)
     $lblOU.Enabled       = $false
     $grpOp.Controls.Add($lblOU)
 
     $txtOU                    = New-Object System.Windows.Forms.TextBox
-    $txtOU.Location           = New-Object System.Drawing.Point(156, 142)
+    $txtOU.Location           = New-Object System.Drawing.Point(156, 164)
     $txtOU.Size               = New-Object System.Drawing.Size(506, 22)
     $txtOU.PlaceholderText    = "OU=Groups,DC=domain,DC=com  (optional -- leave blank for Exchange default)"
     $txtOU.Enabled            = $false
@@ -4608,13 +4642,13 @@ Supported group types: MailUniversalDistributionGroup,
 
     $lblDefaultOwner          = New-Object System.Windows.Forms.Label
     $lblDefaultOwner.Text     = "Default Owner:"
-    $lblDefaultOwner.Location = New-Object System.Drawing.Point(28, 170)
+    $lblDefaultOwner.Location = New-Object System.Drawing.Point(28, 192)
     $lblDefaultOwner.Size     = New-Object System.Drawing.Size(96, 18)
     $lblDefaultOwner.Enabled  = $false
     $grpOp.Controls.Add($lblDefaultOwner)
 
     $txtDefaultOwner                 = New-Object System.Windows.Forms.TextBox
-    $txtDefaultOwner.Location        = New-Object System.Drawing.Point(128, 168)
+    $txtDefaultOwner.Location        = New-Object System.Drawing.Point(128, 190)
     $txtDefaultOwner.Size            = New-Object System.Drawing.Size(534, 22)
     $txtDefaultOwner.PlaceholderText = "admin@target.com  (added as owner on all created groups)"
     $txtDefaultOwner.Enabled         = $false
@@ -4623,7 +4657,7 @@ Supported group types: MailUniversalDistributionGroup,
     # Properties to copy (create mode only)
     $lblCopyProps          = New-Object System.Windows.Forms.Label
     $lblCopyProps.Text     = "Copy properties:"
-    $lblCopyProps.Location = New-Object System.Drawing.Point(10, 198)
+    $lblCopyProps.Location = New-Object System.Drawing.Point(10, 220)
     $lblCopyProps.Size     = New-Object System.Drawing.Size(106, 18)
     $lblCopyProps.Enabled  = $false
     $grpOp.Controls.Add($lblCopyProps)
@@ -4631,7 +4665,7 @@ Supported group types: MailUniversalDistributionGroup,
     $chkAllProps          = New-Object System.Windows.Forms.CheckBox
     $chkAllProps.Text     = "Select All"
     $chkAllProps.Checked  = $true
-    $chkAllProps.Location = New-Object System.Drawing.Point(120, 196)
+    $chkAllProps.Location = New-Object System.Drawing.Point(120, 218)
     $chkAllProps.Size     = New-Object System.Drawing.Size(86, 20)
     $chkAllProps.Enabled  = $false
     $grpOp.Controls.Add($chkAllProps)
@@ -4639,7 +4673,7 @@ Supported group types: MailUniversalDistributionGroup,
     $chkPropManagedBy          = New-Object System.Windows.Forms.CheckBox
     $chkPropManagedBy.Text     = "Owners"
     $chkPropManagedBy.Checked  = $true
-    $chkPropManagedBy.Location = New-Object System.Drawing.Point(28, 218)
+    $chkPropManagedBy.Location = New-Object System.Drawing.Point(28, 240)
     $chkPropManagedBy.Size     = New-Object System.Drawing.Size(72, 20)
     $chkPropManagedBy.Enabled  = $false
     $grpOp.Controls.Add($chkPropManagedBy)
@@ -4647,7 +4681,7 @@ Supported group types: MailUniversalDistributionGroup,
     $chkPropHiddenGAL          = New-Object System.Windows.Forms.CheckBox
     $chkPropHiddenGAL.Text     = "Hidden from GAL"
     $chkPropHiddenGAL.Checked  = $true
-    $chkPropHiddenGAL.Location = New-Object System.Drawing.Point(106, 218)
+    $chkPropHiddenGAL.Location = New-Object System.Drawing.Point(106, 240)
     $chkPropHiddenGAL.Size     = New-Object System.Drawing.Size(124, 20)
     $chkPropHiddenGAL.Enabled  = $false
     $grpOp.Controls.Add($chkPropHiddenGAL)
@@ -4655,7 +4689,7 @@ Supported group types: MailUniversalDistributionGroup,
     $chkPropRequireSenderAuth          = New-Object System.Windows.Forms.CheckBox
     $chkPropRequireSenderAuth.Text     = "External Senders"
     $chkPropRequireSenderAuth.Checked  = $true
-    $chkPropRequireSenderAuth.Location = New-Object System.Drawing.Point(236, 218)
+    $chkPropRequireSenderAuth.Location = New-Object System.Drawing.Point(236, 240)
     $chkPropRequireSenderAuth.Size     = New-Object System.Drawing.Size(126, 20)
     $chkPropRequireSenderAuth.Enabled  = $false
     $grpOp.Controls.Add($chkPropRequireSenderAuth)
@@ -4663,7 +4697,7 @@ Supported group types: MailUniversalDistributionGroup,
     $chkPropGrantSendOnBehalf          = New-Object System.Windows.Forms.CheckBox
     $chkPropGrantSendOnBehalf.Text     = "Send on Behalf"
     $chkPropGrantSendOnBehalf.Checked  = $true
-    $chkPropGrantSendOnBehalf.Location = New-Object System.Drawing.Point(368, 218)
+    $chkPropGrantSendOnBehalf.Location = New-Object System.Drawing.Point(368, 240)
     $chkPropGrantSendOnBehalf.Size     = New-Object System.Drawing.Size(116, 20)
     $chkPropGrantSendOnBehalf.Enabled  = $false
     $grpOp.Controls.Add($chkPropGrantSendOnBehalf)
@@ -4671,7 +4705,7 @@ Supported group types: MailUniversalDistributionGroup,
     $chkPropModeration          = New-Object System.Windows.Forms.CheckBox
     $chkPropModeration.Text     = "Moderation"
     $chkPropModeration.Checked  = $true
-    $chkPropModeration.Location = New-Object System.Drawing.Point(28, 240)
+    $chkPropModeration.Location = New-Object System.Drawing.Point(28, 262)
     $chkPropModeration.Size     = New-Object System.Drawing.Size(92, 20)
     $chkPropModeration.Enabled  = $false
     $grpOp.Controls.Add($chkPropModeration)
@@ -4679,7 +4713,7 @@ Supported group types: MailUniversalDistributionGroup,
     $chkPropAcceptFrom          = New-Object System.Windows.Forms.CheckBox
     $chkPropAcceptFrom.Text     = "Accept Restrictions"
     $chkPropAcceptFrom.Checked  = $true
-    $chkPropAcceptFrom.Location = New-Object System.Drawing.Point(126, 240)
+    $chkPropAcceptFrom.Location = New-Object System.Drawing.Point(126, 262)
     $chkPropAcceptFrom.Size     = New-Object System.Drawing.Size(146, 20)
     $chkPropAcceptFrom.Enabled  = $false
     $grpOp.Controls.Add($chkPropAcceptFrom)
@@ -4687,7 +4721,7 @@ Supported group types: MailUniversalDistributionGroup,
     $chkPropRejectFrom          = New-Object System.Windows.Forms.CheckBox
     $chkPropRejectFrom.Text     = "Reject Restrictions"
     $chkPropRejectFrom.Checked  = $true
-    $chkPropRejectFrom.Location = New-Object System.Drawing.Point(278, 240)
+    $chkPropRejectFrom.Location = New-Object System.Drawing.Point(278, 262)
     $chkPropRejectFrom.Size     = New-Object System.Drawing.Size(146, 20)
     $chkPropRejectFrom.Enabled  = $false
     $grpOp.Controls.Add($chkPropRejectFrom)
@@ -4695,7 +4729,7 @@ Supported group types: MailUniversalDistributionGroup,
     # --- 4. Options ---
     $grpOpts           = New-Object System.Windows.Forms.GroupBox
     $grpOpts.Text      = "4. Options"
-    $grpOpts.Location  = New-Object System.Drawing.Point(12, 704)
+    $grpOpts.Location  = New-Object System.Drawing.Point(12, 726)
     $grpOpts.Size      = New-Object System.Drawing.Size(676, 52)
     $form.Controls.Add($grpOpts)
 
@@ -4720,14 +4754,14 @@ Supported group types: MailUniversalDistributionGroup,
     # --- Action Buttons ---
     $btnPreview               = New-Object System.Windows.Forms.Button
     $btnPreview.Text          = "Preview"
-    $btnPreview.Location      = New-Object System.Drawing.Point(12, 766)
+    $btnPreview.Location      = New-Object System.Drawing.Point(12, 788)
     $btnPreview.Size          = New-Object System.Drawing.Size(130, 34)
     $btnPreview.Enabled       = $false
     $form.Controls.Add($btnPreview)
 
     $btnRun                   = New-Object System.Windows.Forms.Button
     $btnRun.Text              = "Run Migration"
-    $btnRun.Location          = New-Object System.Drawing.Point(260, 766)
+    $btnRun.Location          = New-Object System.Drawing.Point(260, 788)
     $btnRun.Size              = New-Object System.Drawing.Size(180, 34)
     $btnRun.BackColor         = [System.Drawing.Color]::FromArgb(0, 120, 212)
     $btnRun.ForeColor         = [System.Drawing.Color]::White
@@ -4737,7 +4771,7 @@ Supported group types: MailUniversalDistributionGroup,
 
     $btnExportLog             = New-Object System.Windows.Forms.Button
     $btnExportLog.Text        = "Export Log"
-    $btnExportLog.Location    = New-Object System.Drawing.Point(558, 766)
+    $btnExportLog.Location    = New-Object System.Drawing.Point(558, 788)
     $btnExportLog.Size        = New-Object System.Drawing.Size(130, 34)
     $btnExportLog.Enabled     = $false
     $form.Controls.Add($btnExportLog)
@@ -4745,7 +4779,7 @@ Supported group types: MailUniversalDistributionGroup,
     # --- Status Log ---
     $grpLog           = New-Object System.Windows.Forms.GroupBox
     $grpLog.Text      = "Status Log"
-    $grpLog.Location  = New-Object System.Drawing.Point(12, 810)
+    $grpLog.Location  = New-Object System.Drawing.Point(12, 832)
     $grpLog.Size      = New-Object System.Drawing.Size(676, 152)
     $form.Controls.Add($grpLog)
 
@@ -4861,6 +4895,10 @@ Supported group types: MailUniversalDistributionGroup,
         $chkPropModeration.Enabled        = $c
         $chkPropAcceptFrom.Enabled        = $c
         $chkPropRejectFrom.Enabled        = $c
+        # M365 sub-options: only enabled in create mode
+        $m365create = $c -and $chkTypeM365.Checked
+        $chkSuppressWelcome.Enabled = $m365create
+        $chkSkipTeams.Enabled       = $m365create
     })
     $radCreateGroups.Add_CheckedChanged({
         $c = $radCreateGroups.Checked
@@ -4885,6 +4923,20 @@ Supported group types: MailUniversalDistributionGroup,
         $chkPropModeration.Enabled        = $c
         $chkPropAcceptFrom.Enabled        = $c
         $chkPropRejectFrom.Enabled        = $c
+        # M365 sub-options: only enabled in create mode
+        $m365create = $c -and $chkTypeM365.Checked
+        $chkSuppressWelcome.Enabled = $m365create
+        $chkSkipTeams.Enabled       = $m365create
+    })
+
+    # M365 sub-options visibility toggle
+    $chkTypeM365.Add_CheckedChanged({
+        $chkSuppressWelcome.Visible = $chkTypeM365.Checked
+        $chkSkipTeams.Visible       = $chkTypeM365.Checked
+        # Enable only when also in create mode
+        $m365create = $chkTypeM365.Checked -and $radCreateGroups.Checked
+        $chkSuppressWelcome.Enabled = $m365create
+        $chkSkipTeams.Enabled       = $m365create
     })
 
     # Select All - Group Types
@@ -5060,34 +5112,25 @@ Supported group types: MailUniversalDistributionGroup,
         return $null
     }
 
-    # Connect to EXO using stored UPN (silent if token cached), fall back to interactive
-    function Connect-DLTenant ([string]$Upn) {
-        if ($Upn) {
-            Connect-ExchangeOnline -UserPrincipalName $Upn -ShowBanner:$false -ErrorAction Stop
-        } else {
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-        }
-    }
-
-    # Ensure we are connected to source; reconnect silently if on a different org
+    # Ensure we are connected to source; skip reconnect if already on the right org
     function Switch-DLToSource {
         $current = Get-DLCurrentOrg
         if ($script:DLSourceOrg -and $current -eq $script:DLSourceOrg) {
             Write-DLLog "Using existing source connection ($current)." ([System.Drawing.Color]::DimGray)
         } else {
-            Write-DLLog "Connecting to source$(if ($script:DLSourceUpn) { " ($script:DLSourceUpn)" })..." ([System.Drawing.Color]::DimGray)
-            Connect-DLTenant $script:DLSourceUpn
+            Write-DLLog "Connecting to source$(if ($script:DLSourceOrg) { " ($script:DLSourceOrg)" })..." ([System.Drawing.Color]::DimGray)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
         }
     }
 
-    # Ensure we are connected to target; reconnect silently if on a different org
+    # Ensure we are connected to target; skip reconnect if already on the right org
     function Switch-DLToTarget {
         $current = Get-DLCurrentOrg
         if ($script:DLTargetOrg -and $current -eq $script:DLTargetOrg) {
             Write-DLLog "Using existing target connection ($current)." ([System.Drawing.Color]::DimGray)
         } else {
-            Write-DLLog "Connecting to target$(if ($script:DLTargetUpn) { " ($script:DLTargetUpn)" })..." ([System.Drawing.Color]::DimGray)
-            Connect-DLTenant $script:DLTargetUpn
+            Write-DLLog "Connecting to target$(if ($script:DLTargetOrg) { " ($script:DLTargetOrg)" })..." ([System.Drawing.Color]::DimGray)
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
         }
     }
 

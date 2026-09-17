@@ -3051,6 +3051,22 @@ NOTES
         $idx     = 0
         $dlTypes = @('MailUniversalDistributionGroup','MailUniversalSecurityGroup')
 
+        function Find-PMMapping ([object]$recipient) {
+            # Returns the matching mapping table key (lowercase) or $null
+            # Checks primary SMTP first, then all proxy addresses
+            $primary = $recipient.PrimarySmtpAddress.ToLower()
+            if ($script:PMMappingTable.ContainsKey($primary)) { return $primary }
+            if ($recipient.EmailAddresses) {
+                foreach ($addr in $recipient.EmailAddresses) {
+                    if ($addr.ToString() -match '^smtp:(.+)$') {
+                        $proxyKey = $Matches[1].ToLower()
+                        if ($script:PMMappingTable.ContainsKey($proxyKey)) { return $proxyKey }
+                    }
+                }
+            }
+            return $null
+        }
+
         foreach ($mbxSmtp in $MailboxList) {
             $idx++
             Write-PMLog "  [$idx/$total] $mbxSmtp" ([System.Drawing.Color]::DimGray)
@@ -3067,19 +3083,25 @@ NOTES
             function Resolve-PMDelegate ([string]$rawId, [string]$permType) {
                 $r = Get-Recipient -Identity $rawId -ErrorAction SilentlyContinue
                 if (-not $r) { return }
-                $smtp = $r.PrimarySmtpAddress
+                $smtp       = $r.PrimarySmtpAddress
+                $mappingKey = Find-PMMapping $r
                 $isDL       = $r.RecipientTypeDetails -in $dlTypes
-                $dlIsMapped = $script:PMMappingTable.ContainsKey($smtp.ToLower())
+                $dlIsMapped = $null -ne $mappingKey
                 if ($isDL -and $chkResolveDLs.Checked -and -not $dlIsMapped) {
                     # DL has no mapping entry -- expand members and grant individually
                     $members = @(Expand-FrankensteinDLMembers -Identity $smtp -Recurse:($chkNestedDLs.Checked))
                     if ($members.Count) {
                         Write-PMLog "    DL '$smtp' (unmapped, expanding) -> $($members.Count) member(s)" ([System.Drawing.Color]::DarkCyan)
-                        foreach ($m in $members) { Add-PMRecord $m.PrimarySmtpAddress $permType $smtp }
+                        foreach ($m in $members) {
+                            $mKey = Find-PMMapping $m
+                            $keyToStore = if ($mKey) { $mKey } else { $m.PrimarySmtpAddress }
+                            Add-PMRecord $keyToStore $permType $smtp
+                        }
                     }
                 } else {
                     # Non-DL, DL expansion off, or DL is mapped -- record as direct delegate
-                    Add-PMRecord $smtp $permType ''
+                    $keyToStore = if ($mappingKey) { $mappingKey } else { $smtp }
+                    Add-PMRecord $keyToStore $permType ''
                 }
             }
 
@@ -3830,6 +3852,21 @@ function Invoke-FrankensteinDLMigrator {
         $lbl.ForeColor = $color
     }
 
+    function Find-DLMapping ([object]$recipient) {
+        # Check primary SMTP first, then all proxy addresses (handles onmicrosoft.com as CSV key)
+        $primary = $recipient.PrimarySmtpAddress.ToLower()
+        if ($script:DLMappingTable.ContainsKey($primary)) { return $script:DLMappingTable[$primary] }
+        if ($recipient.EmailAddresses) {
+            foreach ($addr in $recipient.EmailAddresses) {
+                if ($addr.ToString() -match '^smtp:(.+)$') {
+                    $proxyKey = $Matches[1].ToLower()
+                    if ($script:DLMappingTable.ContainsKey($proxyKey)) { return $script:DLMappingTable[$proxyKey] }
+                }
+            }
+        }
+        return $null
+    }
+
     function Add-TargetDLMember ([string]$TargetGroup, [string]$TargetMember, [string]$GroupType) {
         if ($GroupType -eq 'GroupMailbox') {
             Add-UnifiedGroupLinks -Identity $TargetGroup -LinkType Members -Links $TargetMember -ErrorAction Stop
@@ -3914,7 +3951,7 @@ function Invoke-FrankensteinDLMigrator {
             foreach ($m in $members) {
                 $mSmtp   = $m.PrimarySmtpAddress
                 $mType   = $m.RecipientTypeDetails
-                $mTarget = $script:DLMappingTable[$mSmtp.ToLower()]
+                $mTarget = Find-DLMapping $m
 
                 if ($mType -in $dlTypes) {
                     if ($mTarget) {
@@ -3931,7 +3968,7 @@ function Invoke-FrankensteinDLMigrator {
                         Write-DLLog "    Nested '$mSmtp' unmapped -- expanding members" ([System.Drawing.Color]::DarkCyan)
                         $expanded = @(Expand-FrankensteinDLMembers -Identity $mSmtp -Recurse)
                         foreach ($em in $expanded) {
-                            $emTarget = $script:DLMappingTable[$em.PrimarySmtpAddress.ToLower()]
+                            $emTarget = Find-DLMapping $em
                             if ($emTarget) {
                                 $script:DLSourceData.Add([PSCustomObject]@{
                                     SourceGroup     = $srcSmtp
@@ -4813,12 +4850,30 @@ Supported group types: MailUniversalDistributionGroup,
             Write-DLLog "Output path not found: $outPath" ([System.Drawing.Color]::Tomato)
             return
         }
-        $file = Join-Path $outPath "DLMigrationLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+        $stamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
+
+        # Result log
+        $logFile = Join-Path $outPath "DLMigrationLog_$stamp.csv"
         try {
-            $script:DLResultLog | Export-Csv $file -NoTypeInformation -Encoding UTF8
-            Write-DLLog "Log exported: $file" ([System.Drawing.Color]::LimeGreen)
+            $script:DLResultLog | Export-Csv $logFile -NoTypeInformation -Encoding UTF8
+            Write-DLLog "Log exported: $logFile" ([System.Drawing.Color]::LimeGreen)
         } catch {
-            Write-DLLog "Export failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+            Write-DLLog "ERROR exporting log: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        }
+
+        # Group map -- Source/Target pairs for all processed groups with final (post-creation) targets
+        if ($script:DLGroupMeta.Count) {
+            $mapFile = Join-Path $outPath "DLGroupMap_$stamp.csv"
+            try {
+                $mapRows = foreach ($srcSmtp in ($script:DLGroupMeta.Keys | Sort-Object)) {
+                    $tgt = $script:DLMappingTable[$srcSmtp.ToLower()]
+                    [PSCustomObject]@{ Source = $srcSmtp; Target = if ($tgt) { $tgt } else { '' } }
+                }
+                $mapRows | Export-Csv $mapFile -NoTypeInformation -Encoding UTF8
+                Write-DLLog "Group map exported: $mapFile" ([System.Drawing.Color]::LimeGreen)
+            } catch {
+                Write-DLLog "ERROR exporting group map: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+            }
         }
     })
 

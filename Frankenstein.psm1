@@ -3859,11 +3859,15 @@ function Invoke-FrankensteinDLMigrator {
     }
 
     function Update-DLProgress ([int]$done, [int]$total) {
-        if ($total -le 0) { $progressBar.Value = 0; return }
+        if ($total -le 0) { $progressBar.Value = 0; $lblProgressPct.Text = ""; return }
         $pct = [math]::Min(100, [math]::Round(($done / $total) * 100))
         if ($progressBar.Value -ne $pct) {
-            $progressBar.Value = $pct
+            $progressBar.Value       = $pct
+            $lblProgressPct.Text     = "$pct%"
+            $lblProgressPct.ForeColor = if ($pct -lt 55) { [System.Drawing.Color]::White } else { [System.Drawing.Color]::Black }
+            $lblProgressPct.BringToFront()
             $progressBar.Refresh()
+            $lblProgressPct.Refresh()
             [System.Windows.Forms.Application]::DoEvents()
         }
     }
@@ -4430,10 +4434,11 @@ function Invoke-FrankensteinDLMigrator {
             Update-DLProgress (70 + [int]($p2Done / [math]::Max(1,$p2Total) * 30)) 100
             $tgtGroup  = $script:DLMappingTable[$rec.SourceGroup.ToLower()]
             if (-not $tgtGroup) { $tgtGroup = $rec.TargetGroup }
-            # Re-resolve TargetMember in case it was a nested group pending creation at collection time
+            # Always re-resolve TargetMember from mapping table -- handles nested groups re-created as STALE in Phase 1
             $tgtMember = $rec.TargetMember
-            if (-not $tgtMember -and $rec.SourceMember) {
-                $tgtMember = $script:DLMappingTable[$rec.SourceMember.ToLower()]
+            if ($rec.SourceMember) {
+                $freshTgt = $script:DLMappingTable[$rec.SourceMember.ToLower()]
+                if ($freshTgt) { $tgtMember = $freshTgt }
             }
             $srcGroupType = $rec.SourceGroupType
 
@@ -5008,6 +5013,17 @@ Supported group types: MailUniversalDistributionGroup,
     $progressBar.Style         = 'Continuous'
     $form.Controls.Add($progressBar)
 
+    $lblProgressPct            = New-Object System.Windows.Forms.Label
+    $lblProgressPct.Location   = New-Object System.Drawing.Point(12, 828)
+    $lblProgressPct.Size       = New-Object System.Drawing.Size(776, 18)
+    $lblProgressPct.Text       = ""
+    $lblProgressPct.TextAlign  = [System.Drawing.ContentAlignment]::MiddleCenter
+    $lblProgressPct.BackColor  = [System.Drawing.Color]::Transparent
+    $lblProgressPct.ForeColor  = [System.Drawing.Color]::White
+    $lblProgressPct.Font       = New-Object System.Drawing.Font("Segoe UI", 7.5, [System.Drawing.FontStyle]::Bold)
+    $form.Controls.Add($lblProgressPct)
+    $lblProgressPct.BringToFront()
+
     # --- Status Log ---
     $grpLog           = New-Object System.Windows.Forms.GroupBox
     $grpLog.Text      = "Status Log"
@@ -5511,10 +5527,15 @@ Supported group types: MailUniversalDistributionGroup,
         } else { '' }
         if ($script:DLLiveLogPath) { Write-DLLog "Live log: $script:DLLiveLogPath" ([System.Drawing.Color]::DimGray) }
         try {
-            Switch-DLToSource
-            Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
-            Collect-DLSourceData
-            Set-DLStatusLabel $lblSrcStatus "Connected - $($script:DLSourceData.Count) member record(s) read" ([System.Drawing.Color]::DarkGreen)
+            if ($script:DLGroupMeta.Count -gt 0) {
+                Write-DLLog "Using source data from Preview ($($script:DLGroupMeta.Count) group(s), $($script:DLSourceData.Count) member record(s)) -- skipping re-scan." ([System.Drawing.Color]::DimGray)
+                Set-DLStatusLabel $lblSrcStatus "Connected - using cached data" ([System.Drawing.Color]::DarkGreen)
+            } else {
+                Switch-DLToSource
+                Set-DLStatusLabel $lblSrcStatus "Connected - scanning groups..." ([System.Drawing.Color]::DarkOrange)
+                Collect-DLSourceData
+                Set-DLStatusLabel $lblSrcStatus "Connected - $($script:DLSourceData.Count) member record(s) read" ([System.Drawing.Color]::DarkGreen)
+            }
 
             if ($radM365.Checked) {
                 Switch-DLToTarget
@@ -5569,6 +5590,31 @@ Supported group types: MailUniversalDistributionGroup,
             }
             Set-DLStatusLabel $lblTgtStatus "Connected - migration complete" ([System.Drawing.Color]::DarkGreen)
             $btnExportLog.Enabled = $true
+
+            # Easter egg
+            $eggForm = New-Object System.Windows.Forms.Form
+            $eggForm.FormBorderStyle = 'FixedDialog'
+            $eggForm.MaximizeBox  = $false
+            $eggForm.MinimizeBox  = $false
+            $eggForm.ControlBox   = $false
+            $eggForm.Size         = New-Object System.Drawing.Size(620, 160)
+            $eggForm.StartPosition = 'CenterScreen'
+            $eggForm.BackColor    = [System.Drawing.Color]::FromArgb(20, 20, 55)
+            $eggForm.TopMost      = $true
+            $eggLbl = New-Object System.Windows.Forms.Label
+            $eggLbl.Text      = "YOU ARE SO AMAZING." + [System.Environment]::NewLine + "DISTRIBUTION GROUP MIGRATION COMPLETE!"
+            $eggLbl.Font      = New-Object System.Drawing.Font("Segoe UI", 15, [System.Drawing.FontStyle]::Bold)
+            $eggLbl.ForeColor = [System.Drawing.Color]::Gold
+            $eggLbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+            $eggLbl.Dock      = 'Fill'
+            $eggForm.Controls.Add($eggLbl)
+            $eggTimer = New-Object System.Windows.Forms.Timer
+            $eggTimer.Interval = 4500
+            $eggTimer.Add_Tick({ $eggTimer.Stop(); $eggForm.Close() })
+            $eggForm.Add_Click({ $eggForm.Close() })
+            $eggLbl.Add_Click({ $eggForm.Close() })
+            $eggForm.Show()
+            $eggTimer.Start()
         } catch {
             Write-DLLog "FATAL: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally {

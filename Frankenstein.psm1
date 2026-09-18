@@ -3862,10 +3862,8 @@ function Invoke-FrankensteinDLMigrator {
         if ($total -le 0) { $progressBar.Value = 0; $lblProgressPct.Text = ""; return }
         $pct = [math]::Min(100, [math]::Round(($done / $total) * 100))
         if ($progressBar.Value -ne $pct) {
-            $progressBar.Value       = $pct
-            $lblProgressPct.Text     = "$pct%"
-            $lblProgressPct.ForeColor = if ($pct -lt 55) { [System.Drawing.Color]::White } else { [System.Drawing.Color]::Black }
-            $lblProgressPct.BringToFront()
+            $progressBar.Value   = $pct
+            $lblProgressPct.Text = "$pct%"
             $progressBar.Refresh()
             $lblProgressPct.Refresh()
             [System.Windows.Forms.Application]::DoEvents()
@@ -5011,18 +5009,17 @@ Supported group types: MailUniversalDistributionGroup,
     $progressBar.Maximum       = 100
     $progressBar.Value         = 0
     $progressBar.Style         = 'Continuous'
+    $progressBar.Size          = New-Object System.Drawing.Size(718, 18)
     $form.Controls.Add($progressBar)
 
     $lblProgressPct            = New-Object System.Windows.Forms.Label
-    $lblProgressPct.Location   = New-Object System.Drawing.Point(12, 828)
-    $lblProgressPct.Size       = New-Object System.Drawing.Size(776, 18)
+    $lblProgressPct.Location   = New-Object System.Drawing.Point(734, 828)
+    $lblProgressPct.Size       = New-Object System.Drawing.Size(54, 18)
     $lblProgressPct.Text       = ""
     $lblProgressPct.TextAlign  = [System.Drawing.ContentAlignment]::MiddleCenter
-    $lblProgressPct.BackColor  = [System.Drawing.Color]::Transparent
-    $lblProgressPct.ForeColor  = [System.Drawing.Color]::White
+    $lblProgressPct.ForeColor  = [System.Drawing.Color]::DimGray
     $lblProgressPct.Font       = New-Object System.Drawing.Font("Segoe UI", 7.5, [System.Drawing.FontStyle]::Bold)
     $form.Controls.Add($lblProgressPct)
-    $lblProgressPct.BringToFront()
 
     # --- Status Log ---
     $grpLog           = New-Object System.Windows.Forms.GroupBox
@@ -5279,7 +5276,11 @@ Supported group types: MailUniversalDistributionGroup,
         try {
             Write-DLLog "Connecting to source M365 tenant..." ([System.Drawing.Color]::Silver)
             $beforeIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | ForEach-Object { $_.ConnectionId })
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            $dlCmdlets = @('Get-DistributionGroup','New-DistributionGroup','Set-DistributionGroup',
+                           'Get-UnifiedGroup','New-UnifiedGroup','Set-UnifiedGroup',
+                           'Add-DistributionGroupMember','Add-UnifiedGroupLinks',
+                           'Get-Recipient','Get-ConnectionInformation','Set-ConnectionContext','Get-OrganizationConfig')
+            Connect-ExchangeOnline -ShowBanner:$false -CommandName $dlCmdlets -ErrorAction Stop
             $allConns = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
             $newConn  = $allConns | Where-Object { $_.ConnectionId -notin $beforeIds } | Select-Object -First 1
             if (-not $newConn) { $newConn = $allConns | Select-Object -First 1 }
@@ -5315,7 +5316,11 @@ Supported group types: MailUniversalDistributionGroup,
             if ($radM365.Checked) {
                 Write-DLLog "Connecting to target M365 tenant..." ([System.Drawing.Color]::Silver)
                 $beforeIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | ForEach-Object { $_.ConnectionId })
-                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+                $dlCmdlets = @('Get-DistributionGroup','New-DistributionGroup','Set-DistributionGroup',
+                               'Get-UnifiedGroup','New-UnifiedGroup','Set-UnifiedGroup',
+                               'Add-DistributionGroupMember','Add-UnifiedGroupLinks',
+                               'Get-Recipient','Get-ConnectionInformation','Set-ConnectionContext','Get-OrganizationConfig')
+                Connect-ExchangeOnline -ShowBanner:$false -CommandName $dlCmdlets -ErrorAction Stop
                 $allConns = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
                 $newConn  = $allConns | Where-Object { $_.ConnectionId -notin $beforeIds } | Select-Object -First 1
                 if (-not $newConn) { $newConn = $allConns | Select-Object -First 1 }
@@ -5591,30 +5596,47 @@ Supported group types: MailUniversalDistributionGroup,
             Set-DLStatusLabel $lblTgtStatus "Connected - migration complete" ([System.Drawing.Color]::DarkGreen)
             $btnExportLog.Enabled = $true
 
-            # Easter egg
+            # Easter egg -- ShowDialog keeps this scope alive so timers fire correctly
             $eggForm = New-Object System.Windows.Forms.Form
             $eggForm.FormBorderStyle = 'FixedDialog'
-            $eggForm.MaximizeBox  = $false
-            $eggForm.MinimizeBox  = $false
-            $eggForm.ControlBox   = $false
-            $eggForm.Size         = New-Object System.Drawing.Size(620, 160)
-            $eggForm.StartPosition = 'CenterScreen'
-            $eggForm.BackColor    = [System.Drawing.Color]::FromArgb(20, 20, 55)
-            $eggForm.TopMost      = $true
+            $eggForm.MaximizeBox    = $false
+            $eggForm.MinimizeBox    = $false
+            $eggForm.Size           = New-Object System.Drawing.Size(660, 175)
+            $eggForm.StartPosition  = 'Manual'
+            $eggForm.Location       = New-Object System.Drawing.Point(
+                [int]($form.Left + ($form.Width  - 660) / 2),
+                [int]($form.Top  + ($form.Height - 175) / 2)
+            )
+            $eggForm.BackColor      = [System.Drawing.Color]::FromArgb(20, 20, 55)
+            $eggForm.TopMost        = $true
+            $eggForm.Text           = "Frankenstein"
             $eggLbl = New-Object System.Windows.Forms.Label
-            $eggLbl.Text      = "YOU ARE SO AMAZING." + [System.Environment]::NewLine + "DISTRIBUTION GROUP MIGRATION COMPLETE!"
+            $eggLbl.Text      = "WOW!!! YOU ARE SO AMAZING." + [System.Environment]::NewLine + "DISTRIBUTION GROUP MIGRATION COMPLETE!"
             $eggLbl.Font      = New-Object System.Drawing.Font("Segoe UI", 15, [System.Drawing.FontStyle]::Bold)
             $eggLbl.ForeColor = [System.Drawing.Color]::Gold
             $eggLbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
             $eggLbl.Dock      = 'Fill'
             $eggForm.Controls.Add($eggLbl)
-            $eggTimer = New-Object System.Windows.Forms.Timer
-            $eggTimer.Interval = 4500
-            $eggTimer.Add_Tick({ $eggTimer.Stop(); $eggForm.Close() })
-            $eggForm.Add_Click({ $eggForm.Close() })
-            $eggLbl.Add_Click({ $eggForm.Close() })
-            $eggForm.Show()
-            $eggTimer.Start()
+            # Flash: alternate label color between Gold and HotPink every 350ms
+            $flashTimer = New-Object System.Windows.Forms.Timer
+            $flashTimer.Interval = 350
+            $eggForm.Tag = $true   # used as flash-state toggle (avoids closure/scope issues)
+            $flashTimer.Add_Tick({
+                if ($eggForm.Tag) { $eggLbl.ForeColor = [System.Drawing.Color]::HotPink; $eggForm.Tag = $false }
+                else              { $eggLbl.ForeColor = [System.Drawing.Color]::Gold;    $eggForm.Tag = $true  }
+            })
+            # Auto-close after 5 s
+            $eggClose = New-Object System.Windows.Forms.Timer
+            $eggClose.Interval = 5000
+            $eggClose.Add_Tick({ $eggClose.Stop(); $flashTimer.Stop(); $eggForm.Close() })
+            # Click anywhere to dismiss early
+            $eggDismiss = { $eggClose.Stop(); $flashTimer.Stop(); $eggForm.Close() }
+            $eggForm.Add_Click($eggDismiss)
+            $eggLbl.Add_Click($eggDismiss)
+            # Start timers only once the window is actually visible
+            $eggForm.Add_Shown({ $flashTimer.Start(); $eggClose.Start() })
+            $eggForm.ShowDialog() | Out-Null
+            $flashTimer.Dispose(); $eggClose.Dispose(); $eggForm.Dispose()
         } catch {
             Write-DLLog "FATAL: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally {

@@ -3861,9 +3861,11 @@ function Invoke-FrankensteinDLMigrator {
     function Update-DLProgress ([int]$done, [int]$total) {
         if ($total -le 0) { $progressBar.Value = 0; return }
         $pct = [math]::Min(100, [math]::Round(($done / $total) * 100))
-        $progressBar.Value = $pct
-        $progressBar.Refresh()
-        [System.Windows.Forms.Application]::DoEvents()
+        if ($progressBar.Value -ne $pct) {
+            $progressBar.Value = $pct
+            $progressBar.Refresh()
+            [System.Windows.Forms.Application]::DoEvents()
+        }
     }
 
     function Set-DLStatusLabel ([System.Windows.Forms.Label]$lbl, [string]$text, [System.Drawing.Color]$color) {
@@ -4061,18 +4063,22 @@ function Invoke-FrankensteinDLMigrator {
     function Collect-DLSourceData {
         $script:DLSourceData.Clear()
         $script:DLGroupMeta.Clear()
+        $script:DLProxyIndex.Clear()
         $dlTypes = @('MailUniversalDistributionGroup','MailUniversalSecurityGroup','GroupMailbox')
 
+        $resolveSmtpCache = @{}
         function Resolve-ToSmtp ([string]$identity) {
             if (-not $identity) { return $null }
             # Strip smtp:/SMTP: prefix if EXO returns addresses in that form
             if ($identity -match '^smtp:(.+)$') { $identity = $Matches[1] }
+            $cacheKey = $identity.ToLower()
+            if ($resolveSmtpCache.ContainsKey($cacheKey)) { return $resolveSmtpCache[$cacheKey] }
             $r = Get-Recipient -Identity $identity -ErrorAction SilentlyContinue
-            if ($r) { return [string]$r.PrimarySmtpAddress }
             # EXO often returns ManagedBy as display names (e.g. "Mollohan, Darren").
-            # Return the raw string so Map-ListToTarget can still find it via the proxy index,
-            # which is also keyed by Name and DisplayName.
-            return $identity
+            # Return the raw string so Map-ListToTarget can still find it via the proxy index.
+            $result = if ($r) { [string]$r.PrimarySmtpAddress } else { $identity }
+            $resolveSmtpCache[$cacheKey] = $result
+            return $result
         }
 
         function Get-SmtpList ([object[]]$identities) {
@@ -4122,6 +4128,19 @@ function Invoke-FrankensteinDLMigrator {
                     AcceptFrom              = Get-SmtpList $grp.AcceptMessagesOnlyFromSendersOrMembers
                     RejectFrom              = Get-SmtpList $grp.RejectMessagesFromSendersOrMembers
                 }
+                # Build proxy index from already-fetched group data (avoids a separate Get-Recipient pass later)
+                $tgtForProxy = $script:DLMappingTable[$srcSmtp.ToLower()]
+                if ($tgtForProxy) {
+                    foreach ($addr in $grp.EmailAddresses) {
+                        if ($addr.ToString() -match '^smtp:(.+)$') {
+                            $pk = $Matches[1].ToLower()
+                            if (-not $script:DLProxyIndex.ContainsKey($pk)) { $script:DLProxyIndex[$pk] = $tgtForProxy }
+                        }
+                    }
+                    if ($grp.Name        -and -not $script:DLProxyIndex.ContainsKey($grp.Name.ToLower()))        { $script:DLProxyIndex[$grp.Name.ToLower()]        = $tgtForProxy }
+                    if ($grp.DisplayName -and -not $script:DLProxyIndex.ContainsKey($grp.DisplayName.ToLower())) { $script:DLProxyIndex[$grp.DisplayName.ToLower()] = $tgtForProxy }
+                    if ($grp.Alias       -and -not $script:DLProxyIndex.ContainsKey($grp.Alias.ToLower()))       { $script:DLProxyIndex[$grp.Alias.ToLower()]       = $tgtForProxy }
+                }
                 $sourceGroups.Add([PSCustomObject]@{ Smtp = $srcSmtp; Type = $typeDetail })
                 continue
             }
@@ -4149,6 +4168,18 @@ function Invoke-FrankensteinDLMigrator {
                     AcceptFrom        = @()
                     RejectFrom        = @()
                     HasTeam           = ($ug.ResourceProvisioningOptions -contains 'Team')
+                }
+                # Build proxy index from already-fetched M365 group data
+                $tgtForProxy = $script:DLMappingTable[$srcSmtp.ToLower()]
+                if ($tgtForProxy) {
+                    foreach ($addr in $ug.EmailAddresses) {
+                        if ($addr.ToString() -match '^smtp:(.+)$') {
+                            $pk = $Matches[1].ToLower()
+                            if (-not $script:DLProxyIndex.ContainsKey($pk)) { $script:DLProxyIndex[$pk] = $tgtForProxy }
+                        }
+                    }
+                    if ($ug.DisplayName -and -not $script:DLProxyIndex.ContainsKey($ug.DisplayName.ToLower())) { $script:DLProxyIndex[$ug.DisplayName.ToLower()] = $tgtForProxy }
+                    if ($ug.Alias       -and -not $script:DLProxyIndex.ContainsKey($ug.Alias.ToLower()))       { $script:DLProxyIndex[$ug.Alias.ToLower()]       = $tgtForProxy }
                 }
                 $sourceGroups.Add([PSCustomObject]@{ Smtp = $srcSmtp; Type = 'GroupMailbox' })
             }
@@ -4228,34 +4259,30 @@ function Invoke-FrankensteinDLMigrator {
         }
         Write-DLLog "Collection complete: $($script:DLSourceData.Count) member record(s) across $total group(s)." ([System.Drawing.Color]::LimeGreen)
 
-        # Build proxy address index: maps every SMTP alias of each mapped source identity → its target.
-        # Needed because CSV may use onmicrosoft.com addresses while ManagedBy/etc. resolve to vanity-domain SMTPs.
-        $script:DLProxyIndex.Clear()
-        $mappedSources = @($script:DLMappingTable.Keys | Where-Object { $script:DLMappingTable[$_] })
-        if ($mappedSources.Count) {
-            Write-DLLog "Building address alias index for $($mappedSources.Count) mapped identities..." ([System.Drawing.Color]::DimGray)
-            foreach ($srcKey in $mappedSources) {
+        # Extend proxy index for non-group entries (users, contacts, etc.) -- groups were indexed during the scan loop above
+        $mappedNonGroups = @($script:DLMappingTable.Keys | Where-Object {
+            $script:DLMappingTable[$_] -and -not $script:DLGroupMeta.ContainsKey($_)
+        })
+        if ($mappedNonGroups.Count) {
+            Write-DLLog "Extending alias index for $($mappedNonGroups.Count) non-group mapping(s)..." ([System.Drawing.Color]::DimGray)
+            foreach ($srcKey in $mappedNonGroups) {
                 $tgtSmtpVal = $script:DLMappingTable[$srcKey]
                 $r = Get-Recipient -Identity $srcKey -ErrorAction SilentlyContinue
                 if ($r) {
-                    # Index every SMTP proxy address
                     foreach ($addr in $r.EmailAddresses) {
                         if ($addr.ToString() -match '^smtp:(.+)$') {
                             $proxyKey = $Matches[1].ToLower()
-                            if (-not $script:DLProxyIndex.ContainsKey($proxyKey)) {
-                                $script:DLProxyIndex[$proxyKey] = $tgtSmtpVal
-                            }
+                            if (-not $script:DLProxyIndex.ContainsKey($proxyKey)) { $script:DLProxyIndex[$proxyKey] = $tgtSmtpVal }
                         }
                     }
-                    # Also index by Name and DisplayName so ManagedBy display-name strings resolve
                     if ($r.Name        -and -not $script:DLProxyIndex.ContainsKey($r.Name.ToLower()))        { $script:DLProxyIndex[$r.Name.ToLower()]        = $tgtSmtpVal }
                     if ($r.DisplayName -and -not $script:DLProxyIndex.ContainsKey($r.DisplayName.ToLower())) { $script:DLProxyIndex[$r.DisplayName.ToLower()] = $tgtSmtpVal }
                     if ($r.Alias       -and -not $script:DLProxyIndex.ContainsKey($r.Alias.ToLower()))       { $script:DLProxyIndex[$r.Alias.ToLower()]       = $tgtSmtpVal }
                 }
             }
-            Write-DLLog "Address alias index built ($($script:DLProxyIndex.Count) entries)." ([System.Drawing.Color]::DimGray)
-            Update-DLProgress 40 100
         }
+        Write-DLLog "Address alias index built ($($script:DLProxyIndex.Count) entries)." ([System.Drawing.Color]::DimGray)
+        Update-DLProgress 40 100
     }
 
     function Apply-DLTargetData {
@@ -4268,6 +4295,17 @@ function Invoke-FrankensteinDLMigrator {
 
         # Phase 1: Create groups
         if ($createMode) {
+            # Pre-fetch all existing group identities from target in one bulk call so STALE detection
+            # is a hashtable lookup instead of a per-group Get-Recipient call
+            Write-DLLog "Pre-fetching target group inventory..." ([System.Drawing.Color]::DimGray)
+            $targetExistsBySmtp = @{}
+            @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue) | ForEach-Object {
+                $targetExistsBySmtp[$_.PrimarySmtpAddress.ToLower()] = $true
+            }
+            @(Get-UnifiedGroup -ResultSize Unlimited -ErrorAction SilentlyContinue) | ForEach-Object {
+                $targetExistsBySmtp[$_.PrimarySmtpAddress.ToLower()] = $true
+            }
+            Write-DLLog "  $($targetExistsBySmtp.Count) group(s) found in target." ([System.Drawing.Color]::DimGray)
             Write-DLLog "---- Phase 1: Creating groups ----" ([System.Drawing.Color]::CornflowerBlue)
             $p1Total = [math]::Max(1, $script:DLGroupMeta.Count); $p1Done = 0
             foreach ($srcSmtp in @($script:DLGroupMeta.Keys)) {
@@ -4279,7 +4317,7 @@ function Invoke-FrankensteinDLMigrator {
                 # Mixed CSV: if a non-blank target was already in the mapping, verify it exists in EXO
                 $existingTarget = $script:DLMappingTable[$srcSmtp.ToLower()]
                 if ($existingTarget) {
-                    $existsInEXO = Get-Recipient -Identity $existingTarget -ErrorAction SilentlyContinue
+                    $existsInEXO = $targetExistsBySmtp.ContainsKey($existingTarget.ToLower())
                     if (-not $existsInEXO) {
                         Write-DLLog "  STALE  $srcSmtp -> $existingTarget (in CSV but not found in EXO -- re-creating)" ([System.Drawing.Color]::DarkGoldenrod)
                         $script:DLMappingTable.Remove($srcSmtp.ToLower())
@@ -4360,25 +4398,26 @@ function Invoke-FrankensteinDLMigrator {
             }
         }
 
-        # Write computed targets back to the source CSV so it can be reused in Add Members mode
-        if ($createMode -and $script:DLMappingCsvPath) {
-            Write-DLLog "---- Writing computed targets back to CSV ----" ([System.Drawing.Color]::CornflowerBlue)
+        # Write all current mappings back to the source CSV -- fills blank targets AND updates stale/re-created ones
+        if ($script:DLMappingCsvPath) {
             try {
-                $csvRows     = Import-Csv -Path $script:DLMappingCsvPath
-                $writeCount  = 0
+                $csvRows    = Import-Csv -Path $script:DLMappingCsvPath
+                $writeCount = 0
                 foreach ($row in $csvRows) {
-                    if ($row.Source -and -not $row.Target) {
+                    if ($row.Source) {
                         $computed = $script:DLMappingTable[$row.Source.Trim().ToLower()]
-                        if ($computed) {
+                        if ($computed -and $row.Target -ne $computed) {
                             $row.Target = $computed
                             $writeCount++
                         }
                     }
                 }
-                $csvRows | Export-Csv -Path $script:DLMappingCsvPath -NoTypeInformation -Force
-                Write-DLLog "  $writeCount computed target(s) written back to: $script:DLMappingCsvPath" ([System.Drawing.Color]::LimeGreen)
+                if ($writeCount) {
+                    $csvRows | Export-Csv -Path $script:DLMappingCsvPath -NoTypeInformation -Force
+                    Write-DLLog "  $writeCount mapping row(s) updated in source CSV: $script:DLMappingCsvPath" ([System.Drawing.Color]::LimeGreen)
+                }
             } catch {
-                Write-DLLog "  WARNING: Could not update CSV -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
+                Write-DLLog "  WARNING: Could not update source CSV -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
             }
         }
 
@@ -5497,6 +5536,21 @@ Supported group types: MailUniversalDistributionGroup,
             $cConf    = @($script:DLResultLog | Where-Object { $_.Status -eq 'Conflict' }).Count
             $cFailed  = @($script:DLResultLog | Where-Object { $_.Status -eq 'Failed' }).Count
             Write-DLLog "---- COMPLETE: $cCreated created | $cSuccess added | $cDupe already members | $cConf conflicts | $cFailed failed ----" ([System.Drawing.Color]::CornflowerBlue)
+
+            # Auto-export complete source→target group map so updated mappings are available immediately
+            if ($outPath -and (Test-Path $outPath) -and $script:DLGroupMeta.Count) {
+                $mapFile = Join-Path $outPath "DLGroupMap_$((Get-Date).ToString('yyyyMMdd_HHmmss')).csv"
+                try {
+                    $mapRows = foreach ($srcSmtp in ($script:DLGroupMeta.Keys | Sort-Object)) {
+                        $tgt = $script:DLMappingTable[$srcSmtp.ToLower()]
+                        [PSCustomObject]@{ Source = $srcSmtp; Target = if ($tgt) { $tgt } else { '' } }
+                    }
+                    $mapRows | Export-Csv $mapFile -NoTypeInformation -Encoding UTF8
+                    Write-DLLog "Group map exported: $mapFile" ([System.Drawing.Color]::LimeGreen)
+                } catch {
+                    Write-DLLog "WARNING: Could not export group map -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
+                }
+            }
 
             # Flag any groups that were not created
             $notCreated = @($script:DLResultLog | Where-Object {

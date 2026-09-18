@@ -3090,7 +3090,10 @@ NOTES
 
             function Resolve-PMDelegate ([string]$rawId, [string]$permType) {
                 $r = Get-Recipient -Identity $rawId -ErrorAction SilentlyContinue
-                if (-not $r) { return }
+                if (-not $r) {
+                    Write-PMLog "    WARN  [$permType] Cannot resolve '$rawId' via Get-Recipient -- skipping" ([System.Drawing.Color]::DarkGoldenrod)
+                    return
+                }
                 $smtp       = $r.PrimarySmtpAddress
                 $mappingKey = Find-PMMapping $r
                 $isDL       = $r.RecipientTypeDetails -in $dlTypes
@@ -3117,21 +3120,33 @@ NOTES
                 }
             }
 
+            $beforeCount = $script:PMSourceData.Count
             if ($chkFullAccess.Checked) {
-                @(Get-MailboxPermission -Identity $mbxSmtp -ErrorAction SilentlyContinue) |
-                    Where-Object { -not $_.IsInherited -and $_.User -notlike 'NT AUTHORITY\SELF' } |
-                    ForEach-Object { Resolve-PMDelegate $_.User 'FullAccess' }
+                $faPerms = @(Get-MailboxPermission -Identity $mbxSmtp -ErrorAction SilentlyContinue) |
+                    Where-Object { -not $_.IsInherited -and -not $_.Deny -and $_.User -notlike 'NT AUTHORITY\*' }
+                if ($faPerms.Count) {
+                    Write-PMLog "    FullAccess: $($faPerms.Count) explicit permission(s)" ([System.Drawing.Color]::DimGray)
+                    $faPerms | ForEach-Object { Resolve-PMDelegate ([string]$_.User) 'FullAccess' }
+                }
             }
             if ($chkSendAs.Checked) {
-                @(Get-RecipientPermission -Identity $mbxSmtp -ErrorAction SilentlyContinue) |
-                    Where-Object { $_.Trustee -ne 'NT AUTHORITY\SELF' } |
-                    ForEach-Object { Resolve-PMDelegate $_.Trustee 'SendAs' }
+                $saPerms = @(Get-RecipientPermission -Identity $mbxSmtp -ErrorAction SilentlyContinue) |
+                    Where-Object { $_.Trustee -notlike 'NT AUTHORITY\*' }
+                if ($saPerms.Count) {
+                    Write-PMLog "    SendAs: $($saPerms.Count) explicit permission(s)" ([System.Drawing.Color]::DimGray)
+                    $saPerms | ForEach-Object { Resolve-PMDelegate ([string]$_.Trustee) 'SendAs' }
+                }
             }
             if ($chkSendOnBehalf.Checked) {
                 $mbxObj = Get-Mailbox -Identity $mbxSmtp -ErrorAction SilentlyContinue
-                if ($mbxObj) {
-                    foreach ($g in $mbxObj.GrantSendOnBehalfTo) { Resolve-PMDelegate $g 'SendOnBehalf' }
+                if ($mbxObj -and $mbxObj.GrantSendOnBehalfTo.Count) {
+                    Write-PMLog "    SendOnBehalf: $($mbxObj.GrantSendOnBehalfTo.Count) grantee(s)" ([System.Drawing.Color]::DimGray)
+                    foreach ($g in $mbxObj.GrantSendOnBehalfTo) { Resolve-PMDelegate ([string]$g) 'SendOnBehalf' }
                 }
+            }
+            $addedCount = $script:PMSourceData.Count - $beforeCount
+            if ($addedCount -eq 0) {
+                Write-PMLog "    (no permissions found or all skipped)" ([System.Drawing.Color]::DimGray)
             }
         }
         Write-PMLog "Source read complete: $($script:PMSourceData.Count) permission record(s) collected." ([System.Drawing.Color]::LimeGreen)

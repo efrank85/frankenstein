@@ -3957,13 +3957,13 @@ function Invoke-FrankensteinDLMigrator {
         $copyAcceptFrom   = $chkPropAcceptFrom.Checked
         $copyRejectFrom   = $chkPropRejectFrom.Checked
 
-        $tgtManagedBy    = if ($copyManagedBy)    { Map-ListToTarget $Meta.ManagedBy }         else { @() }
-        if ($DefaultOwner -and $tgtManagedBy -notcontains $DefaultOwner) { $tgtManagedBy += $DefaultOwner }
+        [string[]]$tgtManagedBy    = @(); if ($copyManagedBy)    { $tgtManagedBy    = [string[]]@(Map-ListToTarget $Meta.ManagedBy) }
+        if ($DefaultOwner -and $tgtManagedBy -notcontains $DefaultOwner) { $tgtManagedBy = $tgtManagedBy + [string[]]@($DefaultOwner) }
         Write-DLLog "    Owners to set: $($tgtManagedBy -join ', ')$(if (-not $tgtManagedBy.Count) { ' (none -- no default owner set and no source owners resolved)' })" ([System.Drawing.Color]::DimGray)
-        $tgtModBy        = if ($copyModeration)   { Map-ListToTarget $Meta.ModeratedBy }       else { @() }
-        $tgtSendOnBehalf = if ($copySendOnBehalf) { Map-ListToTarget $Meta.GrantSendOnBehalf } else { @() }
-        $tgtAcceptFrom   = if ($copyAcceptFrom)   { Map-ListToTarget $Meta.AcceptFrom }        else { @() }
-        $tgtRejectFrom   = if ($copyRejectFrom)   { Map-ListToTarget $Meta.RejectFrom }        else { @() }
+        [string[]]$tgtModBy        = @(); if ($copyModeration)   { $tgtModBy        = [string[]]@(Map-ListToTarget $Meta.ModeratedBy) }
+        [string[]]$tgtSendOnBehalf = @(); if ($copySendOnBehalf) { $tgtSendOnBehalf = [string[]]@(Map-ListToTarget $Meta.GrantSendOnBehalf) }
+        [string[]]$tgtAcceptFrom   = @(); if ($copyAcceptFrom)   { $tgtAcceptFrom   = [string[]]@(Map-ListToTarget $Meta.AcceptFrom) }
+        [string[]]$tgtRejectFrom   = @(); if ($copyRejectFrom)   { $tgtRejectFrom   = [string[]]@(Map-ListToTarget $Meta.RejectFrom) }
 
         if ($GroupType -eq 'GroupMailbox') {
             # M365 Group: properties
@@ -3971,7 +3971,7 @@ function Invoke-FrankensteinDLMigrator {
             if ($copyHidden) { $p['HiddenFromAddressListsEnabled'] = $Meta.HiddenFromGAL }
             if ($copyReqAuth) { $p['RequireSenderAuthenticationEnabled'] = $Meta.RequireSenderAuth }
             if ($p.Count -gt 1) {
-                try { Set-UnifiedGroup @p -ErrorAction Stop }
+                try { Set-UnifiedGroup @p -ErrorAction Stop -WarningAction SilentlyContinue }
                 catch { Write-DLLog "    WARNING: M365 Group properties failed -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod) }
             }
             # M365 Group: recipients/owners (separate call so property failures are independent)
@@ -3979,7 +3979,7 @@ function Invoke-FrankensteinDLMigrator {
             if ($tgtManagedBy.Count)    { $pr['Owners']            = $tgtManagedBy }
             if ($tgtSendOnBehalf.Count) { $pr['GrantSendOnBehalfTo'] = $tgtSendOnBehalf }
             if ($pr.Count -gt 1) {
-                try { Set-UnifiedGroup @pr -ErrorAction Stop }
+                try { Set-UnifiedGroup @pr -ErrorAction Stop -WarningAction SilentlyContinue }
                 catch { Write-DLLog "    WARNING: M365 Group owners failed -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod) }
             }
         } elseif ($radOnPrem.Checked -and $script:DLOnPremSession) {
@@ -4011,7 +4011,7 @@ function Invoke-FrankensteinDLMigrator {
                 if ($null -ne $m.rptManager)      { $p['ReportToManagerEnabled']           = $m.rptManager }
                 if ($null -ne $m.rptOriginator)   { $p['ReportToOriginatorEnabled']        = $m.rptOriginator }
                 if ($null -ne $m.sendOof)         { $p['SendOofMessageToOriginatorEnabled'] = $m.sendOof }
-                if ($p.Count -gt 1) { Set-DistributionGroup @p -ErrorAction Stop }
+                if ($p.Count -gt 1) { Set-DistributionGroup @p -ErrorAction Stop -WarningAction SilentlyContinue }
                 # Recipients call (separate so a bad address doesn't block properties)
                 $pr = @{ Identity = $id }
                 if ($managedBy.Count) { $pr['ManagedBy']                              = $managedBy }
@@ -4019,7 +4019,7 @@ function Invoke-FrankensteinDLMigrator {
                 if ($sob.Count)       { $pr['GrantSendOnBehalfTo']                    = $sob }
                 if ($accept.Count)    { $pr['AcceptMessagesOnlyFromSendersOrMembers'] = $accept }
                 if ($reject.Count)    { $pr['RejectMessagesFromSendersOrMembers']     = $reject }
-                if ($pr.Count -gt 1) { Set-DistributionGroup @pr -ErrorAction Stop }
+                if ($pr.Count -gt 1) { Set-DistributionGroup @pr -ErrorAction Stop -WarningAction SilentlyContinue }
             } -ArgumentList $TargetIdentity, $tgtManagedBy, $tgtModBy, $tgtSendOnBehalf, $tgtAcceptFrom, $tgtRejectFrom, $onpremMeta
         } else {
             # EXO cloud DL: properties call first
@@ -4040,7 +4040,7 @@ function Invoke-FrankensteinDLMigrator {
             if ($null -ne $Meta.ReportToOriginator)      { $p['ReportToOriginatorEnabled']        = $Meta.ReportToOriginator }
             if ($null -ne $Meta.SendOofToOriginator)     { $p['SendOofMessageToOriginatorEnabled'] = $Meta.SendOofToOriginator }
             Write-DLLog "    Setting properties: $(($p.Keys | Where-Object {$_ -ne 'Identity'}) -join ', ')" ([System.Drawing.Color]::DimGray)
-            try { Set-DistributionGroup @p -ErrorAction Stop }
+            try { Set-DistributionGroup @p -ErrorAction Stop -WarningAction SilentlyContinue }
             catch { Write-DLLog "    WARNING: Properties failed -- $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
 
             # EXO cloud DL: recipients call second (isolated so a bad address never blocks properties)
@@ -4052,7 +4052,7 @@ function Invoke-FrankensteinDLMigrator {
             if ($tgtRejectFrom.Count)   { $pr['RejectMessagesFromSendersOrMembers']     = $tgtRejectFrom }
             if ($pr.Count -gt 1) {
                 Write-DLLog "    Setting recipients: ManagedBy=$($tgtManagedBy -join ';') ModBy=$($tgtModBy -join ';')" ([System.Drawing.Color]::DimGray)
-                try { Set-DistributionGroup @pr -ErrorAction Stop }
+                try { Set-DistributionGroup @pr -ErrorAction Stop -WarningAction SilentlyContinue }
                 catch { Write-DLLog "    WARNING: Owners/recipients failed -- $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
             }
         }

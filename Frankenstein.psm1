@@ -3095,6 +3095,10 @@ NOTES
                     return
                 }
                 $smtp       = $r.PrimarySmtpAddress
+                if ($smtp.ToLower() -eq $mbxSmtp.ToLower()) {
+                    Write-PMLog "    SKIP  [$permType] Delegate resolves to the same mailbox (self-delegation) -- skipping" ([System.Drawing.Color]::DimGray)
+                    return
+                }
                 $mappingKey = Find-PMMapping $r
                 $isDL       = $r.RecipientTypeDetails -in $dlTypes
                 $dlIsMapped = $null -ne $mappingKey

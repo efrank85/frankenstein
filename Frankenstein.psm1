@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Creation of Eric Frank. Discovers Exchange On-Premises and Online Information.
 
@@ -3377,7 +3377,7 @@ Important rules:
     $txtManualSrc                 = New-Object System.Windows.Forms.TextBox
     $txtManualSrc.Location        = New-Object System.Drawing.Point(10, 86)
     $txtManualSrc.Size            = New-Object System.Drawing.Size(334, 22)
-    $txtManualSrc.PlaceholderText = "source@domain.com"
+    try { $txtManualSrc.PlaceholderText = "source@domain.com" } catch {}
     $txtManualSrc.Enabled         = $false
     $grpMap.Controls.Add($txtManualSrc)
 
@@ -3391,7 +3391,7 @@ Important rules:
     $txtManualTgt                 = New-Object System.Windows.Forms.TextBox
     $txtManualTgt.Location        = New-Object System.Drawing.Point(372, 86)
     $txtManualTgt.Size            = New-Object System.Drawing.Size(312, 22)
-    $txtManualTgt.PlaceholderText = "target@domain.com"
+    try { $txtManualTgt.PlaceholderText = "target@domain.com" } catch {}
     $txtManualTgt.Enabled         = $false
     $grpMap.Controls.Add($txtManualTgt)
 
@@ -3484,7 +3484,7 @@ Important rules:
     $txtSingleMbx.Location        = New-Object System.Drawing.Point(136, 46)
     $txtSingleMbx.Size            = New-Object System.Drawing.Size(524, 22)
     $txtSingleMbx.Enabled         = $false
-    $txtSingleMbx.PlaceholderText = "source@domain.com"
+    try { $txtSingleMbx.PlaceholderText = "source@domain.com" } catch {}
     $grpScope.Controls.Add($txtSingleMbx)
 
     # --- 4. Permission Types ---
@@ -4710,7 +4710,7 @@ function Invoke-FrankensteinDLMigrator {
     $txtOnPremUri                 = New-Object System.Windows.Forms.TextBox
     $txtOnPremUri.Location        = New-Object System.Drawing.Point(10, 86)
     $txtOnPremUri.Size            = New-Object System.Drawing.Size(754, 22)
-    $txtOnPremUri.PlaceholderText = "On-prem URI: https://mailserver.domain.com/PowerShell/  (leave blank to use current Exchange session)"
+    try { $txtOnPremUri.PlaceholderText = "On-prem URI: https://mailserver.domain.com/PowerShell/  (leave blank to use current Exchange session)" } catch {}
     $txtOnPremUri.Enabled         = $false
     $grpConn.Controls.Add($txtOnPremUri)
 
@@ -4801,7 +4801,7 @@ Supported group types: MailUniversalDistributionGroup,
     $txtManualSrc                 = New-Object System.Windows.Forms.TextBox
     $txtManualSrc.Location        = New-Object System.Drawing.Point(10, 86)
     $txtManualSrc.Size            = New-Object System.Drawing.Size(334, 22)
-    $txtManualSrc.PlaceholderText = "source@domain.com"
+    try { $txtManualSrc.PlaceholderText = "source@domain.com" } catch {}
     $txtManualSrc.Enabled         = $false
     $grpMap.Controls.Add($txtManualSrc)
 
@@ -4815,7 +4815,7 @@ Supported group types: MailUniversalDistributionGroup,
     $txtManualTgt                 = New-Object System.Windows.Forms.TextBox
     $txtManualTgt.Location        = New-Object System.Drawing.Point(372, 86)
     $txtManualTgt.Size            = New-Object System.Drawing.Size(312, 22)
-    $txtManualTgt.PlaceholderText = "target@domain.com"
+    try { $txtManualTgt.PlaceholderText = "target@domain.com" } catch {}
     $txtManualTgt.Enabled         = $false
     $grpMap.Controls.Add($txtManualTgt)
 
@@ -4935,7 +4935,7 @@ Supported group types: MailUniversalDistributionGroup,
     $txtPrefix                    = New-Object System.Windows.Forms.TextBox
     $txtPrefix.Location           = New-Object System.Drawing.Point(78, 110)
     $txtPrefix.Size               = New-Object System.Drawing.Size(120, 22)
-    $txtPrefix.PlaceholderText    = "e.g. MIGR-"
+    try { $txtPrefix.PlaceholderText    = "e.g. MIGR-" } catch {}
     $txtPrefix.Enabled            = $false
     $grpOp.Controls.Add($txtPrefix)
 
@@ -4949,7 +4949,7 @@ Supported group types: MailUniversalDistributionGroup,
     $txtNewDomain                 = New-Object System.Windows.Forms.TextBox
     $txtNewDomain.Location        = New-Object System.Drawing.Point(332, 110)
     $txtNewDomain.Size            = New-Object System.Drawing.Size(344, 22)
-    $txtNewDomain.PlaceholderText = "target.com"
+    try { $txtNewDomain.PlaceholderText = "target.com" } catch {}
     $txtNewDomain.Enabled         = $false
     $grpOp.Controls.Add($txtNewDomain)
 
@@ -4994,7 +4994,7 @@ Supported group types: MailUniversalDistributionGroup,
     $txtOU                    = New-Object System.Windows.Forms.TextBox
     $txtOU.Location           = New-Object System.Drawing.Point(156, 164)
     $txtOU.Size               = New-Object System.Drawing.Size(606, 22)
-    $txtOU.PlaceholderText    = "OU=Groups,DC=domain,DC=com  (optional -- leave blank for Exchange default)"
+    try { $txtOU.PlaceholderText    = "OU=Groups,DC=domain,DC=com  (optional -- leave blank for Exchange default)" } catch {}
     $txtOU.Enabled            = $false
     $grpOp.Controls.Add($txtOU)
 
@@ -5008,7 +5008,7 @@ Supported group types: MailUniversalDistributionGroup,
     $txtDefaultOwner                 = New-Object System.Windows.Forms.TextBox
     $txtDefaultOwner.Location        = New-Object System.Drawing.Point(128, 190)
     $txtDefaultOwner.Size            = New-Object System.Drawing.Size(634, 22)
-    $txtDefaultOwner.PlaceholderText = "admin@target.com  (added as owner on all created groups)"
+    try { $txtDefaultOwner.PlaceholderText = "admin@target.com  (added as owner on all created groups)" } catch {}
     $txtDefaultOwner.Enabled         = $false
     $grpOp.Controls.Add($txtDefaultOwner)
 

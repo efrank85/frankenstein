@@ -3019,11 +3019,17 @@ NOTES
     Add-Type -AssemblyName System.Drawing
     [System.Windows.Forms.Application]::EnableVisualStyles()
 
-    $script:PMSourceConnected = $false
-    $script:PMTargetConnected = $false
-    $script:PMSourceData      = [System.Collections.Generic.List[PSCustomObject]]::new()
-    $script:PMMappingTable    = @{}   # source.ToLower() -> target
-    $script:PMResultLog       = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $script:PMSourceConnected    = $false
+    $script:PMTargetConnected    = $false
+    $script:PMSourceConnectionId = $null
+    $script:PMTargetConnectionId = $null
+    $script:PMSourceUpn          = ''
+    $script:PMTargetUpn          = ''
+    $script:PMSourceOrg          = ''
+    $script:PMTargetOrg          = ''
+    $script:PMSourceData         = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $script:PMMappingTable       = @{}
+    $script:PMResultLog          = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     #region ---- Helpers ----
 
@@ -3053,14 +3059,15 @@ NOTES
 
         function Find-PMMapping ([object]$recipient) {
             # Returns the matching mapping table key (lowercase) or $null
-            # Checks primary SMTP first, then all proxy addresses
+            # Checks primary SMTP first, then all proxy addresses (handles smtp:/SMTP: prefix or bare address)
             $primary = $recipient.PrimarySmtpAddress.ToLower()
             if ($script:PMMappingTable.ContainsKey($primary)) { return $primary }
             if ($recipient.EmailAddresses) {
                 foreach ($addr in $recipient.EmailAddresses) {
-                    if ($addr.ToString() -match '^smtp:(.+)$') {
-                        $proxyKey = $Matches[1].ToLower()
-                        if ($script:PMMappingTable.ContainsKey($proxyKey)) { return $proxyKey }
+                    # Strip any type prefix (smtp:, SMTP:, x500:, sip:, etc.) to get the bare address
+                    $raw = ($addr.ToString() -replace '^[^:]+:', '').ToLower().Trim()
+                    if ($raw -and $raw -ne $primary -and $script:PMMappingTable.ContainsKey($raw)) {
+                        return $raw
                     }
                 }
             }
@@ -3069,6 +3076,7 @@ NOTES
 
         foreach ($mbxSmtp in $MailboxList) {
             $idx++
+            Update-PMProgress $idx $total
             Write-PMLog "  [$idx/$total] $mbxSmtp" ([System.Drawing.Color]::DimGray)
 
             function Add-PMRecord ([string]$delegate, [string]$type, [string]$expandedFrom) {
@@ -3100,8 +3108,12 @@ NOTES
                     }
                 } else {
                     # Non-DL, DL expansion off, or DL is mapped -- record as direct delegate
-                    $keyToStore = if ($mappingKey) { $mappingKey } else { $smtp }
-                    Add-PMRecord $keyToStore $permType ''
+                    if ($mappingKey) {
+                        Add-PMRecord $mappingKey $permType ''
+                    } else {
+                        Write-PMLog "    WARN  [$permType] Delegate '$smtp' not in mapping -- will be skipped at apply time" ([System.Drawing.Color]::DarkGoldenrod)
+                        Add-PMRecord $smtp $permType ''
+                    }
                 }
             }
 
@@ -3128,8 +3140,12 @@ NOTES
     function Apply-PMTargetPermissions {
         $script:PMResultLog.Clear()
         $sobByMailbox = @{}
+        $applyTotal   = $script:PMSourceData.Count
+        $applyDone    = 0
 
         foreach ($perm in $script:PMSourceData) {
+            $applyDone++
+            Update-PMProgress $applyDone $applyTotal
             $mbxTarget = $script:PMMappingTable[$perm.Mailbox.ToLower()]
             $delTarget = $script:PMMappingTable[$perm.Delegate.ToLower()]
 
@@ -3160,13 +3176,13 @@ NOTES
                 switch ($perm.PermissionType) {
                     'FullAccess' {
                         Add-MailboxPermission -Identity $mbxTarget -User $delTarget -AccessRights FullAccess `
-                            -InheritanceType All -AutoMapping $false -ErrorAction Stop | Out-Null
+                            -InheritanceType All -AutoMapping $false -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
                         $log.Status = 'Success'; $log.Details = 'FullAccess granted'
                         Write-PMLog "  OK    [FullAccess] $delTarget -> $mbxTarget" ([System.Drawing.Color]::LimeGreen)
                     }
                     'SendAs' {
                         Add-RecipientPermission -Identity $mbxTarget -Trustee $delTarget `
-                            -AccessRights SendAs -Confirm:$false -ErrorAction Stop | Out-Null
+                            -AccessRights SendAs -Confirm:$false -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
                         $log.Status = 'Success'; $log.Details = 'SendAs granted'
                         Write-PMLog "  OK    [SendAs] $delTarget -> $mbxTarget" ([System.Drawing.Color]::LimeGreen)
                     }
@@ -3194,7 +3210,7 @@ NOTES
 
         foreach ($mbxTarget in $sobByMailbox.Keys) {
             try {
-                Set-Mailbox -Identity $mbxTarget -GrantSendOnBehalfTo @{Add = $sobByMailbox[$mbxTarget].ToArray()} -ErrorAction Stop
+                Set-Mailbox -Identity $mbxTarget -GrantSendOnBehalfTo @{Add = $sobByMailbox[$mbxTarget].ToArray()} -ErrorAction Stop -WarningAction SilentlyContinue
                 Write-PMLog "  OK    [SendOnBehalf] Applied to $mbxTarget ($($sobByMailbox[$mbxTarget].Count) delegate(s))" ([System.Drawing.Color]::LimeGreen)
                 $script:PMResultLog | Where-Object { $_.TargetMailbox -eq $mbxTarget -and $_.PermissionType -eq 'SendOnBehalf' -and $_.Status -eq 'Queued' } |
                     ForEach-Object { $_.Status = 'Success'; $_.Details = 'SendOnBehalf granted' }
@@ -3207,13 +3223,57 @@ NOTES
         }
     }
 
+    function Update-PMProgress ([int]$done, [int]$total) {
+        if ($total -le 0) { $pmProgressBar.Value = 0; $lblPMProgressPct.Text = ""; return }
+        $pct = [math]::Min(100, [math]::Round(($done / $total) * 100))
+        if ($pmProgressBar.Value -ne $pct) {
+            $pmProgressBar.Value       = $pct
+            $lblPMProgressPct.Text     = "$pct%"
+            $pmProgressBar.Refresh()
+            $lblPMProgressPct.Refresh()
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    }
+
+    function Switch-PMToSource {
+        if ($script:PMSourceConnectionId -and (Get-Command Set-ConnectionContext -ErrorAction SilentlyContinue)) {
+            try { Set-ConnectionContext -ConnectionId $script:PMSourceConnectionId -ErrorAction Stop; return } catch {}
+        }
+        if ($script:PMSourceOrg -and (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue)) {
+            $active = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+            if ($active.Count -eq 1 -and [string]$active[0].Organization -eq $script:PMSourceOrg) { return }
+        }
+        Write-PMLog "Switching to source$(if ($script:PMSourceOrg) { " ($script:PMSourceOrg)" })..." ([System.Drawing.Color]::DimGray)
+        if ($script:PMSourceUpn) {
+            Connect-ExchangeOnline -UserPrincipalName $script:PMSourceUpn -ShowBanner:$false -ErrorAction Stop
+        } else {
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+        }
+    }
+
+    function Switch-PMToTarget {
+        if ($script:PMTargetConnectionId -and (Get-Command Set-ConnectionContext -ErrorAction SilentlyContinue)) {
+            try { Set-ConnectionContext -ConnectionId $script:PMTargetConnectionId -ErrorAction Stop; return } catch {}
+        }
+        if ($script:PMTargetOrg -and (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue)) {
+            $active = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+            if ($active.Count -eq 1 -and [string]$active[0].Organization -eq $script:PMTargetOrg) { return }
+        }
+        Write-PMLog "Switching to target$(if ($script:PMTargetOrg) { " ($script:PMTargetOrg)" })..." ([System.Drawing.Color]::DimGray)
+        if ($script:PMTargetUpn) {
+            Connect-ExchangeOnline -UserPrincipalName $script:PMTargetUpn -ShowBanner:$false -ErrorAction Stop
+        } else {
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+        }
+    }
+
     #endregion
 
     #region ---- Build Form ----
 
     $form                 = New-Object System.Windows.Forms.Form
     $form.Text            = "Frankenstein - Permission Migrator"
-    $form.ClientSize      = New-Object System.Drawing.Size(700, 824)
+    $form.ClientSize      = New-Object System.Drawing.Size(700, 848)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedSingle'
     $form.MaximizeBox     = $false
@@ -3501,9 +3561,25 @@ Important rules:
     $form.Controls.Add($btnExportLog)
 
     # --- Status Log ---
+    $pmProgressBar             = New-Object System.Windows.Forms.ProgressBar
+    $pmProgressBar.Location    = New-Object System.Drawing.Point(12, 660)
+    $pmProgressBar.Size        = New-Object System.Drawing.Size(618, 18)
+    $pmProgressBar.Value       = 0
+    $pmProgressBar.Style       = 'Continuous'
+    $form.Controls.Add($pmProgressBar)
+
+    $lblPMProgressPct           = New-Object System.Windows.Forms.Label
+    $lblPMProgressPct.Location  = New-Object System.Drawing.Point(634, 660)
+    $lblPMProgressPct.Size      = New-Object System.Drawing.Size(54, 18)
+    $lblPMProgressPct.Text      = ""
+    $lblPMProgressPct.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+    $lblPMProgressPct.ForeColor = [System.Drawing.Color]::DimGray
+    $lblPMProgressPct.Font      = New-Object System.Drawing.Font("Segoe UI", 7.5, [System.Drawing.FontStyle]::Bold)
+    $form.Controls.Add($lblPMProgressPct)
+
     $grpLog           = New-Object System.Windows.Forms.GroupBox
     $grpLog.Text      = "Status Log"
-    $grpLog.Location  = New-Object System.Drawing.Point(12, 664)
+    $grpLog.Location  = New-Object System.Drawing.Point(12, 686)
     $grpLog.Size      = New-Object System.Drawing.Size(676, 152)
     $form.Controls.Add($grpLog)
 
@@ -3639,9 +3715,26 @@ Important rules:
         $btnConnSrc.Enabled = $false
         try {
             Write-PMLog "Connecting to source tenant..." ([System.Drawing.Color]::Silver)
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            $pmCmdlets = @('Get-Recipient','Get-MailboxPermission','Get-RecipientPermission','Get-Mailbox',
+                           'Add-MailboxPermission','Add-RecipientPermission','Set-Mailbox',
+                           'Get-ConnectionInformation','Set-ConnectionContext','Get-OrganizationConfig',
+                           'Get-DistributionGroupMember')
+            $beforeIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | ForEach-Object { $_.ConnectionId })
+            Connect-ExchangeOnline -ShowBanner:$false -CommandName $pmCmdlets -ErrorAction Stop
+            $allConns = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+            $newConn  = $allConns | Where-Object { $_.ConnectionId -notin $beforeIds } | Select-Object -First 1
+            if (-not $newConn) { $newConn = $allConns | Select-Object -First 1 }
+            if ($newConn) {
+                $script:PMSourceUpn          = [string]$newConn.UserPrincipalName
+                $script:PMSourceOrg          = [string]$newConn.Organization
+                $script:PMSourceConnectionId = $newConn.ConnectionId
+            }
+            if (-not $script:PMSourceOrg) {
+                $script:PMSourceOrg = [string](Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
+            }
+            $srcDisplay = @($script:PMSourceOrg, $script:PMSourceUpn) | Where-Object { $_ }
             $script:PMSourceConnected = $true
-            Set-PMStatusLabel $lblSrcStatus "Connected" ([System.Drawing.Color]::DarkGreen)
+            Set-PMStatusLabel $lblSrcStatus "Connected  --  $($srcDisplay -join '  |  ')" ([System.Drawing.Color]::DarkGreen)
             Write-PMLog "Source connected. Load your mapping, then use Preview or Run Migration." ([System.Drawing.Color]::LimeGreen)
             $btnPreview.Enabled = $true
             if ($script:PMTargetConnected) { $btnRun.Enabled = $true }
@@ -3661,9 +3754,26 @@ Important rules:
         $btnConnTgt.Enabled = $false
         try {
             Write-PMLog "Connecting to target tenant..." ([System.Drawing.Color]::Silver)
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            $pmCmdlets = @('Get-Recipient','Get-MailboxPermission','Get-RecipientPermission','Get-Mailbox',
+                           'Add-MailboxPermission','Add-RecipientPermission','Set-Mailbox',
+                           'Get-ConnectionInformation','Set-ConnectionContext','Get-OrganizationConfig',
+                           'Get-DistributionGroupMember')
+            $beforeIds = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | ForEach-Object { $_.ConnectionId })
+            Connect-ExchangeOnline -ShowBanner:$false -CommandName $pmCmdlets -ErrorAction Stop
+            $allConns = @(Get-ConnectionInformation -ErrorAction SilentlyContinue)
+            $newConn  = $allConns | Where-Object { $_.ConnectionId -notin $beforeIds } | Select-Object -First 1
+            if (-not $newConn) { $newConn = $allConns | Select-Object -First 1 }
+            if ($newConn) {
+                $script:PMTargetUpn          = [string]$newConn.UserPrincipalName
+                $script:PMTargetOrg          = [string]$newConn.Organization
+                $script:PMTargetConnectionId = $newConn.ConnectionId
+            }
+            if (-not $script:PMTargetOrg) {
+                $script:PMTargetOrg = [string](Get-OrganizationConfig -ErrorAction SilentlyContinue).Name
+            }
+            $tgtDisplay = @($script:PMTargetOrg, $script:PMTargetUpn) | Where-Object { $_ }
             $script:PMTargetConnected = $true
-            Set-PMStatusLabel $lblTgtStatus "Connected" ([System.Drawing.Color]::DarkGreen)
+            Set-PMStatusLabel $lblTgtStatus "Connected  --  $($tgtDisplay -join '  |  ')" ([System.Drawing.Color]::DarkGreen)
             Write-PMLog "Target connected." ([System.Drawing.Color]::LimeGreen)
             if ($script:PMSourceConnected) { $btnRun.Enabled = $true }
         } catch {
@@ -3698,11 +3808,12 @@ Important rules:
         $btnPreview.Enabled = $false
         $form.UseWaitCursor = $true
         try {
-            Write-PMLog "Re-connecting to source for permission read..." ([System.Drawing.Color]::DimGray)
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-            Set-PMStatusLabel $lblSrcStatus "Connected - reading $($mailboxList.Count) mailbox(es)..." ([System.Drawing.Color]::DarkOrange)
+            Switch-PMToSource
+            Set-PMStatusLabel $lblSrcStatus "Connected - reading $($mailboxList.Count) recipient object(s)..." ([System.Drawing.Color]::DarkOrange)
+            Update-PMProgress 0 1
 
             Collect-PMSourcePermissions -MailboxList $mailboxList
+            Update-PMProgress 0 0
             Set-PMStatusLabel $lblSrcStatus "Connected - $($script:PMSourceData.Count) record(s) read" ([System.Drawing.Color]::DarkGreen)
 
             Write-PMLog "---- PREVIEW ($($script:PMSourceData.Count) records) ----" ([System.Drawing.Color]::CornflowerBlue)
@@ -3749,7 +3860,7 @@ Important rules:
         } else { @($script:PMMappingTable.Keys) }
 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "This will connect to both tenants, read permissions for $($mailboxList.Count) source mailbox(es), and apply them to the target tenant.`n`nProceed?",
+            "This will connect to both tenants, read permissions for $($mailboxList.Count) source recipient object(s), and apply them to the target tenant.`n`nProceed?",
             "Confirm Migration",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question)
@@ -3758,15 +3869,17 @@ Important rules:
         $btnRun.Enabled = $false
         $form.UseWaitCursor = $true
         try {
-            Write-PMLog "Re-connecting to source..." ([System.Drawing.Color]::DimGray)
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-            Set-PMStatusLabel $lblSrcStatus "Connected - reading $($mailboxList.Count) mailbox(es)..." ([System.Drawing.Color]::DarkOrange)
+            if ($script:PMSourceData.Count -gt 0) {
+                Write-PMLog "Using source data from Preview ($($script:PMSourceData.Count) record(s)) -- skipping re-scan." ([System.Drawing.Color]::DimGray)
+                Set-PMStatusLabel $lblSrcStatus "Connected - using cached data" ([System.Drawing.Color]::DarkGreen)
+            } else {
+                Switch-PMToSource
+                Set-PMStatusLabel $lblSrcStatus "Connected - reading $($mailboxList.Count) recipient object(s)..." ([System.Drawing.Color]::DarkOrange)
+                Collect-PMSourcePermissions -MailboxList $mailboxList
+                Set-PMStatusLabel $lblSrcStatus "Connected - $($script:PMSourceData.Count) record(s) read" ([System.Drawing.Color]::DarkGreen)
+            }
 
-            Collect-PMSourcePermissions -MailboxList $mailboxList
-            Set-PMStatusLabel $lblSrcStatus "Connected - $($script:PMSourceData.Count) record(s) read" ([System.Drawing.Color]::DarkGreen)
-
-            Write-PMLog "Re-connecting to target..." ([System.Drawing.Color]::DimGray)
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            Switch-PMToTarget
             Set-PMStatusLabel $lblTgtStatus "Connected - applying permissions..." ([System.Drawing.Color]::DarkOrange)
 
             Write-PMLog "---- MIGRATION STARTED ($($script:PMSourceData.Count) records) ----" ([System.Drawing.Color]::CornflowerBlue)
@@ -3779,6 +3892,7 @@ Important rules:
             Write-PMLog "---- COMPLETE: $cSuccess applied | $cSkipped skipped | $cDupe already existed | $cFailed failed ----" ([System.Drawing.Color]::CornflowerBlue)
             Set-PMStatusLabel $lblTgtStatus "Connected - migration complete" ([System.Drawing.Color]::DarkGreen)
             $btnExportLog.Enabled = $true
+            Update-PMProgress 0 0
         } catch {
             Write-PMLog "FATAL: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally {

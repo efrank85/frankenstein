@@ -4067,10 +4067,19 @@ function Invoke-FrankensteinDLMigrator {
             $t = $script:DLMappingTable[$key]
             if (-not $t) { $t = $script:DLProxyIndex[$key] }
             if (-not $t) {
-                $r = Get-Recipient -Identity $name -ErrorAction SilentlyContinue
-                if (-not $r -and $name -match '^([^,]+),\s*(.+)$') {
-                    # "Last, First" format from EXO ManagedBy → try "First Last"
-                    $r = Get-Recipient -Identity "$($Matches[2]) $($Matches[1])" -ErrorAction SilentlyContinue
+                if ($radOnPrem.Checked -and $script:DLOnPremSession) {
+                    $altName = if ($name -match '^([^,]+),\s*(.+)$') { "$($Matches[2]) $($Matches[1])" } else { $null }
+                    $r = Invoke-Command -Session $script:DLOnPremSession -ScriptBlock {
+                        param($id, $alt)
+                        $res = Get-Recipient -Identity $id -ErrorAction SilentlyContinue
+                        if (-not $res -and $alt) { $res = Get-Recipient -Identity $alt -ErrorAction SilentlyContinue }
+                        $res
+                    } -ArgumentList $name, $altName
+                } else {
+                    $r = Get-Recipient -Identity $name -ErrorAction SilentlyContinue
+                    if (-not $r -and $name -match '^([^,]+),\s*(.+)$') {
+                        $r = Get-Recipient -Identity "$($Matches[2]) $($Matches[1])" -ErrorAction SilentlyContinue
+                    }
                 }
                 if ($r) { $t = [string]$r.PrimarySmtpAddress }
             }
@@ -4434,11 +4443,17 @@ function Invoke-FrankensteinDLMigrator {
             # is a hashtable lookup instead of a per-group Get-Recipient call
             Write-DLLog "Pre-fetching target group inventory..." ([System.Drawing.Color]::DimGray)
             $targetExistsBySmtp = @{}
-            @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue) | ForEach-Object {
-                $targetExistsBySmtp[$_.PrimarySmtpAddress.ToLower()] = $true
-            }
-            @(Get-UnifiedGroup -ResultSize Unlimited -ErrorAction SilentlyContinue) | ForEach-Object {
-                $targetExistsBySmtp[$_.PrimarySmtpAddress.ToLower()] = $true
+            if ($radOnPrem.Checked -and $script:DLOnPremSession) {
+                @(Invoke-Command -Session $script:DLOnPremSession -ScriptBlock {
+                    Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue
+                }) | ForEach-Object { $targetExistsBySmtp[$_.PrimarySmtpAddress.ToLower()] = $true }
+            } else {
+                @(Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue) | ForEach-Object {
+                    $targetExistsBySmtp[$_.PrimarySmtpAddress.ToLower()] = $true
+                }
+                @(Get-UnifiedGroup -ResultSize Unlimited -ErrorAction SilentlyContinue) | ForEach-Object {
+                    $targetExistsBySmtp[$_.PrimarySmtpAddress.ToLower()] = $true
+                }
             }
             Write-DLLog "  $($targetExistsBySmtp.Count) group(s) found in target." ([System.Drawing.Color]::DimGray)
             Write-DLLog "---- Phase 1: Creating groups ----" ([System.Drawing.Color]::CornflowerBlue)
@@ -4454,7 +4469,7 @@ function Invoke-FrankensteinDLMigrator {
                 if ($existingTarget) {
                     $existsInEXO = $targetExistsBySmtp.ContainsKey($existingTarget.ToLower())
                     if (-not $existsInEXO) {
-                        Write-DLLog "  STALE  $srcSmtp -> $existingTarget (in CSV but not found in EXO -- re-creating)" ([System.Drawing.Color]::DarkGoldenrod)
+                        Write-DLLog "  STALE  $srcSmtp -> $existingTarget (in CSV but not found in target -- re-creating)" ([System.Drawing.Color]::DarkGoldenrod)
                         $script:DLMappingTable.Remove($srcSmtp.ToLower())
                         # fall through to creation logic below
                     } else {
@@ -4612,8 +4627,8 @@ function Invoke-FrankensteinDLMigrator {
             # If this target group already failed with "not found", skip without hitting EXO again
             if ($groupNotFoundInEXO[$tgtGroup]) {
                 $log.Status  = 'Failed'
-                $log.Details = "Target group not found in EXO (skipped -- group was not found for an earlier member add)"
-                Write-DLLog "  SKIP  $tgtMember -> $tgtGroup (group not found in EXO)" ([System.Drawing.Color]::DarkGoldenrod)
+                $log.Details = "Target group not found (skipped -- group was not found for an earlier member add)"
+                Write-DLLog "  SKIP  $tgtMember -> $tgtGroup (group not found in target)" ([System.Drawing.Color]::DarkGoldenrod)
                 $script:DLResultLog.Add([PSCustomObject]$log)
                 continue
             }
@@ -4625,12 +4640,12 @@ function Invoke-FrankensteinDLMigrator {
                 Write-DLLog "  OK    $tgtMember -> $tgtGroup$(if ($rec.ExpandedFrom) { " (from $($rec.ExpandedFrom))" })" ([System.Drawing.Color]::LimeGreen)
             } catch {
                 $err = $_.Exception.Message
-                if ($err -match "couldn't be found on|could not be found on") {
-                    # Target group doesn't exist in EXO -- mark it and skip all remaining members for this group
+                if ($err -match "couldn't be found on|could not be found on|doesn't exist") {
+                    # Target group doesn't exist -- mark it and skip all remaining members for this group
                     $groupNotFoundInEXO[$tgtGroup] = $true
                     $log.Status  = 'Failed'
                     $log.Details = $err
-                    Write-DLLog "  ERR   $tgtMember -> $tgtGroup -- group not found in EXO (remaining members for this group will be skipped)" ([System.Drawing.Color]::Tomato)
+                    Write-DLLog "  ERR   $tgtMember -> $tgtGroup -- group not found in target (remaining members for this group will be skipped)" ([System.Drawing.Color]::Tomato)
                 } elseif ($err -match 'already|member|exists') {
                     $log.Status  = 'AlreadyMember'
                     $log.Details = 'Already a member'
@@ -5477,9 +5492,20 @@ Supported group types: MailUniversalDistributionGroup,
                     Set-DLStatusLabel $lblTgtStatus "Connected (on-prem via URI)" ([System.Drawing.Color]::DarkGreen)
                     Write-DLLog "On-prem session established." ([System.Drawing.Color]::LimeGreen)
                 } else {
-                    Set-DLStatusLabel $lblTgtStatus "Using current Exchange session" ([System.Drawing.Color]::DarkGreen)
-                    Write-DLLog "Using current Exchange PS session for on-prem target." ([System.Drawing.Color]::LimeGreen)
-                    Write-DLLog "Note: After connecting to source EXO above, verify on-prem cmdlets are still active before running." ([System.Drawing.Color]::DarkGoldenrod)
+                    # Capture existing Exchange PSSession so Invoke-Command routes to on-prem
+                    # even after Connect-ExchangeOnline shadows the local EMS cmdlets
+                    $existingEMSSessions = @(Get-PSSession |
+                        Where-Object { $_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.State -eq 'Opened' })
+                    if ($existingEMSSessions.Count -gt 0) {
+                        $script:DLOnPremSession = $existingEMSSessions[0]
+                        $serverName = $script:DLOnPremSession.ComputerName
+                        Set-DLStatusLabel $lblTgtStatus "On-prem: $serverName" ([System.Drawing.Color]::DarkGreen)
+                        Write-DLLog "Captured on-prem Exchange PS session from $serverName." ([System.Drawing.Color]::LimeGreen)
+                    } else {
+                        $script:DLOnPremSession = $null
+                        Set-DLStatusLabel $lblTgtStatus "No Exchange session found" ([System.Drawing.Color]::Tomato)
+                        Write-DLLog "WARNING: No active Exchange PS session found. Launch this from Exchange Management Shell, or enter the server URI above." ([System.Drawing.Color]::Tomato)
+                    }
                 }
             }
             $script:DLTargetConnected = $true
@@ -5531,6 +5557,8 @@ Supported group types: MailUniversalDistributionGroup,
 
     # Ensure we are connected to target; use Set-ConnectionContext for silent switching
     function Switch-DLToTarget {
+        # On-prem target: commands run through Invoke-Command -Session; no EXO switching needed
+        if ($radOnPrem.Checked) { return }
         # Best path: Set-ConnectionContext (EXO 3.2+) is truly silent
         if ($script:DLTargetConnectionId -and (Get-Command Set-ConnectionContext -ErrorAction SilentlyContinue)) {
             try {

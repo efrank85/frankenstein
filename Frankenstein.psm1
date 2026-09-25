@@ -4473,13 +4473,7 @@ function Invoke-FrankensteinDLMigrator {
                         $script:DLMappingTable.Remove($srcSmtp.ToLower())
                         # fall through to creation logic below
                     } else {
-                        Write-DLLog "  EXISTING $srcSmtp -> $existingTarget (target already mapped -- applying properties)" ([System.Drawing.Color]::DarkCyan)
-                        try {
-                            Set-TargetDLProperties -TargetIdentity $existingTarget -Meta $meta -GroupType $srcType -DefaultOwner $txtDefaultOwner.Text.Trim()
-                            Write-DLLog "    Properties applied" ([System.Drawing.Color]::DimGray)
-                        } catch {
-                            Write-DLLog "    WARNING: Properties failed for existing group -- $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod)
-                        }
+                        Write-DLLog "  EXISTING $srcSmtp -> $existingTarget (already mapped -- skipping creation)" ([System.Drawing.Color]::DarkCyan)
                         continue
                     }
                 }
@@ -5856,7 +5850,11 @@ Supported group types: MailUniversalDistributionGroup,
 
     $form.ShowDialog() | Out-Null
     $form.Dispose()
-    if ($script:DLOnPremSession) { Remove-PSSession $script:DLOnPremSession -ErrorAction SilentlyContinue }
+    # Disconnect EXO so the caller's session returns to its original context (on-prem EMS or clean state).
+    # Never remove $script:DLOnPremSession -- that PSSession belongs to the caller's EMS runspace.
+    if (Get-Command Disconnect-ExchangeOnline -ErrorAction SilentlyContinue) {
+        try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+    }
 }
 
 function Set-FrankensteinPSWindowTitle {

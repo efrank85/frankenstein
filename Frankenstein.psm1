@@ -6240,6 +6240,9 @@ function Invoke-FrankensteinMailboxMigrator {
             1 { Update-Step1NextButton }
             2 { Test-ConnectionInputs }
             3 {
+                if ($script:MMProjectId -and $txtProjectName.Text.Trim() -ne $script:MMProjectId) {
+                    $txtProjectName.Text = $script:MMProjectId
+                }
                 $projName = if ($script:MMProjectId) { $script:MMProjectId } else { $txtProjectName.Text.Trim() }
                 $btnNext.Enabled = ($projName -ne '')
                 if ($projName -and $script:MMMappingRows.Count -eq 0) {
@@ -7031,12 +7034,9 @@ Open Microsoft Entra now?",
         $ans = [System.Windows.Forms.MessageBox]::Show(
 "APP PROFILE SETUP — STEP BY STEP
 
-You must complete this for EACH tenant (source and target) before creating a Fly connection.
+Complete this for EACH tenant (source and target) before creating a Fly connection.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PART A — Create App Profile (Confidence Platform)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Open App Management (button above) and click '+ Create'.
+1. Open App Management (button to the left) and click '+ Create'.
 
 2. Select services: choose 'Fly'. Click Next.
 
@@ -7051,33 +7051,16 @@ PART A — Create App Profile (Confidence Platform)
 
 5. Click Finish.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PART B — Grant Exchange Administrator in Entra ID
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The AvePoint Fly enterprise app needs the Exchange Administrator
-role in each tenant's Entra ID.
-
-1. Open Microsoft Entra admin center (click Yes below to open it).
-   Navigate to: Identity → Roles & admins → Exchange Administrator.
-
-2. Click '+ Add assignments'.
-
-3. Search for 'avepoint' and select:
-     ✔ AvePoint Fly   ← select ONLY this one
-   (Do NOT select 'AvePoint Fly Delegated App' or
-    'AvePoint Online Services Tenant Reg' — not needed.)
-
-4. Click Next → leave assignment as Permanent → click Finish.
-
-Repeat Parts A and B for each tenant before creating its Fly connection.
+After completing this for both tenants, use the connection guide in
+step 3 (↗ Open Fly Connections) to create the Fly Exchange connections.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Open Microsoft Entra admin center now?",
+Open App Management now?",
             'App Profile Setup Guide',
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Information)
         if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) {
-            Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesManagementMenuBlade/~/AllRoles'
+            Start-Process 'https://www.avepointonlineservices.com/#/management/app'
         }
     })
 
@@ -7641,6 +7624,9 @@ list — copy it exactly (case-sensitive) into this tool.",
                 1 { Update-Step1NextButton }
                 2 { Test-ConnectionInputs }
                 3 {
+                if ($script:MMProjectId -and $txtProjectName.Text.Trim() -ne $script:MMProjectId) {
+                    $txtProjectName.Text = $script:MMProjectId
+                }
                 $projName = if ($script:MMProjectId) { $script:MMProjectId } else { $txtProjectName.Text.Trim() }
                 $btnNext.Enabled = ($projName -ne '')
                 if ($projName -and $script:MMMappingRows.Count -eq 0) {
@@ -7693,11 +7679,11 @@ list — copy it exactly (case-sensitive) into this tool.",
             if ($script:MMCurrentStep -eq 3) {
                 if ($script:MMProjectId) {
                     $txtProjectName.Text = $script:MMProjectId
-                } elseif (-not $txtProjectName.Text.Trim()) {
-                    # Auto-suggest a project name from connection names
+                } else {
+                    # Auto-suggest a project name from connection names as placeholder hint only
                     $suggest = (($script:MMSourceConnName -replace '\s*(Exchange|Connection|Online|Tenant)\s*', '' -replace '\s+', '').Trim() + '_to_' +
                                 ($script:MMTargetConnName -replace '\s*(Exchange|Connection|Online|Tenant)\s*', '' -replace '\s+', '').Trim()) -replace '[^A-Za-z0-9_\-]', '_'
-                    if ($suggest -and $suggest -ne '_to_') { $txtProjectName.Text = $suggest }
+                    if ($suggest -and $suggest -ne '_to_') { try { $txtProjectName.PlaceholderText = $suggest } catch {} }
                 }
                 # Enable Next if project name is known (typed or loaded)
                 $projName = if ($script:MMProjectId) { $script:MMProjectId } else { $txtProjectName.Text.Trim() }

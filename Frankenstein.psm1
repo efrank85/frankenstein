@@ -6087,9 +6087,10 @@ function Invoke-FrankensteinMailboxMigrator {
         $script:MMTargetConnName = [string]$p.TargetConnName
         $script:MMFlyPolicyName  = [string]$p.FlyPolicyName
         $script:MMProjectId      = [string]$(if ($p.FlyProjectName) { $p.FlyProjectName } else { $p.ProjectId })
-        try { $txtSrcConnName.Text = $script:MMSourceConnName } catch {}
-        try { $txtTgtConnName.Text = $script:MMTargetConnName } catch {}
-        try { $txtFlyPolicy.Text   = $script:MMFlyPolicyName  } catch {}
+        try { $txtSrcConnName.Text  = $script:MMSourceConnName } catch {}
+        try { $txtTgtConnName.Text  = $script:MMTargetConnName } catch {}
+        try { $txtFlyPolicy.Text    = $script:MMFlyPolicyName  } catch {}
+        try { $txtProjectName.Text  = $script:MMProjectId      } catch {}
         Update-Step1NextButton
     }
 
@@ -6358,7 +6359,7 @@ function Invoke-FrankensteinMailboxMigrator {
         param($text, $y)
         $c = New-Object System.Windows.Forms.CheckBox
         $c.Text = $text; $c.Location = New-Object System.Drawing.Point(8, $y)
-        $c.Size = New-Object System.Drawing.Size(340, 24)
+        $c.Size = New-Object System.Drawing.Size(440, 24)
         $c.ForeColor = [System.Drawing.Color]::FromArgb(220,220,220); $c.BackColor = $chkBg
         $c.FlatStyle = 'Standard'; $panStep2.Controls.Add($c); $c
     }
@@ -6380,22 +6381,22 @@ function Invoke-FrankensteinMailboxMigrator {
 
     # Row 1 — Tenant Management
     $chkTenant      = & $mkChk '1. Tenant connected in Confidence Platform' 36
-    $btnOpenTenantMgmt = & $mkBtn '↗  Open Tenant Management' 352 36 200 $true
+    $btnOpenTenantMgmt = & $mkBtn '↗  Open Tenant Management' 452 36 200 $true
 
     # Row 2 — App Management + App Profile Help
     $chkAppProfile  = & $mkChk '2. App profile created (Fly app + Fly delegated app consented)' 62
-    $btnOpenAppMgmt    = & $mkBtn '↗  Open App Management' 352 62 190 $true
-    $btnAppSetupHelp   = & $mkBtn '?  Setup guide' 546 62 140 $false
+    $btnOpenAppMgmt    = & $mkBtn '↗  Open App Management' 452 62 190 $true
+    $btnAppSetupHelp   = & $mkBtn '?  Setup guide' 646 62 134 $false
 
     # Row 3 — Exchange Administrator role in Entra
     $chkEntraRole   = & $mkChk '3. Exchange Administrator role assigned to "AvePoint Fly" in Entra' 88
-    $btnOpenEntra      = & $mkBtn '↗  Open Entra Roles' 352 88 180 $true
-    $btnEntraHelp      = & $mkBtn '?  How to do this' 536 88 154 $false
+    $btnOpenEntra      = & $mkBtn '↗  Open Entra Roles' 452 88 180 $true
+    $btnEntraHelp      = & $mkBtn '?  How to do this' 636 88 148 $false
 
     # Row 4 — Fly Exchange connection (source)
     $chkFlyConnSrc  = & $mkChk '4. Fly Exchange connection created for source tenant' 114
-    $btnOpenFlyConn    = & $mkBtn '↗  Open Fly Connections' 352 114 190 $true
-    $btnConnCreateHelp = & $mkBtn '?  Connection field guide' 546 114 154 $false
+    $btnOpenFlyConn    = & $mkBtn '↗  Open Fly Connections' 452 114 190 $true
+    $btnConnCreateHelp = & $mkBtn '?  Connection field guide' 646 114 148 $false
 
     # Row 5 — Fly Exchange connection (target)
     $chkFlyConnTgt  = & $mkChk '5. Fly Exchange connection created for target tenant' 140
@@ -6545,49 +6546,68 @@ function Invoke-FrankensteinMailboxMigrator {
     $panStep4.Visible   = $false
     $form.Controls.Add($panStep4)
 
+    # Pre-migration row
+    $lblPreMig = New-Object System.Windows.Forms.Label
+    $lblPreMig.Text = 'Pre-migration:'; $lblPreMig.Location = New-Object System.Drawing.Point(8, 14)
+    $lblPreMig.Size = New-Object System.Drawing.Size(100, 18); $lblPreMig.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep4.Controls.Add($lblPreMig)
+
+    $btnVerifyMapping = New-Object System.Windows.Forms.Button
+    $btnVerifyMapping.Text = 'Verify Mapping'; $btnVerifyMapping.Location = New-Object System.Drawing.Point(112, 8)
+    $btnVerifyMapping.Size = New-Object System.Drawing.Size(140, 28); $btnVerifyMapping.FlatStyle = 'Flat'
+    $btnVerifyMapping.BackColor = [System.Drawing.Color]::FromArgb(0,100,120); $btnVerifyMapping.ForeColor = [System.Drawing.Color]::White
+    $panStep4.Controls.Add($btnVerifyMapping)
+
+    $btnScanSource = New-Object System.Windows.Forms.Button
+    $btnScanSource.Text = 'Scan Source Data'; $btnScanSource.Location = New-Object System.Drawing.Point(260, 8)
+    $btnScanSource.Size = New-Object System.Drawing.Size(150, 28); $btnScanSource.FlatStyle = 'Flat'
+    $btnScanSource.BackColor = [System.Drawing.Color]::FromArgb(0,100,120); $btnScanSource.ForeColor = [System.Drawing.Color]::White
+    $panStep4.Controls.Add($btnScanSource)
+
+    # Migration row
     $btnRunFull = New-Object System.Windows.Forms.Button
-    $btnRunFull.Text = 'Run Full Migration'; $btnRunFull.Location = New-Object System.Drawing.Point(8, 10)
-    $btnRunFull.Size = New-Object System.Drawing.Size(160, 32)
+    $btnRunFull.Text = 'Run Full Migration'; $btnRunFull.Location = New-Object System.Drawing.Point(8, 44)
+    $btnRunFull.Size = New-Object System.Drawing.Size(160, 28)
     $btnRunFull.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnRunFull.ForeColor = [System.Drawing.Color]::White
     $btnRunFull.FlatStyle = 'Flat'
     $panStep4.Controls.Add($btnRunFull)
 
     $btnRunDelta = New-Object System.Windows.Forms.Button
-    $btnRunDelta.Text = 'Run Delta Migration'; $btnRunDelta.Location = New-Object System.Drawing.Point(176, 10)
-    $btnRunDelta.Size = New-Object System.Drawing.Size(160, 32)
+    $btnRunDelta.Text = 'Run Delta Migration'; $btnRunDelta.Location = New-Object System.Drawing.Point(176, 44)
+    $btnRunDelta.Size = New-Object System.Drawing.Size(160, 28)
     $btnRunDelta.BackColor = [System.Drawing.Color]::FromArgb(40,167,69); $btnRunDelta.ForeColor = [System.Drawing.Color]::White
     $btnRunDelta.FlatStyle = 'Flat'
     $panStep4.Controls.Add($btnRunDelta)
 
     $btnRefreshStatus = New-Object System.Windows.Forms.Button
-    $btnRefreshStatus.Text = 'Refresh Status'; $btnRefreshStatus.Location = New-Object System.Drawing.Point(344, 10)
-    $btnRefreshStatus.Size = New-Object System.Drawing.Size(120, 32)
+    $btnRefreshStatus.Text = 'Refresh Status'; $btnRefreshStatus.Location = New-Object System.Drawing.Point(344, 44)
+    $btnRefreshStatus.Size = New-Object System.Drawing.Size(120, 28)
     $btnRefreshStatus.FlatStyle = 'Flat'
     $btnRefreshStatus.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnRefreshStatus.ForeColor = [System.Drawing.Color]::Silver
     $panStep4.Controls.Add($btnRefreshStatus)
 
     $btnOpenFly = New-Object System.Windows.Forms.Button
-    $btnOpenFly.Text = 'Open in Fly ↗'; $btnOpenFly.Location = New-Object System.Drawing.Point(472, 10)
-    $btnOpenFly.Size = New-Object System.Drawing.Size(110, 32)
+    $btnOpenFly.Text = 'Open in Fly ↗'; $btnOpenFly.Location = New-Object System.Drawing.Point(472, 44)
+    $btnOpenFly.Size = New-Object System.Drawing.Size(110, 28)
     $btnOpenFly.FlatStyle = 'Flat'
     $btnOpenFly.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnOpenFly.ForeColor = [System.Drawing.Color]::Silver
     $panStep4.Controls.Add($btnOpenFly)
 
     $btnExportStatus = New-Object System.Windows.Forms.Button
-    $btnExportStatus.Text = 'Export CSV'; $btnExportStatus.Location = New-Object System.Drawing.Point(590, 10)
-    $btnExportStatus.Size = New-Object System.Drawing.Size(90, 32)
+    $btnExportStatus.Text = 'Export CSV'; $btnExportStatus.Location = New-Object System.Drawing.Point(590, 44)
+    $btnExportStatus.Size = New-Object System.Drawing.Size(90, 28)
     $btnExportStatus.FlatStyle = 'Flat'
     $btnExportStatus.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnExportStatus.ForeColor = [System.Drawing.Color]::Silver
     $panStep4.Controls.Add($btnExportStatus)
 
     $lblLastRun = New-Object System.Windows.Forms.Label
-    $lblLastRun.Location = New-Object System.Drawing.Point(8, 50); $lblLastRun.Size = New-Object System.Drawing.Size(820, 18)
+    $lblLastRun.Location = New-Object System.Drawing.Point(8, 80); $lblLastRun.Size = New-Object System.Drawing.Size(820, 18)
     $lblLastRun.ForeColor = [System.Drawing.Color]::DimGray; $lblLastRun.Text = 'No migration run yet.'
     $panStep4.Controls.Add($lblLastRun)
 
     # Status grid
     $lvStatus = New-Object System.Windows.Forms.ListView
-    $lvStatus.Location = New-Object System.Drawing.Point(8, 74); $lvStatus.Size = New-Object System.Drawing.Size(820, 304)
+    $lvStatus.Location = New-Object System.Drawing.Point(8, 102); $lvStatus.Size = New-Object System.Drawing.Size(820, 278)
     $lvStatus.View = 'Details'; $lvStatus.FullRowSelect = $true; $lvStatus.GridLines = $true
     $lvStatus.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvStatus.ForeColor = [System.Drawing.Color]::Silver
     foreach ($col in @('Source','Target','Type','Status','Progress','Last Updated')) {
@@ -6678,9 +6698,10 @@ function Invoke-FrankensteinMailboxMigrator {
         $txtSrcUpn.Text = ''; $txtTgtUpn.Text = ''; $txtFlyUrl.Text = ''
         $txtFlyClientId.Text = ''; $txtFlySecret.Text = ''; $txtMappingPath.Text = ''
         $script:MMSourceConnName = ''; $script:MMTargetConnName = ''; $script:MMFlyPolicyName = ''; $script:MMProjectId = ''
-        try { $txtSrcConnName.Text = '' } catch {}
-        try { $txtTgtConnName.Text = '' } catch {}
-        try { $txtFlyPolicy.Text   = '' } catch {}
+        try { $txtSrcConnName.Text  = '' } catch {}
+        try { $txtTgtConnName.Text  = '' } catch {}
+        try { $txtFlyPolicy.Text    = '' } catch {}
+        try { $txtProjectName.Text  = '' } catch {}
         $lblProfileStatus.Text = 'New profile (unsaved)'
         $lblProfileStatus.ForeColor = [System.Drawing.Color]::DarkGoldenrod
         Write-MMLog "New profile started." ([System.Drawing.Color]::DimGray)
@@ -7221,6 +7242,38 @@ list — copy it exactly (case-sensitive) into this tool.",
         } finally { $form.UseWaitCursor = $false }
     })
 
+    # ---- Step 4: Verify Mapping ----
+    $btnVerifyMapping.Add_Click({
+        if (-not $script:MMProjectId) { Write-MMLog "No project — complete Step 3 first." ([System.Drawing.Color]::Tomato); return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Verify mapping for project '$($script:MMProjectId)'?`n`nThis checks that all source and destination mailboxes are accessible.",
+            'Verify Mapping', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            $form.UseWaitCursor = $true
+            Write-MMLog "Starting mapping verification for '$($script:MMProjectId)'..." ([System.Drawing.Color]::Silver)
+            Start-FlyExchangeMigration -Project $script:MMProjectId -Mode VerifyMapping -ErrorAction Stop
+            Write-MMLog "Mapping verification started — use Refresh Status to track progress." ([System.Drawing.Color]::LimeGreen)
+        } catch { Write-MMLog "Verify mapping failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+        finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 4: Scan Source Data ----
+    $btnScanSource.Add_Click({
+        if (-not $script:MMProjectId) { Write-MMLog "No project — complete Step 3 first." ([System.Drawing.Color]::Tomato); return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Scan source data for project '$($script:MMProjectId)'?`n`nThis analyses source mailbox size and content before migration.",
+            'Scan Source Data', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            $form.UseWaitCursor = $true
+            Write-MMLog "Starting source data scan for '$($script:MMProjectId)'..." ([System.Drawing.Color]::Silver)
+            Start-FlyExchangeMigration -Project $script:MMProjectId -Mode Scan -ErrorAction Stop
+            Write-MMLog "Source scan started — use Refresh Status to track progress." ([System.Drawing.Color]::LimeGreen)
+        } catch { Write-MMLog "Scan source data failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+        finally { $form.UseWaitCursor = $false }
+    })
+
     # ---- Step 4: Run Full ----
     $btnRunFull.Add_Click({
         if (-not $script:MMProjectId) { Write-MMLog "No project — complete Step 3 first." ([System.Drawing.Color]::Tomato); return }
@@ -7354,6 +7407,9 @@ list — copy it exactly (case-sensitive) into this tool.",
                 if ($script:MMTargetConnName) { $txtTgtConnName.Text = $script:MMTargetConnName }
                 if ($script:MMFlyPolicyName)  { $txtFlyPolicy.Text   = $script:MMFlyPolicyName  }
                 Test-ConnectionInputs
+            }
+            if ($script:MMCurrentStep -eq 3 -and $script:MMProjectId) {
+                $txtProjectName.Text = $script:MMProjectId
             }
             if ($script:MMCurrentStep -eq 4 -and $script:MMProjectId) { $btnNext.Visible = $false }
             # Auto-save on every step gate

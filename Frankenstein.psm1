@@ -6048,6 +6048,33 @@ function Invoke-FrankensteinMailboxMigrator {
     # Determines whether Next is enabled on Step 1 and shows/hides the quick-status shortcut.
     # Rule: existing project + Fly connected = EXO is optional.
     function Update-Step1NextButton {
+        $optional = $script:MMFlyConnected -and ([string]$script:MMProjectId -ne '')
+
+        # Dim Exchange fields when optional and not yet connected; restore when required or connected
+        foreach ($pair in @(
+            @{ Txt = $txtSrcUpn; Btn = $btnConnSrc; Lbl = $lblSrcStatus; Connected = $script:MMSourceConnected },
+            @{ Txt = $txtTgtUpn; Btn = $btnConnTgt; Lbl = $lblTgtStatus; Connected = $script:MMTargetConnected }
+        )) {
+            if ($optional -and -not $pair.Connected) {
+                $pair.Txt.ForeColor  = [System.Drawing.Color]::FromArgb(100, 100, 100)
+                $pair.Btn.BackColor  = [System.Drawing.Color]::FromArgb(40, 65, 40)
+                $pair.Btn.ForeColor  = [System.Drawing.Color]::FromArgb(110, 150, 110)
+                $pair.Lbl.Text       = 'Optional — connect for mailbox type validation'
+                $pair.Lbl.ForeColor  = [System.Drawing.Color]::FromArgb(75, 100, 75)
+            } elseif (-not $pair.Connected) {
+                $pair.Txt.ForeColor  = [System.Drawing.SystemColors]::WindowText
+                $pair.Btn.BackColor  = [System.Drawing.Color]::FromArgb(0, 120, 212)
+                $pair.Btn.ForeColor  = [System.Drawing.Color]::White
+                $pair.Lbl.Text       = 'Not connected'
+                $pair.Lbl.ForeColor  = [System.Drawing.Color]::DimGray
+            } else {
+                $pair.Txt.ForeColor  = [System.Drawing.SystemColors]::WindowText
+                $pair.Btn.BackColor  = [System.Drawing.Color]::FromArgb(0, 120, 212)
+                $pair.Btn.ForeColor  = [System.Drawing.Color]::White
+                # Status label left as-is — already set to "Connected (...)" by the connect handler
+            }
+        }
+
         if ($script:MMFlyConnected -and $script:MMProjectId) {
             $btnNext.Enabled       = $true
             $btnJumpStatus.Visible = $true
@@ -7125,6 +7152,9 @@ list — copy it exactly (case-sensitive) into this tool.",
         $valid = 0; $skip = 0; $warn = 0
         $total = @($rows | Where-Object { $_.Source.Trim() -and $_.Target.Trim() }).Count
         $done  = 0
+        if (-not $script:MMSourceConnected) {
+            Write-MMLog "Source tenant not connected — mailbox types will show as 'assumed'. Connect Source Tenant in Step 1 for accurate type detection." ([System.Drawing.Color]::FromArgb(160,130,60))
+        }
         Write-MMLog "Validating $total mapping pairs against source tenant..." ([System.Drawing.Color]::Silver)
         Switch-MMToSource
         foreach ($row in $rows) {
@@ -7185,7 +7215,10 @@ list — copy it exactly (case-sensitive) into this tool.",
             '*Skip'            { "SKIP — $mbxType" }
             default            { "WARN — $mbxType" }
         }
-        if (-not $script:MMSourceConnected) { $statusText = 'Valid — Mailbox (assumed, no source connection)' }
+        if (-not $script:MMSourceConnected) {
+            $statusText = 'Valid — Mailbox (assumed)'
+            Write-MMLog "Source not connected — type assumed. Connect Source Tenant in Step 1 for accurate type detection." ([System.Drawing.Color]::FromArgb(160,130,60))
+        }
         $lvi = New-Object System.Windows.Forms.ListViewItem($src)
         $lvi.SubItems.Add($tgt) | Out-Null
         $lvi.SubItems.Add($mbxType) | Out-Null

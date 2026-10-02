@@ -6240,9 +6240,10 @@ function Invoke-FrankensteinMailboxMigrator {
             1 { Update-Step1NextButton }
             2 { Test-ConnectionInputs }
             3 {
-                $btnNext.Enabled = ($null -ne $script:MMProjectId -and $script:MMProjectId -ne '')
-                if ($script:MMProjectId -and $script:MMMappingRows.Count -eq 0) {
-                    $lblMapSummary.Text = "Project '$($script:MMProjectId)' already exists in Fly — click Next to go to migration control. Load a CSV below only if you want to add more users."
+                $projName = if ($script:MMProjectId) { $script:MMProjectId } else { $txtProjectName.Text.Trim() }
+                $btnNext.Enabled = ($projName -ne '')
+                if ($projName -and $script:MMMappingRows.Count -eq 0) {
+                    $lblMapSummary.Text = "Project '$projName' already exists in Fly — click Next to go to migration control. Load a CSV below only if you want to add more users."
                     $lblMapSummary.ForeColor = [System.Drawing.Color]::FromArgb(100, 200, 130)
                 }
             }
@@ -6563,25 +6564,31 @@ function Invoke-FrankensteinMailboxMigrator {
     $panStep3.Controls.Add($lvMapping)
 
     $lblMapSummary = New-Object System.Windows.Forms.Label
-    $lblMapSummary.Location = New-Object System.Drawing.Point(8, 446); $lblMapSummary.Size = New-Object System.Drawing.Size(600, 20)
+    $lblMapSummary.Location = New-Object System.Drawing.Point(8, 446); $lblMapSummary.Size = New-Object System.Drawing.Size(820, 20)
     $lblMapSummary.ForeColor = [System.Drawing.Color]::DimGray; $lblMapSummary.Text = ''
     $panStep3.Controls.Add($lblMapSummary)
 
+    $txtProjectName = New-Object System.Windows.Forms.TextBox
+    $txtProjectName.Location = New-Object System.Drawing.Point(8, 474); $txtProjectName.Size = New-Object System.Drawing.Size(360, 22)
+    try { $txtProjectName.PlaceholderText = 'e.g. Air - Exchange Migration' } catch {}
+    $panStep3.Controls.Add($txtProjectName)
+    $lblProjName = New-Object System.Windows.Forms.Label
+    $lblProjName.Text = '← name of your project in AvePoint Fly'; $lblProjName.Location = New-Object System.Drawing.Point(376, 477)
+    $lblProjName.Size = New-Object System.Drawing.Size(440, 18); $lblProjName.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep3.Controls.Add($lblProjName)
+    $lblProjNameHint = New-Object System.Windows.Forms.Label
+    $lblProjNameHint.Text = 'Existing project? Type its exact name and click Next.   New project? Load a CSV above, type a name below, then click Build Project.'
+    $lblProjNameHint.Location = New-Object System.Drawing.Point(8, 500)
+    $lblProjNameHint.Size = New-Object System.Drawing.Size(820, 18)
+    $lblProjNameHint.ForeColor = [System.Drawing.Color]::FromArgb(100, 130, 160)
+    $panStep3.Controls.Add($lblProjNameHint)
+
     $btnBuildProject = New-Object System.Windows.Forms.Button
-    $btnBuildProject.Text = 'Build Project in Fly'; $btnBuildProject.Location = New-Object System.Drawing.Point(618, 442)
-    $btnBuildProject.Size = New-Object System.Drawing.Size(140, 28)
+    $btnBuildProject.Text = 'Build Project in Fly'; $btnBuildProject.Location = New-Object System.Drawing.Point(8, 526)
+    $btnBuildProject.Size = New-Object System.Drawing.Size(150, 28)
     $btnBuildProject.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnBuildProject.ForeColor = [System.Drawing.Color]::White
     $btnBuildProject.FlatStyle = 'Flat'; $btnBuildProject.Enabled = $false
     $panStep3.Controls.Add($btnBuildProject)
-
-    $txtProjectName = New-Object System.Windows.Forms.TextBox
-    $txtProjectName.Location = New-Object System.Drawing.Point(8, 476); $txtProjectName.Size = New-Object System.Drawing.Size(360, 22)
-    try { $txtProjectName.PlaceholderText = 'Project name in AvePoint Fly...' } catch {}
-    $panStep3.Controls.Add($txtProjectName)
-    $lblProjName = New-Object System.Windows.Forms.Label
-    $lblProjName.Text = '(project name)'; $lblProjName.Location = New-Object System.Drawing.Point(376, 479)
-    $lblProjName.Size = New-Object System.Drawing.Size(240, 18); $lblProjName.ForeColor = [System.Drawing.Color]::DimGray
-    $panStep3.Controls.Add($lblProjName)
 
     # =====================================================================
     # STEP 4 — Migrate & Status
@@ -7145,6 +7152,12 @@ list — copy it exactly (case-sensitive) into this tool.",
         if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $txtMappingPath.Text = $dlg.FileName }
     })
 
+    $txtProjectName.Add_TextChanged({
+        if ($script:MMCurrentStep -eq 3) {
+            $btnNext.Enabled = ($txtProjectName.Text.Trim() -ne '')
+        }
+    })
+
     $btnValidateMap.Add_Click({
         $path = $txtMappingPath.Text.Trim()
         if (-not (Test-Path $path)) { Write-MMLog "Mapping file not found: $path" ([System.Drawing.Color]::Tomato); return }
@@ -7628,9 +7641,10 @@ list — copy it exactly (case-sensitive) into this tool.",
                 1 { Update-Step1NextButton }
                 2 { Test-ConnectionInputs }
                 3 {
-                $btnNext.Enabled = ($null -ne $script:MMProjectId -and $script:MMProjectId -ne '')
-                if ($script:MMProjectId -and $script:MMMappingRows.Count -eq 0) {
-                    $lblMapSummary.Text = "Project '$($script:MMProjectId)' already exists in Fly — click Next to go to migration control. Load a CSV below only if you want to add more users."
+                $projName = if ($script:MMProjectId) { $script:MMProjectId } else { $txtProjectName.Text.Trim() }
+                $btnNext.Enabled = ($projName -ne '')
+                if ($projName -and $script:MMMappingRows.Count -eq 0) {
+                    $lblMapSummary.Text = "Project '$projName' already exists in Fly — click Next to go to migration control. Load a CSV below only if you want to add more users."
                     $lblMapSummary.ForeColor = [System.Drawing.Color]::FromArgb(100, 200, 130)
                 }
             }
@@ -7685,8 +7699,19 @@ list — copy it exactly (case-sensitive) into this tool.",
                                 ($script:MMTargetConnName -replace '\s*(Exchange|Connection|Online|Tenant)\s*', '' -replace '\s+', '').Trim()) -replace '[^A-Za-z0-9_\-]', '_'
                     if ($suggest -and $suggest -ne '_to_') { $txtProjectName.Text = $suggest }
                 }
+                # Enable Next if project name is known (typed or loaded)
+                $projName = if ($script:MMProjectId) { $script:MMProjectId } else { $txtProjectName.Text.Trim() }
+                $btnNext.Enabled = ($projName -ne '')
+                if ($projName -and $script:MMMappingRows.Count -eq 0) {
+                    $lblMapSummary.Text = "Project '$projName' already exists in Fly — click Next to go to migration control. Load a CSV below only if you want to add more users."
+                    $lblMapSummary.ForeColor = [System.Drawing.Color]::FromArgb(100, 200, 130)
+                }
             }
             if ($script:MMCurrentStep -eq 4) {
+                # Sync project ID from textbox in case user typed it without building
+                if (-not $script:MMProjectId -and $txtProjectName.Text.Trim()) {
+                    $script:MMProjectId = $txtProjectName.Text.Trim()
+                }
                 if ($chkAutoRefresh.Checked) { $refreshTimer.Start() }
                 if ($script:MMProjectId) { & $doRefreshStatus $false }
             }

@@ -6239,7 +6239,13 @@ function Invoke-FrankensteinMailboxMigrator {
         switch ($target) {
             1 { Update-Step1NextButton }
             2 { Test-ConnectionInputs }
-            3 { $btnNext.Enabled = ($null -ne $script:MMProjectId -and $script:MMProjectId -ne '') }
+            3 {
+                $btnNext.Enabled = ($null -ne $script:MMProjectId -and $script:MMProjectId -ne '')
+                if ($script:MMProjectId -and $script:MMMappingRows.Count -eq 0) {
+                    $lblMapSummary.Text = "Project '$($script:MMProjectId)' already exists in Fly — click Next to go to migration control. Load a CSV below only if you want to add more users."
+                    $lblMapSummary.ForeColor = [System.Drawing.Color]::FromArgb(100, 200, 130)
+                }
+            }
             4 {
                 $btnNext.Visible = $false
                 if ($chkAutoRefresh.Checked) { $refreshTimer.Start() }
@@ -7621,7 +7627,13 @@ list — copy it exactly (case-sensitive) into this tool.",
             switch ($script:MMCurrentStep) {
                 1 { Update-Step1NextButton }
                 2 { Test-ConnectionInputs }
-                3 { $btnNext.Enabled = ($null -ne $script:MMProjectId -and $script:MMProjectId -ne '') }
+                3 {
+                $btnNext.Enabled = ($null -ne $script:MMProjectId -and $script:MMProjectId -ne '')
+                if ($script:MMProjectId -and $script:MMMappingRows.Count -eq 0) {
+                    $lblMapSummary.Text = "Project '$($script:MMProjectId)' already exists in Fly — click Next to go to migration control. Load a CSV below only if you want to add more users."
+                    $lblMapSummary.ForeColor = [System.Drawing.Color]::FromArgb(100, 200, 130)
+                }
+            }
             }
         }
     })

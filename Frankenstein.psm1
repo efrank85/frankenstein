@@ -6038,6 +6038,31 @@ function Invoke-FrankensteinMailboxMigrator {
         $btnNext.Visible  = ($script:MMCurrentStep -lt 4)
     }
 
+    # Determines whether Next is enabled on Step 1 and shows/hides the quick-status shortcut.
+    # Rule: existing project + Fly connected = EXO is optional.
+    function Update-Step1NextButton {
+        if ($script:MMFlyConnected -and $script:MMProjectId) {
+            $btnNext.Enabled       = $true
+            $btnJumpStatus.Visible = $true
+            $lblConnSummary.Text   = "Project '$($script:MMProjectId)' loaded — Exchange connections are optional." +
+                                     " Click Next to continue setup, or Jump to Status to skip straight to Step 4."
+            $lblConnSummary.ForeColor = [System.Drawing.Color]::FromArgb(100, 220, 130)
+        } elseif ($script:MMFlyConnected -and $script:MMSourceConnected -and $script:MMTargetConnected) {
+            $btnNext.Enabled       = $true
+            $btnJumpStatus.Visible = $false
+            $lblConnSummary.Text   = ''
+        } elseif ($script:MMFlyConnected) {
+            $btnNext.Enabled       = $false
+            $btnJumpStatus.Visible = $false
+            $lblConnSummary.Text   = 'Fly connected. Connect both Exchange tenants, or load a profile with an existing project to skip Exchange.'
+            $lblConnSummary.ForeColor = [System.Drawing.Color]::FromArgb(160, 160, 90)
+        } else {
+            $btnNext.Enabled       = $false
+            $btnJumpStatus.Visible = $false
+            $lblConnSummary.Text   = ''
+        }
+    }
+
     function Populate-ProfileFields ([object]$p) {
         if (-not $p) { return }
         $txtSrcUpn.Text      = $p.SourceUpn
@@ -6046,6 +6071,11 @@ function Invoke-FrankensteinMailboxMigrator {
         $txtFlyClientId.Text = $p.FlyClientId
         $txtFlySecret.Text   = $p.FlyClientSecret
         if ($p.MappingFilePath -and (Test-Path $p.MappingFilePath)) { $txtMappingPath.Text = $p.MappingFilePath }
+        $script:MMSourceUpn      = [string]$p.SourceUpn
+        $script:MMTargetUpn      = [string]$p.TargetUpn
+        $script:MMFlyBaseUrl     = [string]$p.FlyBaseUrl
+        $script:MMFlyClientId    = [string]$p.FlyClientId
+        $script:MMFlyClientSecret = [string]$p.FlyClientSecret
         $script:MMSourceConnName = [string]$p.SourceConnName
         $script:MMTargetConnName = [string]$p.TargetConnName
         $script:MMFlyPolicyName  = [string]$p.FlyPolicyName
@@ -6053,16 +6083,17 @@ function Invoke-FrankensteinMailboxMigrator {
         try { $txtSrcConnName.Text = $script:MMSourceConnName } catch {}
         try { $txtTgtConnName.Text = $script:MMTargetConnName } catch {}
         try { $txtFlyPolicy.Text   = $script:MMFlyPolicyName  } catch {}
+        Update-Step1NextButton
     }
 
     function Get-CurrentProfileData {
         return @{
-            SourceUpn      = $txtSrcUpn.Text.Trim()
-            TargetUpn      = $txtTgtUpn.Text.Trim()
-            FlyBaseUrl     = $txtFlyUrl.Text.Trim()
-            FlyClientId    = $txtFlyClientId.Text.Trim()
-            FlyClientSecret = $txtFlySecret.Text.Trim()
-            MappingFilePath = $txtMappingPath.Text.Trim()
+            SourceUpn       = $script:MMSourceUpn
+            TargetUpn       = $script:MMTargetUpn
+            FlyBaseUrl      = $script:MMFlyBaseUrl
+            FlyClientId     = $script:MMFlyClientId
+            FlyClientSecret = $script:MMFlyClientSecret
+            MappingFilePath = try { $txtMappingPath.Text.Trim() } catch { '' }
             SourceConnName  = $script:MMSourceConnName
             TargetConnName  = $script:MMTargetConnName
             FlyPolicyName   = $script:MMFlyPolicyName
@@ -6261,12 +6292,22 @@ function Invoke-FrankensteinMailboxMigrator {
     $btnFlyHelp.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
     $panStep1.Controls.Add($btnFlyHelp)
 
-    # Connection summary
+    # Connection summary + quick-status shortcut
     $y += 76
     $lblConnSummary = New-Object System.Windows.Forms.Label
     $lblConnSummary.Location = New-Object System.Drawing.Point(8, $y); $lblConnSummary.Size = New-Object System.Drawing.Size(820, 40)
     $lblConnSummary.ForeColor = [System.Drawing.Color]::DimGray; $lblConnSummary.Text = ''
     $panStep1.Controls.Add($lblConnSummary)
+
+    $btnJumpStatus = New-Object System.Windows.Forms.Button
+    $btnJumpStatus.Text      = 'Jump to Status  →'
+    $btnJumpStatus.Location  = New-Object System.Drawing.Point(8, ($y + 44))
+    $btnJumpStatus.Size      = New-Object System.Drawing.Size(180, 28)
+    $btnJumpStatus.FlatStyle = 'Flat'
+    $btnJumpStatus.BackColor = [System.Drawing.Color]::FromArgb(0, 140, 80)
+    $btnJumpStatus.ForeColor = [System.Drawing.Color]::White
+    $btnJumpStatus.Visible   = $false
+    $panStep1.Controls.Add($btnJumpStatus)
 
     # =====================================================================
     # STEP 2 — Connectors
@@ -6585,11 +6626,13 @@ function Invoke-FrankensteinMailboxMigrator {
             if ($connInfo.Count) {
                 $script:MMSourceOrg          = [string]$connInfo[0].Organization
                 $script:MMSourceConnectionId = [string]$connInfo[0].ConnectionId
+                $actualUpn = [string]$connInfo[0].UserPrincipalName
+                if ($actualUpn) { $script:MMSourceUpn = $actualUpn; $txtSrcUpn.Text = $actualUpn }
             }
             $script:MMSourceConnected = $true
             Set-MMStatusLabel $lblSrcStatus "Connected ($($script:MMSourceOrg))" ([System.Drawing.Color]::LimeGreen)
             Write-MMLog "Source connected. TenantId: $($script:MMSourceTenantId)" ([System.Drawing.Color]::LimeGreen)
-            if ($script:MMSourceConnected -and $script:MMTargetConnected -and $script:MMFlyConnected) { $btnNext.Enabled = $true }
+            Update-Step1NextButton
         } catch {
             Set-MMStatusLabel $lblSrcStatus 'Failed' ([System.Drawing.Color]::Tomato)
             Write-MMLog "Source connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
@@ -6613,11 +6656,13 @@ function Invoke-FrankensteinMailboxMigrator {
             if ($tgtConn) {
                 $script:MMTargetOrg          = [string]$tgtConn.Organization
                 $script:MMTargetConnectionId = [string]$tgtConn.ConnectionId
+                $actualUpn = [string]$tgtConn.UserPrincipalName
+                if ($actualUpn) { $script:MMTargetUpn = $actualUpn; $txtTgtUpn.Text = $actualUpn }
             }
             $script:MMTargetConnected = $true
             Set-MMStatusLabel $lblTgtStatus "Connected ($($script:MMTargetOrg))" ([System.Drawing.Color]::LimeGreen)
             Write-MMLog "Target connected. TenantId: $($script:MMTargetTenantId)" ([System.Drawing.Color]::LimeGreen)
-            if ($script:MMSourceConnected -and $script:MMTargetConnected -and $script:MMFlyConnected) { $btnNext.Enabled = $true }
+            Update-Step1NextButton
         } catch {
             Set-MMStatusLabel $lblTgtStatus 'Failed' ([System.Drawing.Color]::Tomato)
             Write-MMLog "Target connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
@@ -6639,7 +6684,7 @@ function Invoke-FrankensteinMailboxMigrator {
             $script:MMFlyConnected = $true
             Set-MMStatusLabel $lblFlyStatus 'Connected' ([System.Drawing.Color]::LimeGreen)
             Write-MMLog "Fly connected." ([System.Drawing.Color]::LimeGreen)
-            if ($script:MMSourceConnected -and $script:MMTargetConnected -and $script:MMFlyConnected) { $btnNext.Enabled = $true }
+            Update-Step1NextButton
         } catch {
             $script:MMFlyConnected = $false
             Set-MMStatusLabel $lblFlyStatus 'Failed' ([System.Drawing.Color]::Tomato)
@@ -6693,6 +6738,29 @@ stored encrypted to your Windows login account.",
             'AvePoint Fly — Credential Help',
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+    })
+
+    # ---- Step 1: Jump to Status (Fly-only shortcut for existing projects) ----
+    $btnJumpStatus.Add_Click({
+        if (-not $script:MMFlyConnected) {
+            [System.Windows.Forms.MessageBox]::Show(
+                'Connect to AvePoint Fly first, then click Jump to Status.',
+                'Fly Not Connected', 'OK', 'Warning') | Out-Null
+            return
+        }
+        if (-not $script:MMCurrentProfileName) {
+            $saveAsk = [System.Windows.Forms.MessageBox]::Show(
+                "Would you like to save your settings as a profile before continuing?`n`nSaving now means you won't need to re-enter these details next time.",
+                'Save Profile?',
+                [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+                [System.Windows.Forms.MessageBoxIcon]::Question)
+            if ($saveAsk -eq [System.Windows.Forms.DialogResult]::Cancel) { return }
+            if ($saveAsk -eq [System.Windows.Forms.DialogResult]::Yes) { $btnSaveProfile.PerformClick() }
+        }
+        $script:MMCurrentStep = 4
+        Update-StepIndicator
+        $btnNext.Visible = $false
+        Write-MMLog "Jumped to Step 4 — using existing project '$($script:MMProjectId)'. Exchange connections not required for status/migration." ([System.Drawing.Color]::FromArgb(100, 220, 130))
     })
 
     # ---- Step 2: Open Tenant Management ----
@@ -6928,6 +6996,15 @@ stored encrypted to your Windows login account.",
                     [System.Windows.Forms.MessageBoxIcon]::Question)
                 if ($saveAsk -eq [System.Windows.Forms.DialogResult]::Cancel) { return }
                 if ($saveAsk -eq [System.Windows.Forms.DialogResult]::Yes) { $btnSaveProfile.PerformClick() }
+            }
+            # Fly-only shortcut: if project exists and EXO not connected, jump to Step 4
+            if ($script:MMCurrentStep -eq 1 -and $script:MMFlyConnected -and $script:MMProjectId `
+                    -and -not ($script:MMSourceConnected -and $script:MMTargetConnected)) {
+                $script:MMCurrentStep = 4
+                Update-StepIndicator
+                $btnNext.Visible = $false
+                Write-MMLog "Jumped to Step 4 — using existing project '$($script:MMProjectId)'. Exchange connections not required for status/migration." ([System.Drawing.Color]::FromArgb(100, 220, 130))
+                return
             }
             $script:MMCurrentStep++
             Update-StepIndicator

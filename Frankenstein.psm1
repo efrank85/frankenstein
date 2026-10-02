@@ -7242,36 +7242,20 @@ list — copy it exactly (case-sensitive) into this tool.",
         } finally { $form.UseWaitCursor = $false }
     })
 
-    # ---- Step 4: Verify Mapping ----
+    # ---- Step 4: Verify Mapping (must be done in Fly UI — not exposed in Fly.Client module) ----
     $btnVerifyMapping.Add_Click({
         if (-not $script:MMProjectId) { Write-MMLog "No project — complete Step 3 first." ([System.Drawing.Color]::Tomato); return }
-        $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Verify mapping for project '$($script:MMProjectId)'?`n`nThis checks that all source and destination mailboxes are accessible.",
-            'Verify Mapping', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
-        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-        try {
-            $form.UseWaitCursor = $true
-            Write-MMLog "Starting mapping verification for '$($script:MMProjectId)'..." ([System.Drawing.Color]::Silver)
-            Start-FlyExchangeMigration -Project $script:MMProjectId -Mode VerifyMapping -ErrorAction Stop
-            Write-MMLog "Mapping verification started — use Refresh Status to track progress." ([System.Drawing.Color]::LimeGreen)
-        } catch { Write-MMLog "Verify mapping failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
-        finally { $form.UseWaitCursor = $false }
+        Write-MMLog "Verify Mapping is not available via the Fly PowerShell module." ([System.Drawing.Color]::DarkGoldenrod)
+        Write-MMLog "Opening Fly Projects... Find '$($script:MMProjectId)' → select mappings → Actions → Verify Mapping." ([System.Drawing.Color]::DarkGoldenrod)
+        Start-Process 'https://fly.avepointonlineservices.com/#/projects'
     })
 
-    # ---- Step 4: Scan Source Data ----
+    # ---- Step 4: Scan Source Data (must be done in Fly UI — not exposed in Fly.Client module) ----
     $btnScanSource.Add_Click({
         if (-not $script:MMProjectId) { Write-MMLog "No project — complete Step 3 first." ([System.Drawing.Color]::Tomato); return }
-        $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Scan source data for project '$($script:MMProjectId)'?`n`nThis analyses source mailbox size and content before migration.",
-            'Scan Source Data', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
-        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-        try {
-            $form.UseWaitCursor = $true
-            Write-MMLog "Starting source data scan for '$($script:MMProjectId)'..." ([System.Drawing.Color]::Silver)
-            Start-FlyExchangeMigration -Project $script:MMProjectId -Mode Scan -ErrorAction Stop
-            Write-MMLog "Source scan started — use Refresh Status to track progress." ([System.Drawing.Color]::LimeGreen)
-        } catch { Write-MMLog "Scan source data failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
-        finally { $form.UseWaitCursor = $false }
+        Write-MMLog "Scan Source Data is not available via the Fly PowerShell module." ([System.Drawing.Color]::DarkGoldenrod)
+        Write-MMLog "Opening Fly Projects... Find '$($script:MMProjectId)' → select mappings → Actions → Scan." ([System.Drawing.Color]::DarkGoldenrod)
+        Start-Process 'https://fly.avepointonlineservices.com/#/projects'
     })
 
     # ---- Step 4: Run Full ----

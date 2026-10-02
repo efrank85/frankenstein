@@ -6612,6 +6612,12 @@ function Invoke-FrankensteinMailboxMigrator {
     $btnExportStatus.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnExportStatus.ForeColor = [System.Drawing.Color]::Silver
     $panStep4.Controls.Add($btnExportStatus)
 
+    $btnUpdateFlyClient = New-Object System.Windows.Forms.Button
+    $btnUpdateFlyClient.Text = 'Update Fly.Client'; $btnUpdateFlyClient.Location = New-Object System.Drawing.Point(530, 70)
+    $btnUpdateFlyClient.Size = New-Object System.Drawing.Size(148, 26); $btnUpdateFlyClient.FlatStyle = 'Flat'
+    $btnUpdateFlyClient.BackColor = [System.Drawing.Color]::FromArgb(50,50,50); $btnUpdateFlyClient.ForeColor = [System.Drawing.Color]::FromArgb(130,130,130)
+    $panStep4.Controls.Add($btnUpdateFlyClient)
+
     $btnReconnectFly = New-Object System.Windows.Forms.Button
     $btnReconnectFly.Text = 'Reconnect Fly'; $btnReconnectFly.Location = New-Object System.Drawing.Point(685, 70)
     $btnReconnectFly.Size = New-Object System.Drawing.Size(143, 26); $btnReconnectFly.FlatStyle = 'Flat'
@@ -6901,9 +6907,13 @@ stored encrypted to your Windows login account.",
             if ($saveAsk -eq [System.Windows.Forms.DialogResult]::Yes) { $btnSaveProfile.PerformClick() }
         }
         $script:MMCurrentStep = 4
+        $script:MMMaxStep     = 4
         Update-StepIndicator
         $btnNext.Visible = $false
+        if ($chkAutoRefresh.Checked) { $refreshTimer.Start() }
+        if ($script:MMProjectId) { & $doRefreshStatus $false }
         Write-MMLog "Jumped to Step 4 — using existing project '$($script:MMProjectId)'. Exchange connections not required for status/migration." ([System.Drawing.Color]::FromArgb(100, 220, 130))
+        Write-MMLog "To run a new migration, go back to Steps 1–3 to connect your Exchange tenants and set up connections." ([System.Drawing.Color]::FromArgb(160, 160, 90))
     })
 
     # ---- Step 2: Portal buttons ----
@@ -7364,6 +7374,27 @@ list — copy it exactly (case-sensitive) into this tool.",
         } catch { Write-MMLog "Fly reconnect failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
     })
 
+    # ---- Step 4: Update Fly.Client module ----
+    $btnUpdateFlyClient.Add_Click({
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "This will run  Update-Module Fly.Client -Force  in the background.`n`nRequires an admin PowerShell session. After updating, restart this tool.`n`nProceed?",
+            'Update Fly.Client', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            Write-MMLog "Updating Fly.Client module (this may take a moment)..." ([System.Drawing.Color]::Silver)
+            $btnUpdateFlyClient.Enabled = $false
+            $job = Start-Job { Update-Module Fly.Client -Force -ErrorAction Stop }
+            $null = $job | Wait-Job -Timeout 120
+            if ($job.State -eq 'Failed') { throw ($job | Receive-Job -ErrorAction Stop) }
+            $job | Remove-Job -Force
+            Write-MMLog "Fly.Client updated successfully. Please restart this tool to use the new version." ([System.Drawing.Color]::LimeGreen)
+            [System.Media.SystemSounds]::Asterisk.Play()
+        } catch {
+            Write-MMLog "Update failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+            Write-MMLog "Try manually: run  Update-Module Fly.Client -Force  in an admin PowerShell." ([System.Drawing.Color]::DarkGoldenrod)
+        } finally { $btnUpdateFlyClient.Enabled = $true }
+    })
+
     # ---- Step 4: Refresh Status (shared by button, timer, and post-build auto-confirm) ----
     $doRefreshStatus = {
         param([bool]$silent = $false)
@@ -7428,7 +7459,19 @@ list — copy it exactly (case-sensitive) into this tool.",
                 $form.Activate()
             }
         } catch {
-            if (-not $silent) { Write-MMLog "Status refresh failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+            $errMsg = $_.Exception.Message
+            if ($errMsg -match 'ProjectMappingItemStageStatus|enumeration values') {
+                if (-not $silent) {
+                    Write-MMLog "Status refresh failed: Fly.Client module is outdated — the Fly API returned a status code the module does not recognise." ([System.Drawing.Color]::Tomato)
+                    Write-MMLog "Fix: run  Update-Module Fly.Client -Force  in an admin PowerShell, then restart this tool." ([System.Drawing.Color]::DarkGoldenrod)
+                }
+            } elseif ($errMsg -match '401|Unauthorized') {
+                if (-not $silent) {
+                    Write-MMLog "Status refresh failed: Fly session expired (401). Click Reconnect Fly." ([System.Drawing.Color]::Tomato)
+                }
+            } else {
+                if (-not $silent) { Write-MMLog "Status refresh failed: $errMsg" ([System.Drawing.Color]::Tomato) }
+            }
         }
     }
 

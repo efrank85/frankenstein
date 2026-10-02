@@ -6337,20 +6337,29 @@ function Invoke-FrankensteinMailboxMigrator {
     $lblStep2Warning.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
     $panStep2.Controls.Add($lblStep2Warning)
 
-    # Two portal buttons side by side
+    # Three portal buttons — one per prerequisite step
     $btnOpenTenantMgmt = New-Object System.Windows.Forms.Button
-    $btnOpenTenantMgmt.Text = '↗  Confidence Platform (steps 1 & 2)'
+    $btnOpenTenantMgmt.Text = '↗  1. Tenant Management'
     $btnOpenTenantMgmt.Location = New-Object System.Drawing.Point(8, 112)
-    $btnOpenTenantMgmt.Size = New-Object System.Drawing.Size(262, 26)
+    $btnOpenTenantMgmt.Size = New-Object System.Drawing.Size(210, 26)
     $btnOpenTenantMgmt.FlatStyle = 'Flat'
     $btnOpenTenantMgmt.BackColor = [System.Drawing.Color]::FromArgb(60, 80, 120)
     $btnOpenTenantMgmt.ForeColor = [System.Drawing.Color]::White
     $panStep2.Controls.Add($btnOpenTenantMgmt)
 
+    $btnOpenAppMgmt = New-Object System.Windows.Forms.Button
+    $btnOpenAppMgmt.Text = '↗  2. App Management'
+    $btnOpenAppMgmt.Location = New-Object System.Drawing.Point(224, 112)
+    $btnOpenAppMgmt.Size = New-Object System.Drawing.Size(210, 26)
+    $btnOpenAppMgmt.FlatStyle = 'Flat'
+    $btnOpenAppMgmt.BackColor = [System.Drawing.Color]::FromArgb(60, 80, 120)
+    $btnOpenAppMgmt.ForeColor = [System.Drawing.Color]::White
+    $panStep2.Controls.Add($btnOpenAppMgmt)
+
     $btnOpenFlyConn = New-Object System.Windows.Forms.Button
-    $btnOpenFlyConn.Text = '↗  Fly → Settings → Connections (step 3)'
-    $btnOpenFlyConn.Location = New-Object System.Drawing.Point(278, 112)
-    $btnOpenFlyConn.Size = New-Object System.Drawing.Size(280, 26)
+    $btnOpenFlyConn.Text = '↗  3. Fly → Settings → Connections'
+    $btnOpenFlyConn.Location = New-Object System.Drawing.Point(440, 112)
+    $btnOpenFlyConn.Size = New-Object System.Drawing.Size(260, 26)
     $btnOpenFlyConn.FlatStyle = 'Flat'
     $btnOpenFlyConn.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
     $btnOpenFlyConn.ForeColor = [System.Drawing.Color]::White
@@ -6382,9 +6391,18 @@ function Invoke-FrankensteinMailboxMigrator {
     $lblPolicyLbl.Size = New-Object System.Drawing.Size(180, 22); $lblPolicyLbl.ForeColor = [System.Drawing.Color]::Silver
     $panStep2.Controls.Add($lblPolicyLbl)
     $txtFlyPolicy = New-Object System.Windows.Forms.TextBox
-    $txtFlyPolicy.Location = New-Object System.Drawing.Point(196, 210); $txtFlyPolicy.Size = New-Object System.Drawing.Size(420, 22)
-    try { $txtFlyPolicy.PlaceholderText = 'e.g. Default Exchange Migration Policy' } catch {}
+    $txtFlyPolicy.Location = New-Object System.Drawing.Point(196, 210); $txtFlyPolicy.Size = New-Object System.Drawing.Size(360, 22)
+    try { $txtFlyPolicy.PlaceholderText = 'e.g. Exchange - Production Policy' } catch {}
     $panStep2.Controls.Add($txtFlyPolicy)
+    $btnOpenPolicies = New-Object System.Windows.Forms.Button
+    $btnOpenPolicies.Text = '↗ View / Create Policies'
+    $btnOpenPolicies.Location = New-Object System.Drawing.Point(562, 209)
+    $btnOpenPolicies.Size = New-Object System.Drawing.Size(178, 24)
+    $btnOpenPolicies.FlatStyle = 'Flat'
+    $btnOpenPolicies.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $btnOpenPolicies.ForeColor = [System.Drawing.Color]::FromArgb(100, 160, 255)
+    $btnOpenPolicies.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    $panStep2.Controls.Add($btnOpenPolicies)
 
     $lblStep2Tip = New-Object System.Windows.Forms.Label
     $lblStep2Tip.Text = 'Connection and policy names are case-sensitive and must match Fly exactly (Fly → Settings → Connections / Policies).'
@@ -6803,14 +6821,18 @@ stored encrypted to your Windows login account.",
         Write-MMLog "Jumped to Step 4 — using existing project '$($script:MMProjectId)'. Exchange connections not required for status/migration." ([System.Drawing.Color]::FromArgb(100, 220, 130))
     })
 
-    # ---- Step 2: Open Confidence Platform (tenant + app management) ----
+    # ---- Step 2: Portal buttons ----
     $btnOpenTenantMgmt.Add_Click({
         Start-Process 'https://www.avepointonlineservices.com/#/management/tenant'
     })
-
-    # ---- Step 2: Open Fly Connections ----
+    $btnOpenAppMgmt.Add_Click({
+        Start-Process 'https://www.avepointonlineservices.com/#/management/app'
+    })
     $btnOpenFlyConn.Add_Click({
         Start-Process 'https://fly.avepointonlineservices.com/#/settings/connection'
+    })
+    $btnOpenPolicies.Add_Click({
+        Start-Process 'https://fly.avepointonlineservices.com/#/settings/migration/exchange-mapping'
     })
 
     # ---- Step 2: Validate connection/policy name inputs ----
@@ -7101,9 +7123,10 @@ stored encrypted to your Windows login account.",
 
     $btnNext.Add_Click({
         if ($script:MMCurrentStep -lt 4) {
-            if ($script:MMCurrentStep -eq 1 -and -not $script:MMCurrentProfileName) {
+            # First time through: prompt for a profile name so auto-save has somewhere to write
+            if (-not $script:MMCurrentProfileName) {
                 $saveAsk = [System.Windows.Forms.MessageBox]::Show(
-                    "Would you like to save your settings as a profile before continuing?`n`nSaving now means you won't need to re-enter these details next time.",
+                    "Save your settings as a profile before continuing?`n`nThis enables auto-save on every step so your progress is always preserved.",
                     'Save Profile?',
                     [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
                     [System.Windows.Forms.MessageBoxIcon]::Question)
@@ -7117,6 +7140,10 @@ stored encrypted to your Windows login account.",
                 Update-StepIndicator
                 $btnNext.Visible = $false
                 Write-MMLog "Jumped to Step 4 — using existing project '$($script:MMProjectId)'. Exchange connections not required for status/migration." ([System.Drawing.Color]::FromArgb(100, 220, 130))
+                if ($script:MMCurrentProfileName) {
+                    try { Save-MMProfile $script:MMCurrentProfileName (Get-CurrentProfileData)
+                          Write-MMLog "Profile '$($script:MMCurrentProfileName)' auto-saved." ([System.Drawing.Color]::DimGray) } catch {}
+                }
                 return
             }
             $script:MMCurrentStep++
@@ -7129,6 +7156,11 @@ stored encrypted to your Windows login account.",
                 Test-ConnectionInputs
             }
             if ($script:MMCurrentStep -eq 4 -and $script:MMProjectId) { $btnNext.Visible = $false }
+            # Auto-save on every step gate
+            if ($script:MMCurrentProfileName) {
+                try { Save-MMProfile $script:MMCurrentProfileName (Get-CurrentProfileData)
+                      Write-MMLog "Profile '$($script:MMCurrentProfileName)' auto-saved." ([System.Drawing.Color]::DimGray) } catch {}
+            }
         }
     })
 

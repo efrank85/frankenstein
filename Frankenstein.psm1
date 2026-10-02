@@ -6320,93 +6320,103 @@ function Invoke-FrankensteinMailboxMigrator {
     $form.Controls.Add($panStep2)
 
     $lblStep2Header = New-Object System.Windows.Forms.Label
-    $lblStep2Header.Text = 'Enter the Exchange connection names exactly as they appear in Fly → Settings → Connections.'
-    $lblStep2Header.Location = New-Object System.Drawing.Point(8, 10); $lblStep2Header.Size = New-Object System.Drawing.Size(820, 22)
+    $lblStep2Header.Text = 'Check off each prerequisite, then enter the connection names below.'
+    $lblStep2Header.Location = New-Object System.Drawing.Point(8, 10); $lblStep2Header.Size = New-Object System.Drawing.Size(820, 20)
     $lblStep2Header.ForeColor = [System.Drawing.Color]::Silver
-    $lblStep2Header.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Regular)
+    $lblStep2Header.Font = New-Object System.Drawing.Font('Segoe UI', 10)
     $panStep2.Controls.Add($lblStep2Header)
 
-    # Warning box — 3-step prerequisite
-    $lblStep2Warning = New-Object System.Windows.Forms.Label
-    $lblStep2Warning.Text = "PREREQUISITE — Three setup steps required in AvePoint before proceeding:`r`n" +
-        "  1. AvePoint Confidence Platform → Tenant Management: connect each tenant`r`n" +
-        "  2. AvePoint Confidence Platform → App Management: create an app profile per tenant`r`n" +
-        "  3. AvePoint Fly → Settings → Connections: create an Exchange Online connection using that app profile"
-    $lblStep2Warning.Location = New-Object System.Drawing.Point(8, 34); $lblStep2Warning.Size = New-Object System.Drawing.Size(820, 72)
-    $lblStep2Warning.ForeColor = [System.Drawing.Color]::FromArgb(255,200,80)
-    $lblStep2Warning.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
-    $panStep2.Controls.Add($lblStep2Warning)
+    # Helper to build a checklist row: returns [CheckBox, optional Button, optional Button]
+    # Row layout: checkbox(x=8,w=340) | btnA(x=352,w=200) | btnB(x=556,w=180)
+    $chkBg = [System.Drawing.Color]::FromArgb(38,38,38)
+    $mkChk = {
+        param($text, $y)
+        $c = New-Object System.Windows.Forms.CheckBox
+        $c.Text = $text; $c.Location = New-Object System.Drawing.Point(8, $y)
+        $c.Size = New-Object System.Drawing.Size(340, 20)
+        $c.ForeColor = [System.Drawing.Color]::Silver; $c.BackColor = $chkBg
+        $c.FlatStyle = 'Flat'; $panStep2.Controls.Add($c); $c
+    }
+    $mkBtn = {
+        param($text, $x, $y, $w, $blue)
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = $text; $b.Location = New-Object System.Drawing.Point($x, ($y-1))
+        $b.Size = New-Object System.Drawing.Size($w, 22); $b.FlatStyle = 'Flat'
+        $b.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+        if ($blue) {
+            $b.BackColor = [System.Drawing.Color]::FromArgb(0,100,180)
+            $b.ForeColor = [System.Drawing.Color]::White
+        } else {
+            $b.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+            $b.ForeColor = [System.Drawing.Color]::FromArgb(100,160,255)
+        }
+        $panStep2.Controls.Add($b); $b
+    }
 
-    # Three portal buttons — one per prerequisite step
-    $btnOpenTenantMgmt = New-Object System.Windows.Forms.Button
-    $btnOpenTenantMgmt.Text = '↗  1. Tenant Management'
-    $btnOpenTenantMgmt.Location = New-Object System.Drawing.Point(8, 112)
-    $btnOpenTenantMgmt.Size = New-Object System.Drawing.Size(210, 26)
-    $btnOpenTenantMgmt.FlatStyle = 'Flat'
-    $btnOpenTenantMgmt.BackColor = [System.Drawing.Color]::FromArgb(60, 80, 120)
-    $btnOpenTenantMgmt.ForeColor = [System.Drawing.Color]::White
-    $panStep2.Controls.Add($btnOpenTenantMgmt)
+    # Row 1 — Tenant Management
+    $chkTenant      = & $mkChk '1. Tenant connected in Confidence Platform' 36
+    $btnOpenTenantMgmt = & $mkBtn '↗  Open Tenant Management' 352 36 200 $true
 
-    $btnOpenAppMgmt = New-Object System.Windows.Forms.Button
-    $btnOpenAppMgmt.Text = '↗  2. App Management'
-    $btnOpenAppMgmt.Location = New-Object System.Drawing.Point(224, 112)
-    $btnOpenAppMgmt.Size = New-Object System.Drawing.Size(210, 26)
-    $btnOpenAppMgmt.FlatStyle = 'Flat'
-    $btnOpenAppMgmt.BackColor = [System.Drawing.Color]::FromArgb(60, 80, 120)
-    $btnOpenAppMgmt.ForeColor = [System.Drawing.Color]::White
-    $panStep2.Controls.Add($btnOpenAppMgmt)
+    # Row 2 — App Management + App Profile Help
+    $chkAppProfile  = & $mkChk '2. App profile created (Fly app + Fly delegated app consented)' 62
+    $btnOpenAppMgmt    = & $mkBtn '↗  Open App Management' 352 62 190 $true
+    $btnAppSetupHelp   = & $mkBtn '?  Setup guide' 546 62 140 $false
 
-    $btnOpenFlyConn = New-Object System.Windows.Forms.Button
-    $btnOpenFlyConn.Text = '↗  3. Fly → Settings → Connections'
-    $btnOpenFlyConn.Location = New-Object System.Drawing.Point(440, 112)
-    $btnOpenFlyConn.Size = New-Object System.Drawing.Size(260, 26)
-    $btnOpenFlyConn.FlatStyle = 'Flat'
-    $btnOpenFlyConn.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
-    $btnOpenFlyConn.ForeColor = [System.Drawing.Color]::White
-    $panStep2.Controls.Add($btnOpenFlyConn)
+    # Row 3 — Exchange Administrator role in Entra
+    $chkEntraRole   = & $mkChk '3. Exchange Administrator role assigned to "AvePoint Fly" in Entra' 88
+    $btnOpenEntra      = & $mkBtn '↗  Open Entra Roles' 352 88 180 $true
+    $btnEntraHelp      = & $mkBtn '?  How to do this' 536 88 154 $false
+
+    # Row 4 — Fly Exchange connection (source)
+    $chkFlyConnSrc  = & $mkChk '4. Fly Exchange connection created for source tenant' 114
+    $btnOpenFlyConn    = & $mkBtn '↗  Open Fly Connections' 352 114 190 $true
+    $btnConnCreateHelp = & $mkBtn '?  Connection field guide' 546 114 154 $false
+
+    # Row 5 — Fly Exchange connection (target)
+    $chkFlyConnTgt  = & $mkChk '5. Fly Exchange connection created for target tenant' 140
+    # (reuses same Fly Connections and help buttons — no separate controls needed)
+
+    # Divider
+    $lblDivider = New-Object System.Windows.Forms.Label
+    $lblDivider.Text = '─' * 110
+    $lblDivider.Location = New-Object System.Drawing.Point(8, 166); $lblDivider.Size = New-Object System.Drawing.Size(820, 14)
+    $lblDivider.ForeColor = [System.Drawing.Color]::FromArgb(60,60,60)
+    $panStep2.Controls.Add($lblDivider)
 
     # Source connection name
     $lblSrcConnLbl = New-Object System.Windows.Forms.Label
-    $lblSrcConnLbl.Text = 'Source connection name:'; $lblSrcConnLbl.Location = New-Object System.Drawing.Point(8, 152)
+    $lblSrcConnLbl.Text = 'Source connection name:'; $lblSrcConnLbl.Location = New-Object System.Drawing.Point(8, 186)
     $lblSrcConnLbl.Size = New-Object System.Drawing.Size(180, 22); $lblSrcConnLbl.ForeColor = [System.Drawing.Color]::Silver
     $panStep2.Controls.Add($lblSrcConnLbl)
     $txtSrcConnName = New-Object System.Windows.Forms.TextBox
-    $txtSrcConnName.Location = New-Object System.Drawing.Point(196, 150); $txtSrcConnName.Size = New-Object System.Drawing.Size(420, 22)
+    $txtSrcConnName.Location = New-Object System.Drawing.Point(196, 184); $txtSrcConnName.Size = New-Object System.Drawing.Size(430, 22)
     try { $txtSrcConnName.PlaceholderText = 'e.g. Air Enterprises Exchange Connection' } catch {}
     $panStep2.Controls.Add($txtSrcConnName)
 
     # Target connection name
     $lblTgtConnLbl = New-Object System.Windows.Forms.Label
-    $lblTgtConnLbl.Text = 'Target connection name:'; $lblTgtConnLbl.Location = New-Object System.Drawing.Point(8, 182)
+    $lblTgtConnLbl.Text = 'Target connection name:'; $lblTgtConnLbl.Location = New-Object System.Drawing.Point(8, 214)
     $lblTgtConnLbl.Size = New-Object System.Drawing.Size(180, 22); $lblTgtConnLbl.ForeColor = [System.Drawing.Color]::Silver
     $panStep2.Controls.Add($lblTgtConnLbl)
     $txtTgtConnName = New-Object System.Windows.Forms.TextBox
-    $txtTgtConnName.Location = New-Object System.Drawing.Point(196, 180); $txtTgtConnName.Size = New-Object System.Drawing.Size(420, 22)
+    $txtTgtConnName.Location = New-Object System.Drawing.Point(196, 212); $txtTgtConnName.Size = New-Object System.Drawing.Size(430, 22)
     try { $txtTgtConnName.PlaceholderText = 'e.g. Contoso Exchange Connection' } catch {}
     $panStep2.Controls.Add($txtTgtConnName)
 
     # Migration policy name
     $lblPolicyLbl = New-Object System.Windows.Forms.Label
-    $lblPolicyLbl.Text = 'Migration policy name:'; $lblPolicyLbl.Location = New-Object System.Drawing.Point(8, 212)
+    $lblPolicyLbl.Text = 'Migration policy name:'; $lblPolicyLbl.Location = New-Object System.Drawing.Point(8, 242)
     $lblPolicyLbl.Size = New-Object System.Drawing.Size(180, 22); $lblPolicyLbl.ForeColor = [System.Drawing.Color]::Silver
     $panStep2.Controls.Add($lblPolicyLbl)
     $txtFlyPolicy = New-Object System.Windows.Forms.TextBox
-    $txtFlyPolicy.Location = New-Object System.Drawing.Point(196, 210); $txtFlyPolicy.Size = New-Object System.Drawing.Size(360, 22)
+    $txtFlyPolicy.Location = New-Object System.Drawing.Point(196, 240); $txtFlyPolicy.Size = New-Object System.Drawing.Size(340, 22)
     try { $txtFlyPolicy.PlaceholderText = 'e.g. Exchange - Production Policy' } catch {}
     $panStep2.Controls.Add($txtFlyPolicy)
-    $btnOpenPolicies = New-Object System.Windows.Forms.Button
-    $btnOpenPolicies.Text = '↗ View / Create Policies'
-    $btnOpenPolicies.Location = New-Object System.Drawing.Point(562, 209)
-    $btnOpenPolicies.Size = New-Object System.Drawing.Size(178, 24)
-    $btnOpenPolicies.FlatStyle = 'Flat'
-    $btnOpenPolicies.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
-    $btnOpenPolicies.ForeColor = [System.Drawing.Color]::FromArgb(100, 160, 255)
-    $btnOpenPolicies.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-    $panStep2.Controls.Add($btnOpenPolicies)
+    $btnOpenPolicies = & $mkBtn '↗ View / Create Policies' 542 240 188 $false
 
     $lblStep2Tip = New-Object System.Windows.Forms.Label
-    $lblStep2Tip.Text = 'Connection and policy names are case-sensitive and must match Fly exactly (Fly → Settings → Connections / Policies).'
-    $lblStep2Tip.Location = New-Object System.Drawing.Point(8, 242); $lblStep2Tip.Size = New-Object System.Drawing.Size(820, 20)
+    $lblStep2Tip.Text = 'Connection and policy names are case-sensitive — copy them exactly from Fly → Settings → Connections / Policies.'
+    $lblStep2Tip.Location = New-Object System.Drawing.Point(8, 270); $lblStep2Tip.Size = New-Object System.Drawing.Size(820, 20)
     $lblStep2Tip.ForeColor = [System.Drawing.Color]::DimGray
     $panStep2.Controls.Add($lblStep2Tip)
 
@@ -6828,11 +6838,143 @@ stored encrypted to your Windows login account.",
     $btnOpenAppMgmt.Add_Click({
         Start-Process 'https://www.avepointonlineservices.com/#/management/app'
     })
+    $btnOpenEntra.Add_Click({
+        Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesAndAdministratorsMenuBlade/~/AllRoles'
+    })
     $btnOpenFlyConn.Add_Click({
         Start-Process 'https://fly.avepointonlineservices.com/#/settings/connection'
     })
+    $btnEntraHelp.Add_Click({
+        $ans = [System.Windows.Forms.MessageBox]::Show(
+"ASSIGNING EXCHANGE ADMINISTRATOR TO AVEPOINT FLY
+
+The AvePoint Fly enterprise app needs the Exchange Administrator
+role in each tenant before it can access mailbox data.
+
+  1. Click '↗ Open Entra Roles' to open Microsoft Entra.
+
+  2. Search for 'Exchange Administrator' and open it.
+
+  3. Click '+ Add assignments'.
+
+  4. Search 'avepoint' — select:
+       ✔  AvePoint Fly   ← this one only
+     Do NOT select 'AvePoint Fly Delegated App' or
+     'AvePoint Online Services Tenant Reg'.
+
+  5. Click Next → set as Permanent → click Finish.
+
+Repeat for each tenant (source and target).
+
+Open Microsoft Entra now?",
+            'Entra — Exchange Administrator Setup',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Information)
+        if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) {
+            Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesAndAdministratorsMenuBlade/~/AllRoles'
+        }
+    })
     $btnOpenPolicies.Add_Click({
         Start-Process 'https://fly.avepointonlineservices.com/#/settings/migration/exchange-mapping'
+    })
+
+    $btnAppSetupHelp.Add_Click({
+        $ans = [System.Windows.Forms.MessageBox]::Show(
+"APP PROFILE SETUP — STEP BY STEP
+
+You must complete this for EACH tenant (source and target) before creating a Fly connection.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART A — Create App Profile (Confidence Platform)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Open App Management (button above) and click '+ Create'.
+
+2. Select services: choose 'Fly'. Click Next.
+
+3. Choose setup method: select 'App' (for unattended migration).
+   Click Next.
+
+4. Consent to apps — click 'Consent' next to each:
+     ✔ Fly             ← required
+     ✔ Fly delegated app  ← required
+   Sign in as an M365 Global Admin when prompted.
+   Other items (Fly for Entra ID source, etc.) can be skipped.
+
+5. Click Finish.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART B — Grant Exchange Administrator in Entra ID
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The AvePoint Fly enterprise app needs the Exchange Administrator
+role in each tenant's Entra ID.
+
+1. Open Microsoft Entra admin center (click Yes below to open it).
+   Navigate to: Identity → Roles & admins → Exchange Administrator.
+
+2. Click '+ Add assignments'.
+
+3. Search for 'avepoint' and select:
+     ✔ AvePoint Fly   ← select ONLY this one
+   (Do NOT select 'AvePoint Fly Delegated App' or
+    'AvePoint Online Services Tenant Reg' — not needed.)
+
+4. Click Next → leave assignment as Permanent → click Finish.
+
+Repeat Parts A and B for each tenant before creating its Fly connection.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Open Microsoft Entra admin center now?",
+            'App Profile Setup Guide',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Information)
+        if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) {
+            Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesAndAdministratorsMenuBlade/~/AllRoles'
+        }
+    })
+
+    $btnConnCreateHelp.Add_Click({
+        [System.Windows.Forms.MessageBox]::Show(
+"HOW TO CREATE A FLY EXCHANGE CONNECTION
+
+In Fly → Settings → Connections, click '+ Create connection'.
+Fill in the form as follows:
+
+  Connection name *
+      Any name you choose — this is exactly what you will
+      type into the 'Source/Target connection name' field
+      in this tool.  Make it descriptive, e.g.:
+        'Air Enterprises Exchange Connection'
+        'Contoso Exchange Connection'
+
+  Connection type
+      Exchange Online
+
+  Tenant *
+      Select from the dropdown. If your tenant is missing,
+      go to Confidence Platform → Tenant Management first
+      and click '+ Connect tenant'.
+
+  Container for auto map
+      Leave as None (not needed for mailbox migration).
+
+  App profile
+      Select the Fly app profile you created in App Management,
+      shown as: admin@yourtenant.com (Fly app)
+      If empty, complete Part A of the App Profile setup first.
+
+  Service account or delegated app authentication
+      Modern authentication  (recommended)
+
+  Microsoft delegated app profile
+      Select the delegated app profile:
+      admin@yourtenant.com (Fly delegated app)
+      This appears after the Fly delegated app consent is done.
+
+Click Save. The connection name now appears in the Connections
+list — copy it exactly (case-sensitive) into this tool.",
+            'Fly Connection — Field Guide',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
     })
 
     # ---- Step 2: Validate connection/policy name inputs ----

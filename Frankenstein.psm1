@@ -6334,7 +6334,7 @@ function Invoke-FrankensteinMailboxMigrator {
         $c = New-Object System.Windows.Forms.CheckBox
         $c.Text = $text; $c.Location = New-Object System.Drawing.Point(8, $y)
         $c.Size = New-Object System.Drawing.Size(340, 20)
-        $c.ForeColor = [System.Drawing.Color]::Silver; $c.BackColor = $chkBg
+        $c.ForeColor = [System.Drawing.Color]::FromArgb(220,220,220); $c.BackColor = $chkBg
         $c.FlatStyle = 'Flat'; $panStep2.Controls.Add($c); $c
     }
     $mkBtn = {
@@ -6839,7 +6839,7 @@ stored encrypted to your Windows login account.",
         Start-Process 'https://www.avepointonlineservices.com/#/management/app'
     })
     $btnOpenEntra.Add_Click({
-        Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesAndAdministratorsMenuBlade/~/AllRoles'
+        Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesManagementMenuBlade/~/AllRoles'
     })
     $btnOpenFlyConn.Add_Click({
         Start-Process 'https://fly.avepointonlineservices.com/#/settings/connection'
@@ -6871,7 +6871,7 @@ Open Microsoft Entra now?",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Information)
         if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) {
-            Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesAndAdministratorsMenuBlade/~/AllRoles'
+            Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesManagementMenuBlade/~/AllRoles'
         }
     })
     $btnOpenPolicies.Add_Click({
@@ -6928,7 +6928,7 @@ Open Microsoft Entra admin center now?",
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Information)
         if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) {
-            Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesAndAdministratorsMenuBlade/~/AllRoles'
+            Start-Process 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/RolesManagementMenuBlade/~/AllRoles'
         }
     })
 
@@ -7136,7 +7136,7 @@ list — copy it exactly (case-sensitive) into this tool.",
             $validPairs = @($script:MMMappingRows | Where-Object { $_.Status -like 'Valid*' })
             if ($validPairs.Count -gt 0) {
                 Write-MMLog "Building mapping CSV for $($validPairs.Count) pair(s)..." ([System.Drawing.Color]::Silver)
-                $tempCsv = [System.IO.Path]::GetTempFileName() + '.csv'
+                $tempCsv = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "fly_mappings_$([System.Guid]::NewGuid().ToString('N')).csv")
                 $csvRows = foreach ($pair in $validPairs) {
                     $flyType = switch ($pair.Type) {
                         'UserMailbox'      { 'User mailbox' }
@@ -7147,7 +7147,7 @@ list — copy it exactly (case-sensitive) into this tool.",
                     }
                     [PSCustomObject]@{ Source = $pair.Source; 'Source type' = $flyType; Destination = $pair.Target; 'Destination type' = $flyType }
                 }
-                $csvRows | Export-Csv $tempCsv -NoTypeInformation
+                $csvRows | Export-Csv $tempCsv -NoTypeInformation -Encoding UTF8
                 Write-MMLog "Importing $($validPairs.Count) mappings into Fly project..." ([System.Drawing.Color]::Silver)
                 Import-FlyExchangeMappings -Project $projName -Path $tempCsv -ErrorAction Stop
                 Remove-Item $tempCsv -Force -ErrorAction SilentlyContinue

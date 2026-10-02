@@ -6645,9 +6645,9 @@ function Invoke-FrankensteinMailboxMigrator {
     $lvStatus.Location = New-Object System.Drawing.Point(8, 124); $lvStatus.Size = New-Object System.Drawing.Size(820, 258)
     $lvStatus.View = 'Details'; $lvStatus.FullRowSelect = $true; $lvStatus.GridLines = $true
     $lvStatus.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvStatus.ForeColor = [System.Drawing.Color]::Silver
-    foreach ($col in @('Source','Destination','Stage','Progress','Updated','Errors','Last Migration Status')) {
+    foreach ($col in @('Source','Destination','Stage','Status','Progress')) {
         $c = $lvStatus.Columns.Add($col)
-        $c.Width = switch ($col) { 'Source' { 185 } 'Destination' { 185 } 'Stage' { 110 } 'Progress' { 65 } 'Updated' { 110 } 'Errors' { 50 } 'Last Migration Status' { 105 } }
+        $c.Width = switch ($col) { 'Source' { 220 } 'Destination' { 220 } 'Stage' { 100 } 'Status' { 150 } 'Progress' { 75 } }
     }
     $panStep4.Controls.Add($lvStatus)
 
@@ -7405,9 +7405,7 @@ list — copy it exactly (case-sensitive) into this tool.",
             Export-FlyExchangeMappingStatus -Project $script:MMProjectId -OutFile $statusCsv -ErrorAction Stop
             $rows = @(Import-Csv $statusCsv -ErrorAction SilentlyContinue)
             Remove-Item $statusCsv -Force -ErrorAction SilentlyContinue
-            if (-not $silent -and $rows.Count -gt 0) {
-                Write-MMLog "CSV columns: $($rows[0].PSObject.Properties.Name -join ', ')" ([System.Drawing.Color]::DimGray)
-            }
+
             $lvStatus.Items.Clear()
             $anyCompleted = $false; $anyFailed = $false
             foreach ($row in $rows) {
@@ -7416,10 +7414,8 @@ list — copy it exactly (case-sensitive) into this tool.",
                 $stageFull  = [string]$(if ($row.Stage) { $row.Stage } elseif ($row.Status) { $row.Status } else { $row.MigrationStatus })
                 $rawPct     = [string]$(if ($row.'Job progress (%)') { $row.'Job progress (%)' } else { '' })
                 $pct        = if ($rawPct -and $rawPct -ne '0' -and $rawPct -ne '') { "$rawPct%" } elseif ($stageFull -match '(\d+(?:\.\d+)?)\s*%') { "$($Matches[1])%" } else { '' }
-                $stageClean = [string]$(if ($row.'Stage status') { $row.'Stage status' } else { ($stageFull -replace '\s*\(.*\)', '').Trim() })
-                $upd        = [string]$(if ($row.Updated) { $row.Updated } elseif ($row.'Last Migration Time') { $row.'Last Migration Time' } else { $row.LastUpdated })
-                $errors     = [string]$(if ($null -ne $row.Errors) { $row.Errors } else { '' })
-                $lastSt     = [string]$(if ($row.'Last migration status') { $row.'Last migration status' } elseif ($row.'Last Migration Status') { $row.'Last Migration Status' } else { '' })
+                $stageLabel = ($stageFull -replace '\s*\(.*\)', '').Trim()
+                $stageClean = [string]$(if ($row.'Stage status') { $row.'Stage status' } else { $stageLabel })
 
                 # Status-change detection (silent refreshes only — avoids noise on manual clicks)
                 if ($silent) {
@@ -7434,12 +7430,13 @@ list — copy it exactly (case-sensitive) into this tool.",
                 }
 
                 $lvi = New-Object System.Windows.Forms.ListViewItem($src)
-                $lvi.SubItems.Add($tgt) | Out-Null; $lvi.SubItems.Add($stageClean) | Out-Null
-                $lvi.SubItems.Add($pct) | Out-Null; $lvi.SubItems.Add($upd) | Out-Null
-                $lvi.SubItems.Add($errors) | Out-Null; $lvi.SubItems.Add($lastSt) | Out-Null
-                $lvi.ForeColor = switch -Wildcard ($stageFull.ToLower()) {
+                $lvi.SubItems.Add($tgt) | Out-Null; $lvi.SubItems.Add($stageLabel) | Out-Null
+                $lvi.SubItems.Add($stageClean) | Out-Null; $lvi.SubItems.Add($pct) | Out-Null
+                $lvi.ForeColor = switch -Wildcard ($stageClean.ToLower()) {
                     '*complet*' { [System.Drawing.Color]::LimeGreen }
                     '*fail*'    { [System.Drawing.Color]::Tomato }
+                    '*stop*'    { [System.Drawing.Color]::Tomato }
+                    '*progress*'{ [System.Drawing.Color]::DarkGoldenrod }
                     '*migrat*'  { [System.Drawing.Color]::DarkGoldenrod }
                     default     { [System.Drawing.Color]::Silver }
                 }

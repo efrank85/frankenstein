@@ -6203,7 +6203,11 @@ function Invoke-FrankensteinMailboxMigrator {
             1 { Update-Step1NextButton }
             2 { Test-ConnectionInputs }
             3 { $btnNext.Enabled = ($null -ne $script:MMProjectId -and $script:MMProjectId -ne '') }
-            4 { $btnNext.Visible = $false }
+            4 {
+                $btnNext.Visible = $false
+                if ($chkAutoRefresh.Checked) { $refreshTimer.Start() }
+                if ($script:MMProjectId) { & $doRefreshStatus $false }
+            }
         }
     }
     $lblStep1.Add_Click({ & $navTo 1 })
@@ -6546,7 +6550,7 @@ function Invoke-FrankensteinMailboxMigrator {
     $panStep4.Visible   = $false
     $form.Controls.Add($panStep4)
 
-    # Pre-migration row (web-only steps — links to Fly UI)
+    # Row 0 — Pre-migration web-only shortcuts
     $lblPreMig = New-Object System.Windows.Forms.Label
     $lblPreMig.Text = 'In Fly web UI first:'; $lblPreMig.Location = New-Object System.Drawing.Point(8, 14)
     $lblPreMig.Size = New-Object System.Drawing.Size(130, 18); $lblPreMig.ForeColor = [System.Drawing.Color]::DimGray
@@ -6564,60 +6568,75 @@ function Invoke-FrankensteinMailboxMigrator {
     $btnScanSource.BackColor = [System.Drawing.Color]::FromArgb(50,50,50); $btnScanSource.ForeColor = [System.Drawing.Color]::FromArgb(160,160,160)
     $panStep4.Controls.Add($btnScanSource)
 
-    # Migration row
+    # Row 1 — Migration action buttons
     $btnRunFull = New-Object System.Windows.Forms.Button
-    $btnRunFull.Text = 'Run Full Migration'; $btnRunFull.Location = New-Object System.Drawing.Point(8, 44)
-    $btnRunFull.Size = New-Object System.Drawing.Size(160, 28)
+    $btnRunFull.Text = 'Run Full Migration'; $btnRunFull.Location = New-Object System.Drawing.Point(8, 38)
+    $btnRunFull.Size = New-Object System.Drawing.Size(155, 26)
     $btnRunFull.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnRunFull.ForeColor = [System.Drawing.Color]::White
-    $btnRunFull.FlatStyle = 'Flat'
-    $panStep4.Controls.Add($btnRunFull)
+    $btnRunFull.FlatStyle = 'Flat'; $panStep4.Controls.Add($btnRunFull)
 
     $btnRunDelta = New-Object System.Windows.Forms.Button
-    $btnRunDelta.Text = 'Run Delta Migration'; $btnRunDelta.Location = New-Object System.Drawing.Point(176, 44)
-    $btnRunDelta.Size = New-Object System.Drawing.Size(160, 28)
+    $btnRunDelta.Text = 'Run Delta Migration'; $btnRunDelta.Location = New-Object System.Drawing.Point(171, 38)
+    $btnRunDelta.Size = New-Object System.Drawing.Size(155, 26)
     $btnRunDelta.BackColor = [System.Drawing.Color]::FromArgb(40,167,69); $btnRunDelta.ForeColor = [System.Drawing.Color]::White
-    $btnRunDelta.FlatStyle = 'Flat'
-    $panStep4.Controls.Add($btnRunDelta)
+    $btnRunDelta.FlatStyle = 'Flat'; $panStep4.Controls.Add($btnRunDelta)
 
+    $btnRetryErrors = New-Object System.Windows.Forms.Button
+    $btnRetryErrors.Text = 'Retry Errors'; $btnRetryErrors.Location = New-Object System.Drawing.Point(334, 38)
+    $btnRetryErrors.Size = New-Object System.Drawing.Size(115, 26)
+    $btnRetryErrors.BackColor = [System.Drawing.Color]::FromArgb(160,80,0); $btnRetryErrors.ForeColor = [System.Drawing.Color]::White
+    $btnRetryErrors.FlatStyle = 'Flat'; $panStep4.Controls.Add($btnRetryErrors)
+
+    $btnPermOnly = New-Object System.Windows.Forms.Button
+    $btnPermOnly.Text = 'Permissions Only'; $btnPermOnly.Location = New-Object System.Drawing.Point(457, 38)
+    $btnPermOnly.Size = New-Object System.Drawing.Size(140, 26)
+    $btnPermOnly.BackColor = [System.Drawing.Color]::FromArgb(70,50,130); $btnPermOnly.ForeColor = [System.Drawing.Color]::White
+    $btnPermOnly.FlatStyle = 'Flat'; $panStep4.Controls.Add($btnPermOnly)
+
+    # Row 2 — Utility buttons
     $btnRefreshStatus = New-Object System.Windows.Forms.Button
-    $btnRefreshStatus.Text = 'Refresh Status'; $btnRefreshStatus.Location = New-Object System.Drawing.Point(344, 44)
-    $btnRefreshStatus.Size = New-Object System.Drawing.Size(120, 28)
-    $btnRefreshStatus.FlatStyle = 'Flat'
+    $btnRefreshStatus.Text = 'Refresh Status'; $btnRefreshStatus.Location = New-Object System.Drawing.Point(8, 70)
+    $btnRefreshStatus.Size = New-Object System.Drawing.Size(115, 26); $btnRefreshStatus.FlatStyle = 'Flat'
     $btnRefreshStatus.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnRefreshStatus.ForeColor = [System.Drawing.Color]::Silver
     $panStep4.Controls.Add($btnRefreshStatus)
 
     $btnOpenFly = New-Object System.Windows.Forms.Button
-    $btnOpenFly.Text = 'Open in Fly ↗'; $btnOpenFly.Location = New-Object System.Drawing.Point(472, 44)
-    $btnOpenFly.Size = New-Object System.Drawing.Size(110, 28)
-    $btnOpenFly.FlatStyle = 'Flat'
+    $btnOpenFly.Text = 'Open in Fly ↗'; $btnOpenFly.Location = New-Object System.Drawing.Point(131, 70)
+    $btnOpenFly.Size = New-Object System.Drawing.Size(110, 26); $btnOpenFly.FlatStyle = 'Flat'
     $btnOpenFly.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnOpenFly.ForeColor = [System.Drawing.Color]::Silver
     $panStep4.Controls.Add($btnOpenFly)
 
     $btnExportStatus = New-Object System.Windows.Forms.Button
-    $btnExportStatus.Text = 'Export CSV'; $btnExportStatus.Location = New-Object System.Drawing.Point(590, 44)
-    $btnExportStatus.Size = New-Object System.Drawing.Size(90, 28)
-    $btnExportStatus.FlatStyle = 'Flat'
+    $btnExportStatus.Text = 'Export CSV'; $btnExportStatus.Location = New-Object System.Drawing.Point(249, 70)
+    $btnExportStatus.Size = New-Object System.Drawing.Size(90, 26); $btnExportStatus.FlatStyle = 'Flat'
     $btnExportStatus.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnExportStatus.ForeColor = [System.Drawing.Color]::Silver
     $panStep4.Controls.Add($btnExportStatus)
 
+    $btnReconnectFly = New-Object System.Windows.Forms.Button
+    $btnReconnectFly.Text = 'Reconnect Fly'; $btnReconnectFly.Location = New-Object System.Drawing.Point(685, 70)
+    $btnReconnectFly.Size = New-Object System.Drawing.Size(143, 26); $btnReconnectFly.FlatStyle = 'Flat'
+    $btnReconnectFly.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnReconnectFly.ForeColor = [System.Drawing.Color]::Silver
+    $panStep4.Controls.Add($btnReconnectFly)
+
     $lblLastRun = New-Object System.Windows.Forms.Label
-    $lblLastRun.Location = New-Object System.Drawing.Point(8, 80); $lblLastRun.Size = New-Object System.Drawing.Size(640, 18)
+    $lblLastRun.Location = New-Object System.Drawing.Point(8, 102); $lblLastRun.Size = New-Object System.Drawing.Size(640, 18)
     $lblLastRun.ForeColor = [System.Drawing.Color]::DimGray; $lblLastRun.Text = 'No migration run yet.'
     $panStep4.Controls.Add($lblLastRun)
 
     $chkAutoRefresh = New-Object System.Windows.Forms.CheckBox
-    $chkAutoRefresh.Text = 'Auto-refresh (30s)'; $chkAutoRefresh.Location = New-Object System.Drawing.Point(658, 78)
-    $chkAutoRefresh.Size = New-Object System.Drawing.Size(160, 20)
+    $chkAutoRefresh.Text = 'Auto-refresh (30s)'; $chkAutoRefresh.Location = New-Object System.Drawing.Point(658, 100)
+    $chkAutoRefresh.Size = New-Object System.Drawing.Size(160, 20); $chkAutoRefresh.Checked = $true
     $chkAutoRefresh.ForeColor = [System.Drawing.Color]::DimGray
     $chkAutoRefresh.BackColor = [System.Drawing.Color]::FromArgb(38,38,38)
     $panStep4.Controls.Add($chkAutoRefresh)
 
     $refreshTimer = New-Object System.Windows.Forms.Timer
     $refreshTimer.Interval = 30000
+    $script:MMPrevStatuses = @{}
 
     # Status grid
     $lvStatus = New-Object System.Windows.Forms.ListView
-    $lvStatus.Location = New-Object System.Drawing.Point(8, 102); $lvStatus.Size = New-Object System.Drawing.Size(820, 278)
+    $lvStatus.Location = New-Object System.Drawing.Point(8, 124); $lvStatus.Size = New-Object System.Drawing.Size(820, 258)
     $lvStatus.View = 'Details'; $lvStatus.FullRowSelect = $true; $lvStatus.GridLines = $true
     $lvStatus.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvStatus.ForeColor = [System.Drawing.Color]::Silver
     foreach ($col in @('Source','Destination','Stage','Progress','Updated','Errors','Last Migration Status')) {
@@ -7230,6 +7249,7 @@ list — copy it exactly (case-sensitive) into this tool.",
                     Import-FlyExchangeMappings -Project $projName -Path $tempCsv -ErrorAction Stop
                     Remove-Item $tempCsv -Force -ErrorAction SilentlyContinue
                     Write-MMLog "Project built: $($validPairs.Count) mapping(s) imported." ([System.Drawing.Color]::LimeGreen)
+                    & $doRefreshStatus $true
                 }
                 $lblProjName.Text = "Project: $projName"
                 $btnNext.Enabled  = $true
@@ -7302,7 +7322,49 @@ list — copy it exactly (case-sensitive) into this tool.",
         } catch { Write-MMLog "Delta migration failed to start: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
     })
 
-    # ---- Step 4: Refresh Status (shared logic used by button and auto-refresh timer) ----
+    # ---- Step 4: Retry Errors ----
+    $btnRetryErrors.Add_Click({
+        if (-not $script:MMProjectId) { Write-MMLog "No project — complete Step 3 first." ([System.Drawing.Color]::Tomato); return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Re-run only failed items in project '$($script:MMProjectId)'?",
+            'Retry Errors', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            Write-MMLog "Retrying failed items for '$($script:MMProjectId)'..." ([System.Drawing.Color]::Silver)
+            Start-FlyExchangeMigration -Project $script:MMProjectId -Mode ErrorOnly -ErrorAction Stop
+            Write-MMLog "Error retry started." ([System.Drawing.Color]::LimeGreen)
+        } catch { Write-MMLog "Retry errors failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    })
+
+    # ---- Step 4: Permissions Only ----
+    $btnPermOnly.Add_Click({
+        if (-not $script:MMProjectId) { Write-MMLog "No project — complete Step 3 first." ([System.Drawing.Color]::Tomato); return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Run a permissions-only pass for project '$($script:MMProjectId)'?`nThis migrates mailbox permissions without copying content.",
+            'Permissions Only', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            Write-MMLog "Starting permissions-only migration for '$($script:MMProjectId)'..." ([System.Drawing.Color]::Silver)
+            Start-FlyExchangeMigration -Project $script:MMProjectId -Mode PermissionOnly -ErrorAction Stop
+            Write-MMLog "Permissions-only migration started." ([System.Drawing.Color]::LimeGreen)
+        } catch { Write-MMLog "Permissions-only failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    })
+
+    # ---- Step 4: Reconnect Fly ----
+    $btnReconnectFly.Add_Click({
+        if (-not $script:MMFlyBaseUrl -or -not $script:MMFlyClientId -or -not $script:MMFlyClientSecret) {
+            Write-MMLog "No Fly credentials in memory — go back to Step 1 to reconnect." ([System.Drawing.Color]::Tomato); return
+        }
+        try {
+            Write-MMLog "Reconnecting to AvePoint Fly ($($script:MMFlyBaseUrl))..." ([System.Drawing.Color]::Silver)
+            Connect-Fly -Url $script:MMFlyBaseUrl -ClientId $script:MMFlyClientId -ClientSecret $script:MMFlyClientSecret -ErrorAction Stop
+            $script:MMFlyConnected = $true
+            Write-MMLog "Fly reconnected." ([System.Drawing.Color]::LimeGreen)
+            & $doRefreshStatus $false
+        } catch { Write-MMLog "Fly reconnect failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    })
+
+    # ---- Step 4: Refresh Status (shared by button, timer, and post-build auto-confirm) ----
     $doRefreshStatus = {
         param([bool]$silent = $false)
         if (-not $script:MMProjectId) { return }
@@ -7316,17 +7378,31 @@ list — copy it exactly (case-sensitive) into this tool.",
                 Write-MMLog "CSV columns: $($rows[0].PSObject.Properties.Name -join ', ')" ([System.Drawing.Color]::DimGray)
             }
             $lvStatus.Items.Clear()
+            $anyCompleted = $false; $anyFailed = $false
             foreach ($row in $rows) {
-                $src      = [string]$row.Source
-                $tgt      = [string]$(if ($row.Destination) { $row.Destination } else { $row.Target })
-                $stageFull= [string]$(if ($row.Stage) { $row.Stage } elseif ($row.Status) { $row.Status } else { $row.MigrationStatus })
-                # Extract percentage from Stage e.g. "Migration (12%, 3 processed...)" → "12%"
-                $pct      = if ($stageFull -match '(\d+(?:\.\d+)?)\s*%') { "$($Matches[1])%" } else { '' }
-                $stageClean = ($stageFull -replace '\s*\(.*\)', '').Trim()
-                $upd      = [string]$(if ($row.Updated) { $row.Updated } elseif ($row.'Last Migration Time') { $row.'Last Migration Time' } else { $row.LastUpdated })
-                $errors   = [string]$(if ($null -ne $row.Errors) { $row.Errors } else { '' })
-                $lastSt   = [string]$(if ($row.'Last migration status') { $row.'Last migration status' } elseif ($row.'Last Migration Status') { $row.'Last Migration Status' } else { '' })
-                $lvi      = New-Object System.Windows.Forms.ListViewItem($src)
+                $src        = [string]$row.Source
+                $tgt        = [string]$(if ($row.Destination) { $row.Destination } else { $row.Target })
+                $stageFull  = [string]$(if ($row.Stage) { $row.Stage } elseif ($row.Status) { $row.Status } else { $row.MigrationStatus })
+                $rawPct     = [string]$(if ($row.'Job progress (%)') { $row.'Job progress (%)' } else { '' })
+                $pct        = if ($rawPct -and $rawPct -ne '0' -and $rawPct -ne '') { "$rawPct%" } elseif ($stageFull -match '(\d+(?:\.\d+)?)\s*%') { "$($Matches[1])%" } else { '' }
+                $stageClean = [string]$(if ($row.'Stage status') { $row.'Stage status' } else { ($stageFull -replace '\s*\(.*\)', '').Trim() })
+                $upd        = [string]$(if ($row.Updated) { $row.Updated } elseif ($row.'Last Migration Time') { $row.'Last Migration Time' } else { $row.LastUpdated })
+                $errors     = [string]$(if ($null -ne $row.Errors) { $row.Errors } else { '' })
+                $lastSt     = [string]$(if ($row.'Last migration status') { $row.'Last migration status' } elseif ($row.'Last Migration Status') { $row.'Last Migration Status' } else { '' })
+
+                # Status-change detection (silent refreshes only — avoids noise on manual clicks)
+                if ($silent) {
+                    $key = "$src|$tgt"
+                    $prev = $script:MMPrevStatuses[$key]
+                    if ($prev -and $prev -ne $stageClean) {
+                        if ($stageClean -match 'complet') { $anyCompleted = $true }
+                        if ($stageClean -match 'fail')    { $anyFailed    = $true }
+                        Write-MMLog "Status changed: $src → $stageClean" ([System.Drawing.Color]::DarkGoldenrod)
+                    }
+                    $script:MMPrevStatuses[$key] = $stageClean
+                }
+
+                $lvi = New-Object System.Windows.Forms.ListViewItem($src)
                 $lvi.SubItems.Add($tgt) | Out-Null; $lvi.SubItems.Add($stageClean) | Out-Null
                 $lvi.SubItems.Add($pct) | Out-Null; $lvi.SubItems.Add($upd) | Out-Null
                 $lvi.SubItems.Add($errors) | Out-Null; $lvi.SubItems.Add($lastSt) | Out-Null
@@ -7340,6 +7416,17 @@ list — copy it exactly (case-sensitive) into this tool.",
             }
             $lblLastRun.Text = "Status last refreshed: $(Get-Date -Format 'HH:mm:ss') — $($rows.Count) mapping(s)."
             if (-not $silent) { Write-MMLog "Status refreshed: $($rows.Count) mapping(s)." ([System.Drawing.Color]::Silver) }
+            # Notify on significant state changes detected during auto-refresh
+            if ($anyCompleted) {
+                Write-MMLog "✔ One or more mailboxes completed migration." ([System.Drawing.Color]::LimeGreen)
+                [System.Media.SystemSounds]::Asterisk.Play()
+                $form.Activate()
+            }
+            if ($anyFailed) {
+                Write-MMLog "✘ One or more mailboxes failed — check status grid." ([System.Drawing.Color]::Tomato)
+                [System.Media.SystemSounds]::Hand.Play()
+                $form.Activate()
+            }
         } catch {
             if (-not $silent) { Write-MMLog "Status refresh failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
         }
@@ -7358,7 +7445,6 @@ list — copy it exactly (case-sensitive) into this tool.",
         if ($chkAutoRefresh.Checked) {
             $refreshTimer.Start()
             Write-MMLog "Auto-refresh enabled — status will update every 30s." ([System.Drawing.Color]::DimGray)
-            & $doRefreshStatus $false
         } else {
             $refreshTimer.Stop()
             Write-MMLog "Auto-refresh disabled." ([System.Drawing.Color]::DimGray)
@@ -7415,6 +7501,8 @@ list — copy it exactly (case-sensitive) into this tool.",
                 $script:MMMaxStep = 4
                 Update-StepIndicator
                 $btnNext.Visible = $false
+                if ($chkAutoRefresh.Checked) { $refreshTimer.Start() }
+                if ($script:MMProjectId) { & $doRefreshStatus $false }
                 Write-MMLog "Jumped to Step 4 — using existing project '$($script:MMProjectId)'. Exchange connections not required for status/migration." ([System.Drawing.Color]::FromArgb(100, 220, 130))
                 if ($script:MMCurrentProfileName) {
                     try { Save-MMProfile $script:MMCurrentProfileName (Get-CurrentProfileData)
@@ -7432,8 +7520,19 @@ list — copy it exactly (case-sensitive) into this tool.",
                 if ($script:MMFlyPolicyName)  { $txtFlyPolicy.Text   = $script:MMFlyPolicyName  }
                 Test-ConnectionInputs
             }
-            if ($script:MMCurrentStep -eq 3 -and $script:MMProjectId) {
-                $txtProjectName.Text = $script:MMProjectId
+            if ($script:MMCurrentStep -eq 3) {
+                if ($script:MMProjectId) {
+                    $txtProjectName.Text = $script:MMProjectId
+                } elseif (-not $txtProjectName.Text.Trim()) {
+                    # Auto-suggest a project name from connection names
+                    $suggest = (($script:MMSourceConnName -replace '\s*(Exchange|Connection|Online|Tenant)\s*', '' -replace '\s+', '').Trim() + '_to_' +
+                                ($script:MMTargetConnName -replace '\s*(Exchange|Connection|Online|Tenant)\s*', '' -replace '\s+', '').Trim()) -replace '[^A-Za-z0-9_\-]', '_'
+                    if ($suggest -and $suggest -ne '_to_') { $txtProjectName.Text = $suggest }
+                }
+            }
+            if ($script:MMCurrentStep -eq 4) {
+                if ($chkAutoRefresh.Checked) { $refreshTimer.Start() }
+                if ($script:MMProjectId) { & $doRefreshStatus $false }
             }
             if ($script:MMCurrentStep -eq 4 -and $script:MMProjectId) { $btnNext.Visible = $false }
             # Auto-save on every step gate

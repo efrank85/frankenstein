@@ -6093,7 +6093,7 @@ function Invoke-FrankensteinMailboxMigrator {
             FlyBaseUrl      = $script:MMFlyBaseUrl
             FlyClientId     = $script:MMFlyClientId
             FlyClientSecret = $script:MMFlyClientSecret
-            MappingFilePath = try { $txtMappingPath.Text.Trim() } catch { '' }
+            MappingFilePath = $(try { $txtMappingPath.Text.Trim() } catch { '' })
             SourceConnName  = $script:MMSourceConnName
             TargetConnName  = $script:MMTargetConnName
             FlyPolicyName   = $script:MMFlyPolicyName
@@ -6320,63 +6320,75 @@ function Invoke-FrankensteinMailboxMigrator {
     $form.Controls.Add($panStep2)
 
     $lblStep2Header = New-Object System.Windows.Forms.Label
-    $lblStep2Header.Text = 'Enter the connection and policy names exactly as they appear in AvePoint Fly.'
+    $lblStep2Header.Text = 'Enter the Exchange connection names exactly as they appear in Fly → Settings → Connections.'
     $lblStep2Header.Location = New-Object System.Drawing.Point(8, 10); $lblStep2Header.Size = New-Object System.Drawing.Size(820, 22)
     $lblStep2Header.ForeColor = [System.Drawing.Color]::Silver
     $lblStep2Header.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Regular)
     $panStep2.Controls.Add($lblStep2Header)
 
-    # Warning box — connections must exist first
+    # Warning box — 3-step prerequisite
     $lblStep2Warning = New-Object System.Windows.Forms.Label
-    $lblStep2Warning.Text = 'IMPORTANT: Connections must already exist in the AvePoint Confidence Platform before proceeding. Use the button below to open Tenant Management and verify your connections, then enter their names here.'
-    $lblStep2Warning.Location = New-Object System.Drawing.Point(8, 34); $lblStep2Warning.Size = New-Object System.Drawing.Size(820, 36)
+    $lblStep2Warning.Text = "PREREQUISITE — Three setup steps required in AvePoint before proceeding:`r`n" +
+        "  1. AvePoint Confidence Platform → Tenant Management: connect each tenant`r`n" +
+        "  2. AvePoint Confidence Platform → App Management: create an app profile per tenant`r`n" +
+        "  3. AvePoint Fly → Settings → Connections: create an Exchange Online connection using that app profile"
+    $lblStep2Warning.Location = New-Object System.Drawing.Point(8, 34); $lblStep2Warning.Size = New-Object System.Drawing.Size(820, 72)
     $lblStep2Warning.ForeColor = [System.Drawing.Color]::FromArgb(255,200,80)
     $lblStep2Warning.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
     $panStep2.Controls.Add($lblStep2Warning)
 
-    # Open Tenant Management button
+    # Two portal buttons side by side
     $btnOpenTenantMgmt = New-Object System.Windows.Forms.Button
-    $btnOpenTenantMgmt.Text = '↗  Open AvePoint Tenant Management'
-    $btnOpenTenantMgmt.Location = New-Object System.Drawing.Point(8, 76)
-    $btnOpenTenantMgmt.Size = New-Object System.Drawing.Size(260, 26)
+    $btnOpenTenantMgmt.Text = '↗  Confidence Platform (steps 1 & 2)'
+    $btnOpenTenantMgmt.Location = New-Object System.Drawing.Point(8, 112)
+    $btnOpenTenantMgmt.Size = New-Object System.Drawing.Size(262, 26)
     $btnOpenTenantMgmt.FlatStyle = 'Flat'
-    $btnOpenTenantMgmt.BackColor = [System.Drawing.Color]::FromArgb(0,100,180)
+    $btnOpenTenantMgmt.BackColor = [System.Drawing.Color]::FromArgb(60, 80, 120)
     $btnOpenTenantMgmt.ForeColor = [System.Drawing.Color]::White
     $panStep2.Controls.Add($btnOpenTenantMgmt)
 
+    $btnOpenFlyConn = New-Object System.Windows.Forms.Button
+    $btnOpenFlyConn.Text = '↗  Fly → Settings → Connections (step 3)'
+    $btnOpenFlyConn.Location = New-Object System.Drawing.Point(278, 112)
+    $btnOpenFlyConn.Size = New-Object System.Drawing.Size(280, 26)
+    $btnOpenFlyConn.FlatStyle = 'Flat'
+    $btnOpenFlyConn.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+    $btnOpenFlyConn.ForeColor = [System.Drawing.Color]::White
+    $panStep2.Controls.Add($btnOpenFlyConn)
+
     # Source connection name
     $lblSrcConnLbl = New-Object System.Windows.Forms.Label
-    $lblSrcConnLbl.Text = 'Source connection name:'; $lblSrcConnLbl.Location = New-Object System.Drawing.Point(8, 120)
+    $lblSrcConnLbl.Text = 'Source connection name:'; $lblSrcConnLbl.Location = New-Object System.Drawing.Point(8, 152)
     $lblSrcConnLbl.Size = New-Object System.Drawing.Size(180, 22); $lblSrcConnLbl.ForeColor = [System.Drawing.Color]::Silver
     $panStep2.Controls.Add($lblSrcConnLbl)
     $txtSrcConnName = New-Object System.Windows.Forms.TextBox
-    $txtSrcConnName.Location = New-Object System.Drawing.Point(196, 118); $txtSrcConnName.Size = New-Object System.Drawing.Size(420, 22)
-    try { $txtSrcConnName.PlaceholderText = 'Name exactly as shown in Tenant Management' } catch {}
+    $txtSrcConnName.Location = New-Object System.Drawing.Point(196, 150); $txtSrcConnName.Size = New-Object System.Drawing.Size(420, 22)
+    try { $txtSrcConnName.PlaceholderText = 'e.g. Air Enterprises Exchange Connection' } catch {}
     $panStep2.Controls.Add($txtSrcConnName)
 
     # Target connection name
     $lblTgtConnLbl = New-Object System.Windows.Forms.Label
-    $lblTgtConnLbl.Text = 'Target connection name:'; $lblTgtConnLbl.Location = New-Object System.Drawing.Point(8, 154)
+    $lblTgtConnLbl.Text = 'Target connection name:'; $lblTgtConnLbl.Location = New-Object System.Drawing.Point(8, 182)
     $lblTgtConnLbl.Size = New-Object System.Drawing.Size(180, 22); $lblTgtConnLbl.ForeColor = [System.Drawing.Color]::Silver
     $panStep2.Controls.Add($lblTgtConnLbl)
     $txtTgtConnName = New-Object System.Windows.Forms.TextBox
-    $txtTgtConnName.Location = New-Object System.Drawing.Point(196, 152); $txtTgtConnName.Size = New-Object System.Drawing.Size(420, 22)
-    try { $txtTgtConnName.PlaceholderText = 'Name exactly as shown in Tenant Management' } catch {}
+    $txtTgtConnName.Location = New-Object System.Drawing.Point(196, 180); $txtTgtConnName.Size = New-Object System.Drawing.Size(420, 22)
+    try { $txtTgtConnName.PlaceholderText = 'e.g. Contoso Exchange Connection' } catch {}
     $panStep2.Controls.Add($txtTgtConnName)
 
     # Migration policy name
     $lblPolicyLbl = New-Object System.Windows.Forms.Label
-    $lblPolicyLbl.Text = 'Migration policy name:'; $lblPolicyLbl.Location = New-Object System.Drawing.Point(8, 188)
+    $lblPolicyLbl.Text = 'Migration policy name:'; $lblPolicyLbl.Location = New-Object System.Drawing.Point(8, 212)
     $lblPolicyLbl.Size = New-Object System.Drawing.Size(180, 22); $lblPolicyLbl.ForeColor = [System.Drawing.Color]::Silver
     $panStep2.Controls.Add($lblPolicyLbl)
     $txtFlyPolicy = New-Object System.Windows.Forms.TextBox
-    $txtFlyPolicy.Location = New-Object System.Drawing.Point(196, 186); $txtFlyPolicy.Size = New-Object System.Drawing.Size(420, 22)
+    $txtFlyPolicy.Location = New-Object System.Drawing.Point(196, 210); $txtFlyPolicy.Size = New-Object System.Drawing.Size(420, 22)
     try { $txtFlyPolicy.PlaceholderText = 'e.g. Default Exchange Migration Policy' } catch {}
     $panStep2.Controls.Add($txtFlyPolicy)
 
     $lblStep2Tip = New-Object System.Windows.Forms.Label
-    $lblStep2Tip.Text = 'Names are case-sensitive. To add a missing tenant, click the button above and use "+ Connect tenant" in the portal.'
-    $lblStep2Tip.Location = New-Object System.Drawing.Point(8, 218); $lblStep2Tip.Size = New-Object System.Drawing.Size(820, 20)
+    $lblStep2Tip.Text = 'Connection and policy names are case-sensitive and must match Fly exactly (Fly → Settings → Connections / Policies).'
+    $lblStep2Tip.Location = New-Object System.Drawing.Point(8, 242); $lblStep2Tip.Size = New-Object System.Drawing.Size(820, 20)
     $lblStep2Tip.ForeColor = [System.Drawing.Color]::DimGray
     $panStep2.Controls.Add($lblStep2Tip)
 
@@ -6410,9 +6422,37 @@ function Invoke-FrankensteinMailboxMigrator {
     $btnValidateMap.FlatStyle = 'Flat'
     $panStep3.Controls.Add($btnValidateMap)
 
+    # Manual single-entry row
+    $lblAddEntry = New-Object System.Windows.Forms.Label
+    $lblAddEntry.Text = 'Add single entry:'; $lblAddEntry.Location = New-Object System.Drawing.Point(8, 70)
+    $lblAddEntry.Size = New-Object System.Drawing.Size(110, 20); $lblAddEntry.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep3.Controls.Add($lblAddEntry)
+    $txtAddSrc = New-Object System.Windows.Forms.TextBox
+    $txtAddSrc.Location = New-Object System.Drawing.Point(120, 67); $txtAddSrc.Size = New-Object System.Drawing.Size(248, 22)
+    try { $txtAddSrc.PlaceholderText = 'source@tenant.com' } catch {}
+    $panStep3.Controls.Add($txtAddSrc)
+    $lblAddArrow = New-Object System.Windows.Forms.Label
+    $lblAddArrow.Text = '→'; $lblAddArrow.Location = New-Object System.Drawing.Point(372, 70)
+    $lblAddArrow.Size = New-Object System.Drawing.Size(18, 20); $lblAddArrow.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep3.Controls.Add($lblAddArrow)
+    $txtAddTgt = New-Object System.Windows.Forms.TextBox
+    $txtAddTgt.Location = New-Object System.Drawing.Point(394, 67); $txtAddTgt.Size = New-Object System.Drawing.Size(248, 22)
+    try { $txtAddTgt.PlaceholderText = 'target@tenant.com' } catch {}
+    $panStep3.Controls.Add($txtAddTgt)
+    $btnAddEntry = New-Object System.Windows.Forms.Button
+    $btnAddEntry.Text = '+ Add'; $btnAddEntry.Location = New-Object System.Drawing.Point(648, 66)
+    $btnAddEntry.Size = New-Object System.Drawing.Size(70, 24); $btnAddEntry.FlatStyle = 'Flat'
+    $btnAddEntry.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnAddEntry.ForeColor = [System.Drawing.Color]::White
+    $panStep3.Controls.Add($btnAddEntry)
+    $btnRemoveEntry = New-Object System.Windows.Forms.Button
+    $btnRemoveEntry.Text = 'Remove'; $btnRemoveEntry.Location = New-Object System.Drawing.Point(724, 66)
+    $btnRemoveEntry.Size = New-Object System.Drawing.Size(70, 24); $btnRemoveEntry.FlatStyle = 'Flat'
+    $btnRemoveEntry.BackColor = [System.Drawing.Color]::FromArgb(100,30,30); $btnRemoveEntry.ForeColor = [System.Drawing.Color]::White
+    $panStep3.Controls.Add($btnRemoveEntry)
+
     # Mapping validation grid
     $lvMapping = New-Object System.Windows.Forms.ListView
-    $lvMapping.Location = New-Object System.Drawing.Point(8, 68); $lvMapping.Size = New-Object System.Drawing.Size(820, 230)
+    $lvMapping.Location = New-Object System.Drawing.Point(8, 98); $lvMapping.Size = New-Object System.Drawing.Size(820, 200)
     $lvMapping.View = 'Details'; $lvMapping.FullRowSelect = $true; $lvMapping.GridLines = $true
     $lvMapping.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvMapping.ForeColor = [System.Drawing.Color]::Silver
     foreach ($col in @('Source','Target','Type','Status')) {
@@ -6763,9 +6803,14 @@ stored encrypted to your Windows login account.",
         Write-MMLog "Jumped to Step 4 — using existing project '$($script:MMProjectId)'. Exchange connections not required for status/migration." ([System.Drawing.Color]::FromArgb(100, 220, 130))
     })
 
-    # ---- Step 2: Open Tenant Management ----
+    # ---- Step 2: Open Confidence Platform (tenant + app management) ----
     $btnOpenTenantMgmt.Add_Click({
         Start-Process 'https://www.avepointonlineservices.com/#/management/tenant'
+    })
+
+    # ---- Step 2: Open Fly Connections ----
+    $btnOpenFlyConn.Add_Click({
+        Start-Process 'https://fly.avepointonlineservices.com/#/settings/connection'
     })
 
     # ---- Step 2: Validate connection/policy name inputs ----
@@ -6840,6 +6885,74 @@ stored encrypted to your Windows login account.",
         $lblMapSummary.ForeColor = if ($warn -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
         $btnBuildProject.Enabled = ($valid -gt 0)
         Write-MMLog "Validation complete: $valid valid, $warn warnings, $skip skipped." ([System.Drawing.Color]::Silver)
+    })
+
+    # ---- Step 3: Add single entry ----
+    $btnAddEntry.Add_Click({
+        $src = $txtAddSrc.Text.Trim()
+        $tgt = $txtAddTgt.Text.Trim()
+        if (-not $src -or -not $tgt) {
+            Write-MMLog "Enter both source and target addresses before adding." ([System.Drawing.Color]::DarkGoldenrod); return
+        }
+        if ($script:MMMappingRows | Where-Object { $_.Source -eq $src }) {
+            Write-MMLog "Source '$src' is already in the mapping list." ([System.Drawing.Color]::DarkGoldenrod); return
+        }
+        if ($script:MMSourceConnected) {
+            Switch-MMToSource
+            $mbxType = Get-MailboxType $src
+        } else {
+            $mbxType = 'UserMailbox'
+        }
+        $statusText = switch -Wildcard ($mbxType) {
+            'UserMailbox'      { 'Valid — Mailbox' }
+            'SharedMailbox'    { 'Valid — Shared Mailbox' }
+            'RoomMailbox'      { 'Valid — Room Mailbox' }
+            'EquipmentMailbox' { 'Valid — Equipment Mailbox' }
+            'NotFound'         { 'WARN — Not found in source' }
+            '*Skip'            { "SKIP — $mbxType" }
+            default            { "WARN — $mbxType" }
+        }
+        if (-not $script:MMSourceConnected) { $statusText = 'Valid — Mailbox (assumed, no source connection)' }
+        $lvi = New-Object System.Windows.Forms.ListViewItem($src)
+        $lvi.SubItems.Add($tgt) | Out-Null
+        $lvi.SubItems.Add($mbxType) | Out-Null
+        $lvi.SubItems.Add($statusText) | Out-Null
+        $lvi.ForeColor = switch -Wildcard ($statusText) {
+            'Valid*' { [System.Drawing.Color]::LimeGreen }
+            'SKIP*'  { [System.Drawing.Color]::DimGray }
+            default  { [System.Drawing.Color]::DarkGoldenrod }
+        }
+        $lvMapping.Items.Add($lvi) | Out-Null
+        $script:MMMappingRows.Add([PSCustomObject]@{ Source=$src; Target=$tgt; Type=$mbxType; Status=$statusText })
+        $txtAddSrc.Clear(); $txtAddTgt.Clear()
+        $validCount = @($script:MMMappingRows | Where-Object { $_.Status -like 'Valid*' }).Count
+        $warnCount  = @($script:MMMappingRows | Where-Object { $_.Status -like 'WARN*' }).Count
+        $skipCount  = @($script:MMMappingRows | Where-Object { $_.Status -like 'SKIP*' }).Count
+        $lblMapSummary.Text = "$validCount valid  |  $warnCount warnings  |  $skipCount skipped  (of $($script:MMMappingRows.Count) pairs)"
+        $lblMapSummary.ForeColor = if ($warnCount -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
+        $btnBuildProject.Enabled = ($validCount -gt 0)
+        Write-MMLog "Added: $src → $tgt  [$statusText]" ([System.Drawing.Color]::LimeGreen)
+    })
+
+    # ---- Step 3: Remove selected entries ----
+    $btnRemoveEntry.Add_Click({
+        $selected = @($lvMapping.SelectedItems)
+        if ($selected.Count -eq 0) {
+            Write-MMLog "Select one or more rows in the list to remove." ([System.Drawing.Color]::DarkGoldenrod); return
+        }
+        foreach ($item in $selected) {
+            $srcAddr = $item.Text
+            $match = $script:MMMappingRows | Where-Object { $_.Source -eq $srcAddr } | Select-Object -First 1
+            if ($match) { $script:MMMappingRows.Remove($match) | Out-Null }
+            $lvMapping.Items.Remove($item)
+        }
+        $validCount = @($script:MMMappingRows | Where-Object { $_.Status -like 'Valid*' }).Count
+        $warnCount  = @($script:MMMappingRows | Where-Object { $_.Status -like 'WARN*' }).Count
+        $skipCount  = @($script:MMMappingRows | Where-Object { $_.Status -like 'SKIP*' }).Count
+        $lblMapSummary.Text = "$validCount valid  |  $warnCount warnings  |  $skipCount skipped  (of $($script:MMMappingRows.Count) pairs)"
+        $lblMapSummary.ForeColor = if ($warnCount -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
+        $btnBuildProject.Enabled = ($validCount -gt 0)
+        Write-MMLog "Removed $($selected.Count) mapping row(s)." ([System.Drawing.Color]::Silver)
     })
 
     $btnBuildProject.Add_Click({

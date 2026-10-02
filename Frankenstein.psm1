@@ -6620,9 +6620,9 @@ function Invoke-FrankensteinMailboxMigrator {
     $lvStatus.Location = New-Object System.Drawing.Point(8, 102); $lvStatus.Size = New-Object System.Drawing.Size(820, 278)
     $lvStatus.View = 'Details'; $lvStatus.FullRowSelect = $true; $lvStatus.GridLines = $true
     $lvStatus.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvStatus.ForeColor = [System.Drawing.Color]::Silver
-    foreach ($col in @('Source','Destination','Stage','Updated','Errors','Last Migration Status')) {
+    foreach ($col in @('Source','Destination','Stage','Progress','Updated','Errors','Last Migration Status')) {
         $c = $lvStatus.Columns.Add($col)
-        $c.Width = switch ($col) { 'Source' { 195 } 'Destination' { 195 } 'Stage' { 160 } 'Updated' { 120 } 'Errors' { 55 } 'Last Migration Status' { 90 } }
+        $c.Width = switch ($col) { 'Source' { 185 } 'Destination' { 185 } 'Stage' { 110 } 'Progress' { 65 } 'Updated' { 110 } 'Errors' { 50 } 'Last Migration Status' { 105 } }
     }
     $panStep4.Controls.Add($lvStatus)
 
@@ -7317,17 +7317,20 @@ list — copy it exactly (case-sensitive) into this tool.",
             }
             $lvStatus.Items.Clear()
             foreach ($row in $rows) {
-                $src    = [string]$row.Source
-                $tgt    = [string]$(if ($row.Destination) { $row.Destination } else { $row.Target })
-                $stage  = [string]$(if ($row.Stage) { $row.Stage } elseif ($row.Status) { $row.Status } else { $row.MigrationStatus })
-                $upd    = [string]$(if ($row.Updated) { $row.Updated } elseif ($row.'Last Migration Time') { $row.'Last Migration Time' } else { $row.LastUpdated })
-                $errors = [string]$(if ($null -ne $row.Errors) { $row.Errors } else { '' })
-                $lastSt = [string]$(if ($row.'Last migration status') { $row.'Last migration status' } elseif ($row.'Last Migration Status') { $row.'Last Migration Status' } else { '' })
-                $lvi    = New-Object System.Windows.Forms.ListViewItem($src)
-                $lvi.SubItems.Add($tgt) | Out-Null; $lvi.SubItems.Add($stage) | Out-Null
-                $lvi.SubItems.Add($upd) | Out-Null; $lvi.SubItems.Add($errors) | Out-Null
-                $lvi.SubItems.Add($lastSt) | Out-Null
-                $lvi.ForeColor = switch -Wildcard ($stage.ToLower()) {
+                $src      = [string]$row.Source
+                $tgt      = [string]$(if ($row.Destination) { $row.Destination } else { $row.Target })
+                $stageFull= [string]$(if ($row.Stage) { $row.Stage } elseif ($row.Status) { $row.Status } else { $row.MigrationStatus })
+                # Extract percentage from Stage e.g. "Migration (12%, 3 processed...)" → "12%"
+                $pct      = if ($stageFull -match '(\d+(?:\.\d+)?)\s*%') { "$($Matches[1])%" } else { '' }
+                $stageClean = ($stageFull -replace '\s*\(.*\)', '').Trim()
+                $upd      = [string]$(if ($row.Updated) { $row.Updated } elseif ($row.'Last Migration Time') { $row.'Last Migration Time' } else { $row.LastUpdated })
+                $errors   = [string]$(if ($null -ne $row.Errors) { $row.Errors } else { '' })
+                $lastSt   = [string]$(if ($row.'Last migration status') { $row.'Last migration status' } elseif ($row.'Last Migration Status') { $row.'Last Migration Status' } else { '' })
+                $lvi      = New-Object System.Windows.Forms.ListViewItem($src)
+                $lvi.SubItems.Add($tgt) | Out-Null; $lvi.SubItems.Add($stageClean) | Out-Null
+                $lvi.SubItems.Add($pct) | Out-Null; $lvi.SubItems.Add($upd) | Out-Null
+                $lvi.SubItems.Add($errors) | Out-Null; $lvi.SubItems.Add($lastSt) | Out-Null
+                $lvi.ForeColor = switch -Wildcard ($stageFull.ToLower()) {
                     '*complet*' { [System.Drawing.Color]::LimeGreen }
                     '*fail*'    { [System.Drawing.Color]::Tomato }
                     '*migrat*'  { [System.Drawing.Color]::DarkGoldenrod }

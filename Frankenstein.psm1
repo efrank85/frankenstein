@@ -5921,6 +5921,7 @@ function Invoke-FrankensteinMailboxMigrator {
     $script:MMFlyPolicyName      = ''
     $script:MMProjectId          = ''
     $script:MMCurrentStep        = 1
+    $script:MMMaxStep            = 1
     $script:MMMappingRows        = [System.Collections.Generic.List[PSCustomObject]]::new()
     $script:MMCurrentProfileName = ''
     #endregion
@@ -6036,6 +6037,12 @@ function Invoke-FrankensteinMailboxMigrator {
         $panStep4.Visible = ($script:MMCurrentStep -eq 4)
         $btnBack.Enabled  = ($script:MMCurrentStep -gt 1)
         $btnNext.Visible  = ($script:MMCurrentStep -lt 4)
+        $stepLabels = @($lblStep1, $lblStep2, $lblStep3, $lblStep4)
+        for ($j = 0; $j -lt 4; $j++) {
+            $stepLabels[$j].Cursor = if (($j + 1) -le $script:MMMaxStep -and ($j + 1) -ne $script:MMCurrentStep) {
+                [System.Windows.Forms.Cursors]::Hand
+            } else { [System.Windows.Forms.Cursors]::Default }
+        }
     }
 
     # Determines whether Next is enabled on Step 1 and shows/hides the quick-status shortcut.
@@ -6185,6 +6192,24 @@ function Invoke-FrankensteinMailboxMigrator {
     $lblStep1 = $stepLabels[0]; $lblStep2 = $stepLabels[1]
     $lblStep3 = $stepLabels[2]; $lblStep4 = $stepLabels[3]
 
+    # Click-to-navigate: jump to any step already reached
+    $navTo = {
+        param($target)
+        if ($target -gt $script:MMMaxStep -or $target -eq $script:MMCurrentStep) { return }
+        $script:MMCurrentStep = $target
+        Update-StepIndicator
+        switch ($target) {
+            1 { Update-Step1NextButton }
+            2 { Test-ConnectionInputs }
+            3 { $btnNext.Enabled = ($null -ne $script:MMProjectId -and $script:MMProjectId -ne '') }
+            4 { $btnNext.Visible = $false }
+        }
+    }
+    $lblStep1.Add_Click({ & $navTo 1 })
+    $lblStep2.Add_Click({ & $navTo 2 })
+    $lblStep3.Add_Click({ & $navTo 3 })
+    $lblStep4.Add_Click({ & $navTo 4 })
+
     # ---- Step panels (all same location; only one visible at a time) ----
     $stepPanelLoc  = New-Object System.Drawing.Point(10, 98)
     $stepPanelSize = New-Object System.Drawing.Size(838, 390)
@@ -6333,9 +6358,9 @@ function Invoke-FrankensteinMailboxMigrator {
         param($text, $y)
         $c = New-Object System.Windows.Forms.CheckBox
         $c.Text = $text; $c.Location = New-Object System.Drawing.Point(8, $y)
-        $c.Size = New-Object System.Drawing.Size(340, 20)
+        $c.Size = New-Object System.Drawing.Size(340, 24)
         $c.ForeColor = [System.Drawing.Color]::FromArgb(220,220,220); $c.BackColor = $chkBg
-        $c.FlatStyle = 'Flat'; $panStep2.Controls.Add($c); $c
+        $c.FlatStyle = 'Standard'; $panStep2.Controls.Add($c); $c
     }
     $mkBtn = {
         param($text, $x, $y, $w, $blue)
@@ -7127,34 +7152,57 @@ list — copy it exactly (case-sensitive) into this tool.",
         }
         try {
             $form.UseWaitCursor = $true
-            Write-MMLog "Creating project '$projName' (source: $($script:MMSourceConnName), target: $($script:MMTargetConnName), policy: $($script:MMFlyPolicyName))..." ([System.Drawing.Color]::Silver)
-            New-FlyMigrationProject -Name $projName -SourceConnection $script:MMSourceConnName `
-                -DestinationConnection $script:MMTargetConnName -Policy $script:MMFlyPolicyName -ErrorAction Stop
-            $script:MMProjectId = $projName
-            Write-MMLog "Project '$projName' created." ([System.Drawing.Color]::LimeGreen)
 
-            $validPairs = @($script:MMMappingRows | Where-Object { $_.Status -like 'Valid*' })
-            if ($validPairs.Count -gt 0) {
-                Write-MMLog "Building mapping CSV for $($validPairs.Count) pair(s)..." ([System.Drawing.Color]::Silver)
-                $tempCsv = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "fly_mappings_$([System.Guid]::NewGuid().ToString('N')).csv")
-                $csvRows = foreach ($pair in $validPairs) {
-                    $flyType = switch ($pair.Type) {
-                        'UserMailbox'      { 'User mailbox' }
-                        'SharedMailbox'    { 'Shared mailbox' }
-                        'RoomMailbox'      { 'Resource mailbox' }
-                        'EquipmentMailbox' { 'Resource mailbox' }
-                        default            { 'User mailbox' }
+            # Create the project, or reuse it if it already exists in Fly
+            $projectReady = $false
+            if ($script:MMProjectId -eq $projName) {
+                Write-MMLog "Project '$projName' already loaded — re-importing mappings..." ([System.Drawing.Color]::DarkGoldenrod)
+                $projectReady = $true
+            } else {
+                Write-MMLog "Creating project '$projName' (source: $($script:MMSourceConnName), target: $($script:MMTargetConnName), policy: $($script:MMFlyPolicyName))..." ([System.Drawing.Color]::Silver)
+                try {
+                    New-FlyMigrationProject -Name $projName -SourceConnection $script:MMSourceConnName `
+                        -DestinationConnection $script:MMTargetConnName -Policy $script:MMFlyPolicyName -ErrorAction Stop
+                    $script:MMProjectId = $projName
+                    Write-MMLog "Project '$projName' created." ([System.Drawing.Color]::LimeGreen)
+                    $projectReady = $true
+                } catch {
+                    $createErr = $_.Exception.Message
+                    if ($createErr -match 'exist|duplicate|already|conflict') {
+                        Write-MMLog "Project '$projName' already exists in Fly — re-importing mappings." ([System.Drawing.Color]::DarkGoldenrod)
+                        $script:MMProjectId = $projName
+                        $projectReady = $true
+                    } else {
+                        throw
                     }
-                    [PSCustomObject]@{ Source = $pair.Source; 'Source type' = $flyType; Destination = $pair.Target; 'Destination type' = $flyType }
                 }
-                $csvRows | Export-Csv $tempCsv -NoTypeInformation -Encoding UTF8
-                Write-MMLog "Importing $($validPairs.Count) mappings into Fly project..." ([System.Drawing.Color]::Silver)
-                Import-FlyExchangeMappings -Project $projName -Path $tempCsv -ErrorAction Stop
-                Remove-Item $tempCsv -Force -ErrorAction SilentlyContinue
-                Write-MMLog "Project built: $($validPairs.Count) mapping(s) imported." ([System.Drawing.Color]::LimeGreen)
             }
-            $lblProjName.Text = "Project: $projName"
-            $btnNext.Enabled  = $true
+
+            if ($projectReady) {
+                $validPairs = @($script:MMMappingRows | Where-Object { $_.Status -like 'Valid*' })
+                if ($validPairs.Count -gt 0) {
+                    Write-MMLog "Building mapping CSV for $($validPairs.Count) pair(s)..." ([System.Drawing.Color]::Silver)
+                    $tempCsv = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "fly_mappings_$([System.Guid]::NewGuid().ToString('N')).csv")
+                    $csvRows = foreach ($pair in $validPairs) {
+                        $flyType = switch ($pair.Type) {
+                            'UserMailbox'      { 'User mailbox' }
+                            'SharedMailbox'    { 'Shared mailbox' }
+                            'RoomMailbox'      { 'Resource mailbox' }
+                            'EquipmentMailbox' { 'Resource mailbox' }
+                            default            { 'User mailbox' }
+                        }
+                        [PSCustomObject]@{ Source = $pair.Source; 'Source type' = $flyType; Destination = $pair.Target; 'Destination type' = $flyType }
+                    }
+                    $csvRows | Export-Csv $tempCsv -NoTypeInformation -Encoding UTF8
+                    Write-MMLog "Mapping CSV written: $tempCsv" ([System.Drawing.Color]::DimGray)
+                    Write-MMLog "Importing $($validPairs.Count) mappings into Fly project..." ([System.Drawing.Color]::Silver)
+                    Import-FlyExchangeMappings -Project $projName -Path $tempCsv -ErrorAction Stop
+                    Remove-Item $tempCsv -Force -ErrorAction SilentlyContinue
+                    Write-MMLog "Project built: $($validPairs.Count) mapping(s) imported." ([System.Drawing.Color]::LimeGreen)
+                }
+                $lblProjName.Text = "Project: $projName"
+                $btnNext.Enabled  = $true
+            }
         } catch {
             $errMsg = $_.Exception.Message
             Write-MMLog "Build project failed: $errMsg" ([System.Drawing.Color]::Tomato)
@@ -7260,7 +7308,15 @@ list — copy it exactly (case-sensitive) into this tool.",
 
     # ---- Navigation ----
     $btnBack.Add_Click({
-        if ($script:MMCurrentStep -gt 1) { $script:MMCurrentStep--; Update-StepIndicator }
+        if ($script:MMCurrentStep -gt 1) {
+            $script:MMCurrentStep--
+            Update-StepIndicator
+            switch ($script:MMCurrentStep) {
+                1 { Update-Step1NextButton }
+                2 { Test-ConnectionInputs }
+                3 { $btnNext.Enabled = ($null -ne $script:MMProjectId -and $script:MMProjectId -ne '') }
+            }
+        }
     })
 
     $btnNext.Add_Click({
@@ -7279,6 +7335,7 @@ list — copy it exactly (case-sensitive) into this tool.",
             if ($script:MMCurrentStep -eq 1 -and $script:MMFlyConnected -and $script:MMProjectId `
                     -and -not ($script:MMSourceConnected -and $script:MMTargetConnected)) {
                 $script:MMCurrentStep = 4
+                $script:MMMaxStep = 4
                 Update-StepIndicator
                 $btnNext.Visible = $false
                 Write-MMLog "Jumped to Step 4 — using existing project '$($script:MMProjectId)'. Exchange connections not required for status/migration." ([System.Drawing.Color]::FromArgb(100, 220, 130))
@@ -7289,6 +7346,7 @@ list — copy it exactly (case-sensitive) into this tool.",
                 return
             }
             $script:MMCurrentStep++
+            if ($script:MMCurrentStep -gt $script:MMMaxStep) { $script:MMMaxStep = $script:MMCurrentStep }
             Update-StepIndicator
             $btnNext.Enabled = $false
             if ($script:MMCurrentStep -eq 2) {

@@ -8491,15 +8491,23 @@ function Invoke-FrankensteinDomainMigrator {
                     Write-CMLog "$($m.UserPrincipalName): already primary." ([System.Drawing.Color]::DimGray); $done++; continue
                 }
                 try {
-                    Set-Mailbox -Identity $m.UserPrincipalName -EmailAddressPolicyEnabled $false `
-                                -PrimarySmtpAddress $onmsAddr -ErrorAction Stop
+                    # Build new address list: promote onms to SMTP: (primary), demote all others to smtp:
+                    $newAddrs = $m.EmailAddresses | ForEach-Object {
+                        if (($_ -replace '^(?i)smtp:', '').ToLower() -eq $onmsAddr.ToLower()) {
+                            "SMTP:$onmsAddr"
+                        } else {
+                            ($_ -replace '^SMTP:', 'smtp:')
+                        }
+                    }
+                    Set-Mailbox -Identity $m.UserPrincipalName -EmailAddresses $newAddrs -ErrorAction Stop
                     Write-CMLog "Promoted $onmsAddr for $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
                     $done++
                 } catch {
                     Write-CMLog "Failed $($m.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
                 }
             }
-            Write-CMLog "Primary SMTP promotion complete. $done done, $errs errors." (if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+            $finalColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
+            Write-CMLog "Primary SMTP promotion complete. $done done, $errs errors." $finalColor
         } catch {
             Write-CMLog "Error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally { $form.UseWaitCursor = $false }
@@ -8535,7 +8543,8 @@ function Invoke-FrankensteinDomainMigrator {
                     Write-CMLog "Failed $($m.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
                 }
             }
-            Write-CMLog "UPN update complete. $done done, $errs errors." (if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+            $finalColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
+            Write-CMLog "UPN update complete. $done done, $errs errors." $finalColor
         } catch {
             Write-CMLog "Error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally { $form.UseWaitCursor = $false }
@@ -8564,7 +8573,8 @@ function Invoke-FrankensteinDomainMigrator {
                     Write-CMLog "Failed $($row.Identity): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
                 }
             }
-            Write-CMLog "Rollback complete. $done restored, $errs errors." (if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+            $finalColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
+            Write-CMLog "Rollback complete. $done restored, $errs errors." $finalColor
         } catch {
             Write-CMLog "Rollback error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally { $form.UseWaitCursor = $false }
@@ -8703,7 +8713,8 @@ function Invoke-FrankensteinDomainMigrator {
                 }
             }
 
-            Write-CMLog "Domain removal from objects complete. $done removed, $errs errors." (if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+            $finalColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
+            Write-CMLog "Domain removal from objects complete. $done removed, $errs errors." $finalColor
             $btnConfirmClean.Enabled = $true
             # Update grid
             for ($i = 0; $i -lt $lvDomainObjects.Items.Count; $i++) {

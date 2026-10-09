@@ -8993,7 +8993,7 @@ function Invoke-FrankensteinDomainMigrator {
         $csvPath = $txtRollbackPath.Text.Trim()
         if (-not $csvPath -or -not (Test-Path $csvPath)) { Write-CMLog "Select a valid backup CSV first." ([System.Drawing.Color]::Tomato); return }
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "This will restore all email addresses from:`n$csvPath`n`nAll current addresses for each object will be replaced with the backup values.`n`nProceed?",
+            "This will restore smtp proxy addresses and UPNs from:`n$csvPath`n`nNon-smtp addresses (SIP, SPO, X500) are preserved from the current mailbox state.`n`nProceed?",
             'Rollback', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
         if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         try {
@@ -9007,16 +9007,30 @@ function Invoke-FrankensteinDomainMigrator {
                     switch ($objType) {
                         { $_ -in 'Mailbox','MailUser','DistGroup','M365Group' } {
                             $primary = $row.PrimarySmtpAddress.Trim().ToLower()
-                            $addrs = ($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' }) | ForEach-Object {
-                                $addr = $_.Trim()
+                            # Normalize smtp addresses from backup; collect non-smtp separately
+                            $smtpFromBackup = [System.Collections.Generic.List[string]]::new()
+                            $nonSmtpFromBackup = [System.Collections.Generic.List[string]]::new()
+                            foreach ($addr in ($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' })) {
+                                $addr = $addr.Trim()
                                 if ($addr -match '^(?i)smtp:') {
-                                    # SMTP-type: normalize primary to SMTP: and aliases to smtp:
                                     $clean = ($addr -replace '^(?i)smtp:', '').ToLower()
-                                    if ($clean -eq $primary) { "SMTP:$($row.PrimarySmtpAddress.Trim())" } else { "smtp:$clean" }
+                                    $smtpFromBackup.Add($(if ($clean -eq $primary) { "SMTP:$($row.PrimarySmtpAddress.Trim())" } else { "smtp:$clean" }))
                                 } else {
-                                    $addr  # SIP:, SPO:, X500:, EUM: etc. — pass through as-is
+                                    $nonSmtpFromBackup.Add($addr)
                                 }
                             }
+                            # For Mailbox/MailUser: EXO REST mode does not surface SIP:/SPO:/X500: in EmailAddresses,
+                            # so the backup may be missing them. Read the live mailbox to preserve those entries;
+                            # fall back to whatever non-smtp entries the backup captured if the read fails.
+                            $nonSmtpAddrs = if ($objType -in 'Mailbox','MailUser') {
+                                try {
+                                    @(Get-EXOMailbox -Identity $row.Identity -Properties EmailAddresses -ErrorAction Stop |
+                                        Select-Object -ExpandProperty EmailAddresses |
+                                        ForEach-Object { "$_" } |
+                                        Where-Object { $_ -notmatch '^(?i)smtp:' })
+                                } catch { @($nonSmtpFromBackup) }
+                            } else { @($nonSmtpFromBackup) }
+                            $addrs = @($nonSmtpAddrs) + @($smtpFromBackup)
                             switch ($objType) {
                                 'Mailbox'   { Set-Mailbox           -Identity $row.Identity -EmailAddresses $addrs -ErrorAction Stop }
                                 'MailUser'  { Set-MailUser          -Identity $row.Identity -EmailAddresses $addrs -ErrorAction Stop }
@@ -9179,6 +9193,21 @@ function Invoke-FrankensteinDomainMigrator {
             $form.UseWaitCursor = $true
             $done = 0; $errs = 0
 
+            # Update a specific grid row by type+address; only touches the first Pending match
+            $markRow = {
+                param([string]$type, [string]$addr, [string]$status, [System.Drawing.Color]$color)
+                for ($ri = 0; $ri -lt $lvDomainObjects.Items.Count; $ri++) {
+                    $item = $lvDomainObjects.Items[$ri]
+                    if ($item.SubItems[1].Text -eq $type -and
+                        $item.SubItems[2].Text -ieq $addr -and
+                        $item.SubItems[3].Text -eq 'Pending') {
+                        $item.SubItems[3].Text = $status
+                        $item.ForeColor = $color
+                        break
+                    }
+                }
+            }
+
             if ($script:CMEXOConnected) {
                 # Mailboxes
                 $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName -ErrorAction Stop
@@ -9187,8 +9216,12 @@ function Invoke-FrankensteinDomainMigrator {
                     foreach ($a in $toRemove) {
                         try {
                             Set-Mailbox -Identity $m.UserPrincipalName -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                            & $markRow 'Mailbox' "$a" 'Removed' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "Removed $a from $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
-                        } catch { Write-CMLog "Failed $($m.UserPrincipalName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                        } catch {
+                            & $markRow 'Mailbox' "$a" 'Failed' ([System.Drawing.Color]::Tomato)
+                            Write-CMLog "Failed $($m.UserPrincipalName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                        }
                     }
                 }
                 # EXO mail users
@@ -9198,8 +9231,12 @@ function Invoke-FrankensteinDomainMigrator {
                     foreach ($a in $toRemove) {
                         try {
                             Set-MailUser -Identity $m.UserPrincipalName -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                            & $markRow 'MailUser' "$a" 'Removed' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "Removed $a from mail user $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
-                        } catch { Write-CMLog "Failed mail user $($m.UserPrincipalName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                        } catch {
+                            & $markRow 'MailUser' "$a" 'Failed' ([System.Drawing.Color]::Tomato)
+                            Write-CMLog "Failed mail user $($m.UserPrincipalName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                        }
                     }
                 }
                 # EXO distribution groups
@@ -9209,8 +9246,12 @@ function Invoke-FrankensteinDomainMigrator {
                     foreach ($a in $toRemove) {
                         try {
                             Set-DistributionGroup -Identity $g.Name -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                            & $markRow 'DistGroup' "$a" 'Removed' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "Removed $a from group $($g.Name)" ([System.Drawing.Color]::LimeGreen); $done++
-                        } catch { Write-CMLog "Failed group $($g.Name): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                        } catch {
+                            & $markRow 'DistGroup' "$a" 'Failed' ([System.Drawing.Color]::Tomato)
+                            Write-CMLog "Failed group $($g.Name): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                        }
                     }
                 }
                 # EXO M365 groups
@@ -9220,8 +9261,12 @@ function Invoke-FrankensteinDomainMigrator {
                     foreach ($a in $toRemove) {
                         try {
                             Set-UnifiedGroup -Identity $g.PrimarySmtpAddress -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                            & $markRow 'M365Group' "$a" 'Removed' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "Removed $a from M365 group $($g.DisplayName)" ([System.Drawing.Color]::LimeGreen); $done++
-                        } catch { Write-CMLog "Failed M365 group $($g.DisplayName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                        } catch {
+                            & $markRow 'M365Group' "$a" 'Failed' ([System.Drawing.Color]::Tomato)
+                            Write-CMLog "Failed M365 group $($g.DisplayName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                        }
                     }
                 }
             }
@@ -9229,17 +9274,19 @@ function Invoke-FrankensteinDomainMigrator {
             # Entra users — remove proxyAddresses AND update UPN if it uses the domain
             $mgUsers = Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,ProxyAddresses -ErrorAction Stop
             foreach ($u in $mgUsers) {
-                # Remove matching proxy addresses
                 $toRemove = $u.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
                 if ($toRemove) {
                     $newProxies = @($u.ProxyAddresses | Where-Object { $_ -notmatch "@$([regex]::Escape($domain))$" })
                     try {
                         Update-MgUser -UserId $u.Id -BodyParameter @{ proxyAddresses = $newProxies } -ErrorAction Stop
+                        foreach ($a in $toRemove) { & $markRow 'EntraUser' $a 'Removed' ([System.Drawing.Color]::LimeGreen) }
                         Write-CMLog "Removed domain addresses from $($u.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
                     } catch {
                         if ($_.Exception.Message -match 'read-only') {
+                            foreach ($a in $toRemove) { & $markRow 'EntraUser' $a 'Skipped (Exchange-managed)' ([System.Drawing.Color]::DimGray) }
                             Write-CMLog "Skipped proxyAddresses for $($u.UserPrincipalName) — managed by Exchange" ([System.Drawing.Color]::DimGray)
                         } else {
+                            foreach ($a in $toRemove) { & $markRow 'EntraUser' $a 'Failed' ([System.Drawing.Color]::Tomato) }
                             Write-CMLog "Failed Entra user $($u.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
                         }
                     }
@@ -9251,9 +9298,14 @@ function Invoke-FrankensteinDomainMigrator {
                         $newUpn = "$localPart@$($script:CMOnMSDomain)"
                         try {
                             Update-MgUser -UserId $u.Id -BodyParameter @{ userPrincipalName = $newUpn } -ErrorAction Stop
+                            & $markRow 'EntraUser' "UPN:$($u.UserPrincipalName)" 'Removed' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "UPN: $($u.UserPrincipalName) → $newUpn" ([System.Drawing.Color]::LimeGreen); $done++
-                        } catch { Write-CMLog "Failed UPN change for $($u.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                        } catch {
+                            & $markRow 'EntraUser' "UPN:$($u.UserPrincipalName)" 'Failed' ([System.Drawing.Color]::Tomato)
+                            Write-CMLog "Failed UPN change for $($u.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                        }
                     } else {
+                        & $markRow 'EntraUser' "UPN:$($u.UserPrincipalName)" 'Skipped — OnMS domain unknown' ([System.Drawing.Color]::DarkGoldenrod)
                         Write-CMLog "Cannot update UPN $($u.UserPrincipalName) — OnMS domain not detected; run Update UPNs (Tab 2) manually." ([System.Drawing.Color]::DarkGoldenrod)
                     }
                 }
@@ -9267,19 +9319,23 @@ function Invoke-FrankensteinDomainMigrator {
                     $newProxies = @($g.ProxyAddresses | Where-Object { $_ -notmatch "@$([regex]::Escape($domain))$" })
                     try {
                         Update-MgGroup -GroupId $g.Id -BodyParameter @{ proxyAddresses = $newProxies } -ErrorAction Stop
+                        foreach ($a in $toRemove) { & $markRow 'EntraGroup' $a 'Removed' ([System.Drawing.Color]::LimeGreen) }
                         Write-CMLog "Cleaned Entra group $($g.DisplayName)" ([System.Drawing.Color]::LimeGreen); $done++
-                    } catch { Write-CMLog "Failed Entra group $($g.DisplayName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                    } catch {
+                        if ($_.Exception.Message -match 'mail-enabled|distribution list|not authorized') {
+                            foreach ($a in $toRemove) { & $markRow 'EntraGroup' $a 'Skipped (Exchange-managed)' ([System.Drawing.Color]::DimGray) }
+                            Write-CMLog "Skipped Entra group $($g.DisplayName) — Exchange-managed (already cleaned via Exchange cmdlets)" ([System.Drawing.Color]::DimGray)
+                        } else {
+                            foreach ($a in $toRemove) { & $markRow 'EntraGroup' $a 'Failed' ([System.Drawing.Color]::Tomato) }
+                            Write-CMLog "Failed Entra group $($g.DisplayName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                        }
+                    }
                 }
             }
 
             $finalColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
             Write-CMLog "Domain removal from objects complete. $done removed, $errs errors." $finalColor
             $btnConfirmClean.Enabled = $true
-            # Update grid
-            for ($i = 0; $i -lt $lvDomainObjects.Items.Count; $i++) {
-                $lvDomainObjects.Items[$i].SubItems[3].Text = if ($errs -gt 0) { 'Done (some errors)' } else { 'Removed' }
-                $lvDomainObjects.Items[$i].ForeColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
-            }
         } catch {
             Write-CMLog "Error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally { $form.UseWaitCursor = $false }

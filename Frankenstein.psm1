@@ -7959,9 +7959,9 @@ function Invoke-FrankensteinDomainMigrator {
     $lvUnsync.Location = New-Object System.Drawing.Point(8, 100); $lvUnsync.Size = New-Object System.Drawing.Size(876, 352)
     $lvUnsync.View = 'Details'; $lvUnsync.FullRowSelect = $true; $lvUnsync.GridLines = $true
     $lvUnsync.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvUnsync.ForeColor = [System.Drawing.Color]::Silver
-    foreach ($col in @('Object / UPN','Display Name','Type','Was Synced','Cloud-Only Now')) {
+    foreach ($col in @('Display Name','UPN / Email','Type','Was Synced','Cloud-Only Now')) {
         $c = $lvUnsync.Columns.Add($col)
-        $c.Width = switch ($col) { 'Object / UPN' { 260 } 'Display Name' { 200 } 'Type' { 90 } default { 110 } }
+        $c.Width = switch ($col) { 'Display Name' { 240 } 'UPN / Email' { 200 } 'Type' { 90 } default { 110 } }
     }
     $panStep1.Controls.Add($lvUnsync)
 
@@ -8270,15 +8270,18 @@ function Invoke-FrankensteinDomainMigrator {
             Write-CMLog "Scanning all Entra objects for sync state (users, groups, contacts)..." ([System.Drawing.Color]::Silver)
             $script:CMSyncedUsers = @()
             $lvUnsync.Items.Clear()
-            $allUsers    = @(Get-MgUser    -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
-            $allGroups   = @(Get-MgGroup   -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
+            $allUsers    = @(Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
+            $allGroups   = @(try { Get-MgGroup -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop } catch {
+                Write-CMLog "Warning: could not query Entra groups: $($_.Exception.Message)" ([System.Drawing.Color]::DarkGoldenrod); @()
+            })
             $allContacts = @(try { Get-MgContact -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop } catch { @() })
+            Write-CMLog "Loaded $($allUsers.Count) users, $($allGroups.Count) groups, $($allContacts.Count) contacts." ([System.Drawing.Color]::Silver)
             foreach ($u in $allUsers) {
                 $wasSynced = $u.OnPremisesSyncEnabled -eq $true
                 $isCloud   = $u.OnPremisesSyncEnabled -ne $true
                 if ($wasSynced) { $script:CMSyncedUsers += $u }
-                $lvi = New-Object System.Windows.Forms.ListViewItem($u.UserPrincipalName)
-                $lvi.SubItems.Add($u.DisplayName) | Out-Null
+                $lvi = New-Object System.Windows.Forms.ListViewItem($u.DisplayName)
+                $lvi.SubItems.Add($u.UserPrincipalName) | Out-Null
                 $lvi.SubItems.Add('User') | Out-Null
                 $lvi.SubItems.Add($(if ($wasSynced) { 'Yes' } else { 'No' })) | Out-Null
                 $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
@@ -8354,8 +8357,8 @@ function Invoke-FrankensteinDomainMigrator {
             $lblOrgSyncStatus.ForeColor = if ($orgDone) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::DarkGoldenrod }
 
             # Smart check: sample 5 objects first
-            $allUsers    = @(Get-MgUser    -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
-            $allGroups   = @(Get-MgGroup   -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
+            $allUsers    = @(Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
+            $allGroups   = @(try { Get-MgGroup -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop } catch { @() })
             $allContacts = @(try { Get-MgContact -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop } catch { @() })
             $allObjects  = @($allUsers) + @($allGroups) + @($allContacts)
             $sample = $allObjects | Get-Random -Count ([Math]::Min(5, $allObjects.Count))
@@ -8372,8 +8375,8 @@ function Invoke-FrankensteinDomainMigrator {
             $changes = @()
             foreach ($u in $allUsers) {
                 $isCloud = $u.OnPremisesSyncEnabled -ne $true
-                $lvi = New-Object System.Windows.Forms.ListViewItem($u.UserPrincipalName)
-                $lvi.SubItems.Add($u.DisplayName) | Out-Null
+                $lvi = New-Object System.Windows.Forms.ListViewItem($u.DisplayName)
+                $lvi.SubItems.Add($u.UserPrincipalName) | Out-Null
                 $lvi.SubItems.Add('User') | Out-Null
                 $lvi.SubItems.Add('Yes') | Out-Null
                 $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
@@ -8650,38 +8653,72 @@ function Invoke-FrankensteinDomainMigrator {
     $btnPromoteSmtp.Add_Click({
         if (-not $script:CMConnected -or -not $script:CMOnMSDomain) { return }
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "This will promote each mailbox's *.onmicrosoft.com address to primary SMTP.`n`nAll current primary SMTP addresses will become secondary aliases.`n`nProceed?",
+            "This will promote each mail object's *.onmicrosoft.com address to primary SMTP.`n`nApplies to mailboxes, mail users, distribution groups, and M365 groups.`n`nAll current primary SMTP addresses will become secondary aliases.`n`nProceed?",
             'Promote OnMS to Primary SMTP',
             [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
         if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         try {
             $form.UseWaitCursor = $true
-            $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,PrimarySmtpAddress -ErrorAction Stop
             $done = 0; $errs = 0
-            foreach ($m in $mbxs) {
-                $onmsAddr = ($m.EmailAddresses | Where-Object { $_ -match "smtp:.*@$([regex]::Escape($script:CMOnMSDomain))$" } | Select-Object -First 1) -replace '^(?i)smtp:', ''
+            $onmsDom = $script:CMOnMSDomain
+
+            $promoteOnms = {
+                param($identity, $label, $addresses, $primarySmtp, $setCmdlet)
+                $onmsAddr = ($addresses | Where-Object { $_ -match "smtp:.*@$([regex]::Escape($onmsDom))$" } | Select-Object -First 1) -replace '^(?i)smtp:', ''
                 if (-not $onmsAddr) {
-                    Write-CMLog "No OnMS address found for $($m.UserPrincipalName) — skipping." ([System.Drawing.Color]::DarkGoldenrod); continue
+                    Write-CMLog "No OnMS address for $label — skipping." ([System.Drawing.Color]::DarkGoldenrod); return 'skip'
                 }
-                if ($m.PrimarySmtpAddress -ieq $onmsAddr) {
-                    Write-CMLog "$($m.UserPrincipalName): already primary." ([System.Drawing.Color]::DimGray); $done++; continue
+                if ($primarySmtp -ieq $onmsAddr) {
+                    Write-CMLog "$label`: already primary." ([System.Drawing.Color]::DimGray); return 'done'
+                }
+                $newAddrs = $addresses | ForEach-Object {
+                    if (($_ -replace '^(?i)smtp:', '').ToLower() -eq $onmsAddr.ToLower()) { "SMTP:$onmsAddr" }
+                    else { ($_ -replace '^SMTP:', 'smtp:') }
                 }
                 try {
-                    # Build new address list: promote onms to SMTP: (primary), demote all others to smtp:
-                    $newAddrs = $m.EmailAddresses | ForEach-Object {
-                        if (($_ -replace '^(?i)smtp:', '').ToLower() -eq $onmsAddr.ToLower()) {
-                            "SMTP:$onmsAddr"
-                        } else {
-                            ($_ -replace '^SMTP:', 'smtp:')
-                        }
-                    }
-                    Set-Mailbox -Identity $m.UserPrincipalName -EmailAddresses $newAddrs -ErrorAction Stop
-                    Write-CMLog "Promoted $onmsAddr for $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
-                    $done++
+                    & $setCmdlet $identity $newAddrs
+                    Write-CMLog "Promoted $onmsAddr for $label" ([System.Drawing.Color]::LimeGreen); return 'done'
                 } catch {
-                    Write-CMLog "Failed $($m.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                    Write-CMLog "Failed $label`: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); return 'error'
                 }
             }
+
+            Write-CMLog "Promoting OnMS addresses for mailboxes..." ([System.Drawing.Color]::Silver)
+            $mbxs = @(Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,PrimarySmtpAddress -ErrorAction Stop)
+            foreach ($m in $mbxs) {
+                $result = & $promoteOnms $m.UserPrincipalName $m.UserPrincipalName $m.EmailAddresses $m.PrimarySmtpAddress {
+                    param($id, $addrs) Set-Mailbox -Identity $id -EmailAddresses $addrs -ErrorAction Stop
+                }
+                if ($result -eq 'done') { $done++ } elseif ($result -eq 'error') { $errs++ }
+            }
+
+            Write-CMLog "Promoting OnMS addresses for mail users..." ([System.Drawing.Color]::Silver)
+            $musr = @(try { Get-MailUser -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+            foreach ($m in $musr) {
+                $result = & $promoteOnms $m.UserPrincipalName $m.UserPrincipalName $m.EmailAddresses $m.PrimarySmtpAddress {
+                    param($id, $addrs) Set-MailUser -Identity $id -EmailAddresses $addrs -ErrorAction Stop
+                }
+                if ($result -eq 'done') { $done++ } elseif ($result -eq 'error') { $errs++ }
+            }
+
+            Write-CMLog "Promoting OnMS addresses for distribution groups..." ([System.Drawing.Color]::Silver)
+            $dgrps = @(try { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+            foreach ($g in $dgrps) {
+                $result = & $promoteOnms $g.PrimarySmtpAddress $g.DisplayName $g.EmailAddresses $g.PrimarySmtpAddress {
+                    param($id, $addrs) Set-DistributionGroup -Identity $id -EmailAddresses $addrs -ErrorAction Stop
+                }
+                if ($result -eq 'done') { $done++ } elseif ($result -eq 'error') { $errs++ }
+            }
+
+            Write-CMLog "Promoting OnMS addresses for M365 groups..." ([System.Drawing.Color]::Silver)
+            $ugrps = @(try { Get-UnifiedGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+            foreach ($g in $ugrps) {
+                $result = & $promoteOnms $g.PrimarySmtpAddress $g.DisplayName $g.EmailAddresses $g.PrimarySmtpAddress {
+                    param($id, $addrs) Set-UnifiedGroup -Identity $id -EmailAddresses $addrs -ErrorAction Stop
+                }
+                if ($result -eq 'done') { $done++ } elseif ($result -eq 'error') { $errs++ }
+            }
+
             $finalColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
             Write-CMLog "Primary SMTP promotion complete. $done done, $errs errors." $finalColor
         } catch {
@@ -8801,13 +8838,33 @@ function Invoke-FrankensteinDomainMigrator {
                         $lvDomainObjects.Items.Add($lvi) | Out-Null; $found++
                     }
                 }
-                # Distribution/mail-enabled groups in EXO
-                $exoGroups = Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue
+                # Mail users
+                $exoMailUsers = @(try { Get-MailUser -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+                foreach ($m in $exoMailUsers) {
+                    $hits = $m.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                    foreach ($h in $hits) {
+                        $lvi = New-Object System.Windows.Forms.ListViewItem($m.UserPrincipalName)
+                        $lvi.SubItems.Add('MailUser') | Out-Null; $lvi.SubItems.Add($h) | Out-Null; $lvi.SubItems.Add('Pending') | Out-Null
+                        $lvDomainObjects.Items.Add($lvi) | Out-Null; $found++
+                    }
+                }
+                # Distribution groups
+                $exoGroups = @(try { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
                 foreach ($g in $exoGroups) {
                     $hits = $g.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
                     foreach ($h in $hits) {
                         $lvi = New-Object System.Windows.Forms.ListViewItem($g.Name)
-                        $lvi.SubItems.Add('DistributionGroup') | Out-Null; $lvi.SubItems.Add($h) | Out-Null; $lvi.SubItems.Add('Pending') | Out-Null
+                        $lvi.SubItems.Add('DistGroup') | Out-Null; $lvi.SubItems.Add($h) | Out-Null; $lvi.SubItems.Add('Pending') | Out-Null
+                        $lvDomainObjects.Items.Add($lvi) | Out-Null; $found++
+                    }
+                }
+                # M365 groups
+                $exoUGrps = @(try { Get-UnifiedGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+                foreach ($g in $exoUGrps) {
+                    $hits = $g.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                    foreach ($h in $hits) {
+                        $lvi = New-Object System.Windows.Forms.ListViewItem($g.DisplayName)
+                        $lvi.SubItems.Add('M365Group') | Out-Null; $lvi.SubItems.Add($h) | Out-Null; $lvi.SubItems.Add('Pending') | Out-Null
                         $lvDomainObjects.Items.Add($lvi) | Out-Null; $found++
                     }
                 }
@@ -8851,7 +8908,7 @@ function Invoke-FrankensteinDomainMigrator {
         $domain = $txtDomainToRemove.Text.Trim().ToLower()
         if (-not $domain) { return }
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Remove all addresses containing '@$domain' from mailboxes, Exchange groups, Entra users, and Entra groups?`n`nThis cannot be undone without a backup.`n`nProceed?",
+            "Remove all addresses containing '@$domain' from mailboxes, mail users, distribution groups, M365 groups, Entra users, and Entra groups?`n`nThis cannot be undone without a backup.`n`nProceed?",
             'Remove Domain from Objects',
             [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
         if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
@@ -8871,8 +8928,19 @@ function Invoke-FrankensteinDomainMigrator {
                         } catch { Write-CMLog "Failed $($m.UserPrincipalName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
                     }
                 }
+                # EXO mail users
+                $exoMailUsers = @(try { Get-MailUser -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+                foreach ($m in $exoMailUsers) {
+                    $toRemove = $m.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                    foreach ($a in $toRemove) {
+                        try {
+                            Set-MailUser -Identity $m.UserPrincipalName -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                            Write-CMLog "Removed $a from mail user $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
+                        } catch { Write-CMLog "Failed mail user $($m.UserPrincipalName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                    }
+                }
                 # EXO distribution groups
-                $exoGroups = Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue
+                $exoGroups = @(try { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
                 foreach ($g in $exoGroups) {
                     $toRemove = $g.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
                     foreach ($a in $toRemove) {
@@ -8880,6 +8948,17 @@ function Invoke-FrankensteinDomainMigrator {
                             Set-DistributionGroup -Identity $g.Name -EmailAddresses @{Remove=$a} -ErrorAction Stop
                             Write-CMLog "Removed $a from group $($g.Name)" ([System.Drawing.Color]::LimeGreen); $done++
                         } catch { Write-CMLog "Failed group $($g.Name): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                    }
+                }
+                # EXO M365 groups
+                $exoUGrps = @(try { Get-UnifiedGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+                foreach ($g in $exoUGrps) {
+                    $toRemove = $g.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                    foreach ($a in $toRemove) {
+                        try {
+                            Set-UnifiedGroup -Identity $g.PrimarySmtpAddress -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                            Write-CMLog "Removed $a from M365 group $($g.DisplayName)" ([System.Drawing.Color]::LimeGreen); $done++
+                        } catch { Write-CMLog "Failed M365 group $($g.DisplayName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
                     }
                 }
             }

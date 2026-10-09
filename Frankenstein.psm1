@@ -8214,6 +8214,8 @@ function Invoke-FrankensteinDomainMigrator {
         if (-not $tid) { Write-CMLog "Enter Tenant ID first." ([System.Drawing.Color]::Tomato); return }
         try {
             $form.UseWaitCursor = $true
+            # Minimize so browser auth popups can come to the front
+            $form.WindowState = [System.Windows.Forms.FormWindowState]::Minimized
             Write-CMLog "Connecting to Microsoft Graph..." ([System.Drawing.Color]::Silver)
             Connect-MgGraph -Scopes 'Organization.ReadWrite.All','Directory.ReadWrite.All',
                                      'User.ReadWrite.All','Group.ReadWrite.All','Domain.ReadWrite.All' `
@@ -8249,7 +8251,11 @@ function Invoke-FrankensteinDomainMigrator {
             & $navTo 1
         } catch {
             Write-CMLog "Connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
-        } finally { $form.UseWaitCursor = $false }
+        } finally {
+            $form.UseWaitCursor = $false
+            $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+            $form.Activate()
+        }
     })
 
     # ---- Step 1: Check Sync Status ----

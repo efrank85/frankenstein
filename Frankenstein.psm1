@@ -8212,48 +8212,83 @@ function Invoke-FrankensteinDomainMigrator {
     $btnConnect.Add_Click({
         $tid = $txtTenantId.Text.Trim()
         if (-not $tid) { Write-CMLog "Enter Tenant ID first." ([System.Drawing.Color]::Tomato); return }
-        try {
-            $form.UseWaitCursor = $true
-            Write-CMLog "Connecting to Microsoft Graph..." ([System.Drawing.Color]::Silver)
-            Connect-MgGraph -Scopes 'Organization.ReadWrite.All','Directory.ReadWrite.All',
-                                     'User.ReadWrite.All','Group.ReadWrite.All','Domain.ReadWrite.All' `
-                            -TenantId $tid -NoWelcome -ErrorAction Stop
-            $ctx = Get-MgContext
-            $script:CMTenantId = $ctx.TenantId
-            $script:CMAdminUpn = $ctx.Account
-            Write-CMLog "Graph connected. Tenant: $($ctx.TenantId)  Account: $($ctx.Account)" ([System.Drawing.Color]::LimeGreen)
-            Write-CMLog "Connecting to Exchange Online (loading required cmdlets only)..." ([System.Drawing.Color]::Silver)
-            $exoParams = @{
-                ShowBanner  = $false
-                ErrorAction = 'Stop'
-                CommandName = @('Set-Mailbox','Get-Mailbox','Get-MailUser','Set-MailUser',
-                                'Get-DistributionGroup','Set-DistributionGroup',
-                                'Get-UnifiedGroup','Set-UnifiedGroup',
-                                'Get-ConnectionInformation','Get-OrganizationConfig')
+
+        $btnConnect.Enabled = $false
+        $form.UseWaitCursor  = $true
+        Write-CMLog "Connecting — a browser window will open for authentication. Form stays responsive." ([System.Drawing.Color]::DarkGoldenrod)
+
+        # Run auth in a background runspace so the WinForms message pump is never blocked.
+        # EXO v3 and MgGraph both use process-wide MSAL/REST sessions — connecting from a
+        # background runspace makes the session available on the UI thread immediately.
+        $exoCmdlets = @('Set-Mailbox','Get-Mailbox','Get-MailUser','Set-MailUser',
+                        'Get-DistributionGroup','Set-DistributionGroup',
+                        'Get-UnifiedGroup','Set-UnifiedGroup',
+                        'Get-ConnectionInformation','Get-OrganizationConfig')
+
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        [void]$ps.AddScript({
+            param($tenantId, $cmdlets)
+            $r = @{ OK = $false; Err = ''; Tenant = ''; Upn = ''; OnMS = '' }
+            try {
+                Connect-MgGraph -Scopes 'Organization.ReadWrite.All','Directory.ReadWrite.All',
+                                         'User.ReadWrite.All','Group.ReadWrite.All','Domain.ReadWrite.All' `
+                                -TenantId $tenantId -NoWelcome -ErrorAction Stop
+                $ctx = Get-MgContext
+                $r.Tenant = $ctx.TenantId
+                $r.Upn    = $ctx.Account
+                $exoP = @{ ShowBanner = $false; ErrorAction = 'Stop'; CommandName = $cmdlets }
+                if ($ctx.Account) { $exoP['UserPrincipalName'] = $ctx.Account }
+                Connect-ExchangeOnline @exoP
+                $r.OnMS = (Get-MgDomain | Where-Object { $_.IsInitial -eq $true }).Id
+                $r.OK   = $true
+            } catch {
+                $r.Err = $_.Exception.Message
             }
-            if ($script:CMAdminUpn) { $exoParams['UserPrincipalName'] = $script:CMAdminUpn }
-            Connect-ExchangeOnline @exoParams
-            $script:CMEXOConnected = $true
-            Write-CMLog "Exchange Online connected." ([System.Drawing.Color]::LimeGreen)
-            $script:CMConnected = $true
-            $lblConnStatus.Text = "Connected — Tenant: $($script:CMTenantId)"
-            $lblConnStatus.ForeColor = [System.Drawing.Color]::FromArgb(100,220,130)
-            $btnDisableSync.Enabled = $true
-            $btnAddOnMS.Enabled = $true
-            $btnPromoteSmtp.Enabled = $true
-            $btnUpdateUpn.Enabled = $true
-            # Detect onmicrosoft domain
-            $script:CMOnMSDomain = (Get-MgDomain | Where-Object { $_.IsInitial -eq $true }).Id
-            if ($script:CMOnMSDomain) {
-                $lblDetectedOnMS.Text = "Detected onmicrosoft.com domain: $($script:CMOnMSDomain)"
-                Write-CMLog "Detected initial domain: $($script:CMOnMSDomain)" ([System.Drawing.Color]::Silver)
+            return $r
+        }).AddArgument($tid).AddArgument($exoCmdlets)
+
+        $handle = $ps.BeginInvoke()
+
+        # Timer polls job; tick runs on UI thread so controls are safe to touch
+        $connectPollTimer = New-Object System.Windows.Forms.Timer
+        $connectPollTimer.Interval = 400
+        $connectPollTimer.Add_Tick({
+            if (-not $handle.IsCompleted) { return }
+            $connectPollTimer.Stop()
+            try {
+                $res = $ps.EndInvoke($handle) | Select-Object -Last 1
+                $psErr = if ($ps.Streams.Error.Count -gt 0) { $ps.Streams.Error[0].ToString() } else { '' }
+                if ($res -and $res.OK) {
+                    $script:CMTenantId     = $res.Tenant
+                    $script:CMAdminUpn     = $res.Upn
+                    $script:CMOnMSDomain   = $res.OnMS
+                    $script:CMEXOConnected = $true
+                    $script:CMConnected    = $true
+                    $lblConnStatus.Text      = "Connected — Tenant: $($res.Tenant)"
+                    $lblConnStatus.ForeColor = [System.Drawing.Color]::FromArgb(100,220,130)
+                    $btnDisableSync.Enabled  = $true
+                    $btnAddOnMS.Enabled      = $true
+                    $btnPromoteSmtp.Enabled  = $true
+                    $btnUpdateUpn.Enabled    = $true
+                    if ($res.OnMS) {
+                        $lblDetectedOnMS.Text = "Detected onmicrosoft.com domain: $($res.OnMS)"
+                        Write-CMLog "Detected initial domain: $($res.OnMS)" ([System.Drawing.Color]::Silver)
+                    }
+                    Write-CMLog "Connected. Tenant: $($res.Tenant)  Account: $($res.Upn)" ([System.Drawing.Color]::LimeGreen)
+                    & $navTo 1
+                } else {
+                    $msg = if ($res -and $res.Err) { $res.Err } elseif ($psErr) { $psErr } else { 'Connection did not complete.' }
+                    Write-CMLog "Connection failed: $msg" ([System.Drawing.Color]::Tomato)
+                }
+            } catch {
+                Write-CMLog "Connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+            } finally {
+                $ps.Dispose()
+                $btnConnect.Enabled = $true
+                $form.UseWaitCursor  = $false
             }
-            & $navTo 1
-        } catch {
-            Write-CMLog "Connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
-        } finally {
-            $form.UseWaitCursor = $false
-        }
+        })
+        $connectPollTimer.Start()
     })
 
     # ---- Step 1: Check Sync Status ----

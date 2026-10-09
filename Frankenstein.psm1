@@ -8256,7 +8256,9 @@ function Invoke-FrankensteinDomainMigrator {
         } finally {
             $form.UseWaitCursor = $false
             $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+            $form.TopMost = $true
             $form.Activate()
+            $form.TopMost = $false
         }
     })
 

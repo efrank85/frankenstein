@@ -8343,54 +8343,90 @@ function Invoke-FrankensteinDomainMigrator {
             return
         }
 
-        # --- Exchange Online (UI thread, synchronous) ---
-        # WAM token-broker is COM/STA — it cannot surface an auth window from a
-        # background thread, causing a silent hang. Running on the UI thread lets
-        # WAM complete silently (< 1 s) using the session established by Graph auth.
-        # On first-ever connection the token isn't cached yet; a browser or WAM prompt
-        # may open briefly — if so, complete sign-in there and the form will resume.
-        $lblConnStatus.Text      = "Authenticating Exchange Online — complete browser sign-in if prompted..."
+        # --- Exchange Online (background runspace + WinForms Timer poll) ---
+        # On first-ever PS session, WAM needs to surface an auth dialog. Calling
+        # Connect-ExchangeOnline synchronously blocks the WinForms message loop, so
+        # WAM can never post its WM_USER messages back → silent deadlock.
+        #
+        # Fix: launch EXO in a background PS runspace and return from the click handler
+        # immediately, leaving the message loop completely free. WAM can then marshal
+        # its auth dialog to the idle main STA thread (first launch), or silently
+        # deliver the cached token (subsequent launches). A WinForms Timer polls for
+        # completion every 500 ms without blocking the loop.
+        $lblConnStatus.Text      = "Connecting to Exchange Online — sign in if a browser opens..."
         $lblConnStatus.ForeColor = [System.Drawing.Color]::DarkGoldenrod
-        Write-CMLog "Connecting to Exchange Online — if a browser opens, sign in there..." ([System.Drawing.Color]::Silver)
+        Write-CMLog "Launching Exchange Online connection (background — form stays responsive)..." ([System.Drawing.Color]::Silver)
         [System.Windows.Forms.Application]::DoEvents()
-        try {
-            $form.UseWaitCursor = $true
-            $exoParams = @{
-                ShowBanner  = $false
-                ErrorAction = 'Stop'
-                CommandName = @('Set-Mailbox','Get-Mailbox','Get-MailUser','Set-MailUser',
-                                'Get-DistributionGroup','Set-DistributionGroup',
-                                'Get-UnifiedGroup','Set-UnifiedGroup',
-                                'Get-ConnectionInformation','Get-OrganizationConfig')
-            }
-            if ($script:CMAdminUpn) { $exoParams['UserPrincipalName'] = $script:CMAdminUpn }
-            Connect-ExchangeOnline @exoParams
-            $script:CMEXOConnected = $true
-            $script:CMConnected    = $true
-            # Start live log file (matches DL Migrator pattern — captures all activity from connection onward)
-            $script:CMLiveLogPath = Join-Path (New-CMExportDir) "DomainMigrator_Log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
-            Write-CMLog "Exchange Online connected." ([System.Drawing.Color]::LimeGreen)
-            Write-CMLog "Session log: $($script:CMLiveLogPath)" ([System.Drawing.Color]::DimGray)
-            $lblConnStatus.Text      = "Connected — Tenant: $($script:CMTenantId)"
-            $lblConnStatus.ForeColor = [System.Drawing.Color]::FromArgb(100,220,130)
-            $btnDisableSync.Enabled  = $true
-            $btnAddOnMS.Enabled      = $true
-            $btnPromoteSmtp.Enabled  = $true
-            $btnUpdateUpn.Enabled    = $true
-            $script:CMOnMSDomain = (Get-MgDomain | Where-Object { $_.IsInitial -eq $true }).Id
-            if ($script:CMOnMSDomain) {
-                $lblDetectedOnMS.Text = "Detected onmicrosoft.com domain: $($script:CMOnMSDomain)"
-                Write-CMLog "Detected initial domain: $($script:CMOnMSDomain)" ([System.Drawing.Color]::Silver)
-            }
-            & $navTo 1
-        } catch {
-            Write-CMLog "Exchange Online connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
-            $lblConnStatus.Text      = "EXO connection failed — retry Connect"
-            $lblConnStatus.ForeColor = [System.Drawing.Color]::Tomato
-        } finally {
-            $form.UseWaitCursor = $false
-            $btnConnect.Enabled = $true
+
+        $exoParams = @{
+            ShowBanner  = $false
+            ErrorAction = 'Stop'
+            CommandName = @('Set-Mailbox','Get-Mailbox','Get-MailUser','Set-MailUser',
+                            'Get-DistributionGroup','Set-DistributionGroup',
+                            'Get-UnifiedGroup','Set-UnifiedGroup',
+                            'Get-ConnectionInformation','Get-OrganizationConfig')
         }
+        if ($script:CMAdminUpn) { $exoParams['UserPrincipalName'] = $script:CMAdminUpn }
+
+        $script:CMExoResult = [hashtable]::Synchronized(@{ Done=$false; Success=$false; Error='' })
+        $script:CMExoPS     = [System.Management.Automation.PowerShell]::Create()
+        [void]$script:CMExoPS.AddScript({
+            param($p, $r)
+            try   { Connect-ExchangeOnline @p; $r.Success = $true }
+            catch { $r.Error = $_.Exception.Message }
+            finally { $r.Done = $true }
+        }).AddParameter('p', $exoParams).AddParameter('r', $script:CMExoResult)
+
+        $script:CMExoAsync    = $script:CMExoPS.BeginInvoke()
+        $script:CMConnectTs   = [System.DateTime]::UtcNow
+        $script:CMEXOPollTimer = New-Object System.Windows.Forms.Timer
+        $script:CMEXOPollTimer.Interval = 500
+        $script:CMEXOPollTimer.Add_Tick({
+            if (-not $script:CMExoAsync.IsCompleted) {
+                $secs = ([System.DateTime]::UtcNow - $script:CMConnectTs).TotalSeconds
+                if ($secs -gt 120) {
+                    $script:CMEXOPollTimer.Stop(); $script:CMEXOPollTimer.Dispose()
+                    try { $script:CMExoPS.Stop() } catch {}
+                    Write-CMLog "Exchange Online connection timed out. Click Connect to retry." ([System.Drawing.Color]::Tomato)
+                    $lblConnStatus.Text      = "EXO timed out — click Connect to retry"
+                    $lblConnStatus.ForeColor = [System.Drawing.Color]::Tomato
+                    $btnConnect.Enabled = $true
+                }
+                return
+            }
+            $script:CMEXOPollTimer.Stop(); $script:CMEXOPollTimer.Dispose()
+            try { $script:CMExoPS.EndInvoke($script:CMExoAsync) } catch {}
+            $script:CMExoPS.Dispose(); $script:CMExoAsync = $null
+
+            if ($script:CMExoResult.Success) {
+                $script:CMEXOConnected = $true
+                $script:CMConnected    = $true
+                $script:CMLiveLogPath  = Join-Path (New-CMExportDir) "DomainMigrator_Log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
+                Write-CMLog "Exchange Online connected." ([System.Drawing.Color]::LimeGreen)
+                Write-CMLog "Session log: $($script:CMLiveLogPath)" ([System.Drawing.Color]::DimGray)
+                $lblConnStatus.Text      = "Connected — Tenant: $($script:CMTenantId)"
+                $lblConnStatus.ForeColor = [System.Drawing.Color]::FromArgb(100,220,130)
+                $btnDisableSync.Enabled  = $true
+                $btnAddOnMS.Enabled      = $true
+                $btnPromoteSmtp.Enabled  = $true
+                $btnUpdateUpn.Enabled    = $true
+                $script:CMOnMSDomain = (Get-MgDomain | Where-Object { $_.IsInitial -eq $true }).Id
+                if ($script:CMOnMSDomain) {
+                    $lblDetectedOnMS.Text = "Detected onmicrosoft.com domain: $($script:CMOnMSDomain)"
+                    Write-CMLog "Detected initial domain: $($script:CMOnMSDomain)" ([System.Drawing.Color]::Silver)
+                }
+                & $navTo 1
+            } else {
+                Write-CMLog "Exchange Online connection failed: $($script:CMExoResult.Error)" ([System.Drawing.Color]::Tomato)
+                $lblConnStatus.Text      = "EXO connection failed — click Connect to retry"
+                $lblConnStatus.ForeColor = [System.Drawing.Color]::Tomato
+            }
+            $btnConnect.Enabled = $true
+        })
+        $script:CMEXOPollTimer.Start()
+        # Click handler returns here — WinForms message loop is completely free.
+        # WAM can marshal its auth dialog to the idle main STA thread (first launch),
+        # or silently provide the cached token (subsequent launches).
     })
 
     # ---- Step 1: Check Sync Status ----
@@ -8976,6 +9012,19 @@ function Invoke-FrankensteinDomainMigrator {
                                     $skipRow = $true
                                 } else { throw }
                             }
+                            # Restore UPN — covers all users (licensed and unlicensed) whose UPN was
+                            # re-routed to *.onmicrosoft.com by the Update UPNs step
+                            if (-not [string]::IsNullOrWhiteSpace($row.UserPrincipalName) -and
+                                $row.UserPrincipalName -notmatch '#EXT#') {
+                                try {
+                                    Update-MgUser -UserId $row.Identity -BodyParameter @{ userPrincipalName = $row.UserPrincipalName } -ErrorAction Stop
+                                    Write-CMLog "  UPN restored → $($row.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
+                                    $skipRow = $false  # something was successfully restored — count the row
+                                } catch {
+                                    Write-CMLog "  UPN restore failed for $($row.DisplayName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+                                    $errs++
+                                }
+                            }
                         }
                         'EntraGroup' {
                             $proxies = @($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' })
@@ -9086,7 +9135,7 @@ function Invoke-FrankensteinDomainMigrator {
                 }
             }
 
-            Write-CMLog "Scan complete. Found $found address entries containing '@$domain'." (if ($found -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+            Write-CMLog "Scan complete. Found $found address entries containing '@$domain'." $(if ($found -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
             if ($found -gt 0) { $btnRemoveDomainObjs.Enabled = $true }
             else { $btnConfirmClean.Enabled = $true }
         } catch {

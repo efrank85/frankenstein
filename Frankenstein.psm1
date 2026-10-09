@@ -7736,3 +7736,1088 @@ function Set-FrankensteinPSWindowTitle {
 }
 
 #endregion
+
+function Invoke-FrankensteinCutoverMigrator {
+    [CmdletBinding()]
+    param()
+
+    #region ---- Module check ----
+    foreach ($mod in @('Microsoft.Graph.Authentication','Microsoft.Graph.Identity.DirectoryManagement',
+                        'Microsoft.Graph.Users','Microsoft.Graph.Groups',
+                        'ExchangeOnlineManagement')) {
+        if (-not (Get-Module -ListAvailable -Name $mod)) {
+            Write-Host "Installing $mod..." -ForegroundColor Yellow
+            Install-Module $mod -Scope CurrentUser -Force -ErrorAction Stop
+        }
+    }
+    Import-Module Microsoft.Graph.Authentication,Microsoft.Graph.Identity.DirectoryManagement,
+                  Microsoft.Graph.Users,Microsoft.Graph.Groups -ErrorAction SilentlyContinue
+    #endregion
+
+    #region ---- State ----
+    $script:CMConnected    = $false
+    $script:CMEXOConnected = $false
+    $script:CMTenantId     = ''
+    $script:CMOnMSDomain   = ''
+    $script:CMCurrentStep  = 1
+    $script:CMExportDir    = ''
+    $script:CMBackupPath   = ''
+    $script:CMSyncPollTimer = $null
+    $script:CMDomainPollTimer = $null
+    $script:CMSyncedUsers  = @()
+
+    function New-CMExportDir {
+        if (-not $script:CMExportDir) {
+            $chosen = try { $txtExportPath.Text.Trim() } catch { '' }
+            if ($chosen -and (Test-Path (Split-Path $chosen -Parent -ErrorAction SilentlyContinue))) {
+                $script:CMExportDir = $chosen
+            } else {
+                $script:CMExportDir = Join-Path $env:USERPROFILE "Documents\Frankenstein_Cutover_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+            }
+            New-Item -ItemType Directory -Path $script:CMExportDir -Force | Out-Null
+        }
+        return $script:CMExportDir
+    }
+    #endregion
+
+    #region ---- Forms setup ----
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'Frankenstein — Cutover Migrator'
+    $form.Size = New-Object System.Drawing.Size(920, 868)
+    $form.MinimumSize = New-Object System.Drawing.Size(920, 868)
+    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+    $form.ForeColor = [System.Drawing.Color]::White
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    #endregion
+
+    #region ---- Log helper ----
+    $rtfLog = New-Object System.Windows.Forms.RichTextBox
+    function Write-CMLog ([string]$msg, [System.Drawing.Color]$color = [System.Drawing.Color]::Silver) {
+        $ts = Get-Date -Format 'HH:mm:ss'
+        $rtfLog.SelectionStart  = $rtfLog.TextLength
+        $rtfLog.SelectionLength = 0
+        $rtfLog.SelectionColor  = [System.Drawing.Color]::FromArgb(80,80,80)
+        $rtfLog.AppendText("[$ts] ")
+        $rtfLog.SelectionStart  = $rtfLog.TextLength
+        $rtfLog.SelectionColor  = $color
+        $rtfLog.AppendText("$msg`n")
+        $rtfLog.ScrollToCaret()
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+    #endregion
+
+    #region ---- Connection Panel ----
+    $grpConn = New-Object System.Windows.Forms.GroupBox
+    $grpConn.Text = 'Connection'; $grpConn.ForeColor = [System.Drawing.Color]::Silver
+    $grpConn.Location = New-Object System.Drawing.Point(8, 5)
+    $grpConn.Size = New-Object System.Drawing.Size(894, 98)
+    $grpConn.BackColor = [System.Drawing.Color]::FromArgb(38, 38, 38)
+    $form.Controls.Add($grpConn)
+
+    $lblTenantId = New-Object System.Windows.Forms.Label
+    $lblTenantId.Text = 'Tenant ID:'; $lblTenantId.Location = New-Object System.Drawing.Point(8, 26)
+    $lblTenantId.Size = New-Object System.Drawing.Size(70, 20); $lblTenantId.ForeColor = [System.Drawing.Color]::Silver
+    $grpConn.Controls.Add($lblTenantId)
+
+    $txtTenantId = New-Object System.Windows.Forms.TextBox
+    $txtTenantId.Location = New-Object System.Drawing.Point(82, 23); $txtTenantId.Size = New-Object System.Drawing.Size(280, 22)
+    $txtTenantId.BackColor = [System.Drawing.Color]::FromArgb(45,45,45); $txtTenantId.ForeColor = [System.Drawing.Color]::White
+    $txtTenantId.BorderStyle = 'FixedSingle'
+    try { $txtTenantId.PlaceholderText = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' } catch {}
+    $grpConn.Controls.Add($txtTenantId)
+
+    $btnConnect = New-Object System.Windows.Forms.Button
+    $btnConnect.Text = 'Connect'; $btnConnect.Location = New-Object System.Drawing.Point(372, 21)
+    $btnConnect.Size = New-Object System.Drawing.Size(90, 26); $btnConnect.FlatStyle = 'Flat'
+    $btnConnect.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnConnect.ForeColor = [System.Drawing.Color]::White
+    $grpConn.Controls.Add($btnConnect)
+
+    $lblConnStatus = New-Object System.Windows.Forms.Label
+    $lblConnStatus.Text = 'Not connected'; $lblConnStatus.Location = New-Object System.Drawing.Point(472, 26)
+    $lblConnStatus.Size = New-Object System.Drawing.Size(414, 20); $lblConnStatus.ForeColor = [System.Drawing.Color]::DimGray
+    $grpConn.Controls.Add($lblConnStatus)
+
+    $lblExportPath = New-Object System.Windows.Forms.Label
+    $lblExportPath.Text = 'Export folder:'; $lblExportPath.Location = New-Object System.Drawing.Point(8, 54)
+    $lblExportPath.Size = New-Object System.Drawing.Size(80, 20); $lblExportPath.ForeColor = [System.Drawing.Color]::Silver
+    $grpConn.Controls.Add($lblExportPath)
+    $txtExportPath = New-Object System.Windows.Forms.TextBox
+    $txtExportPath.Location = New-Object System.Drawing.Point(92, 51); $txtExportPath.Size = New-Object System.Drawing.Size(690, 22)
+    $txtExportPath.BackColor = [System.Drawing.Color]::FromArgb(45,45,45); $txtExportPath.ForeColor = [System.Drawing.Color]::White
+    $txtExportPath.BorderStyle = 'FixedSingle'
+    try { $txtExportPath.PlaceholderText = 'Leave blank to auto-create in Documents\Frankenstein_Cutover_<timestamp>' } catch {}
+    $grpConn.Controls.Add($txtExportPath)
+    $btnBrowseExport = New-Object System.Windows.Forms.Button
+    $btnBrowseExport.Text = 'Browse...'; $btnBrowseExport.Location = New-Object System.Drawing.Point(792, 49)
+    $btnBrowseExport.Size = New-Object System.Drawing.Size(92, 26); $btnBrowseExport.FlatStyle = 'Flat'
+    $btnBrowseExport.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnBrowseExport.ForeColor = [System.Drawing.Color]::Silver
+    $grpConn.Controls.Add($btnBrowseExport)
+    #endregion
+
+    #region ---- Step Navigation ----
+    $navPanel = New-Object System.Windows.Forms.Panel
+    $navPanel.Location = New-Object System.Drawing.Point(8, 108); $navPanel.Size = New-Object System.Drawing.Size(894, 32)
+    $navPanel.BackColor = [System.Drawing.Color]::FromArgb(38, 38, 38)
+    $form.Controls.Add($navPanel)
+
+    $stepTitles = @('1. Unsync Objects','2. OnMicrosoft Addresses','3. Remove from Objects','4. Remove from Tenant')
+    $stepLabels = @()
+    $stepW = 222
+    for ($i = 0; $i -lt 4; $i++) {
+        $lbl = New-Object System.Windows.Forms.Label
+        $lbl.Text = $stepTitles[$i]
+        $lbl.Location = New-Object System.Drawing.Point(($i * $stepW + 2), 6)
+        $lbl.Size = New-Object System.Drawing.Size(($stepW - 4), 22)
+        $lbl.TextAlign = 'MiddleCenter'
+        $lbl.ForeColor = [System.Drawing.Color]::DimGray
+        $lbl.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $lbl.Tag = $i + 1
+        $lbl.Add_Click({ param($s,$e) if ($script:CMConnected) { & $navTo ([int]$s.Tag) } })
+        $navPanel.Controls.Add($lbl)
+        $stepLabels += $lbl
+    }
+
+    $stepPanelLoc  = New-Object System.Drawing.Point(8, 144)
+    $stepPanelSize = New-Object System.Drawing.Size(894, 490)
+
+    $navTo = {
+        param([int]$target)
+        $script:CMCurrentStep = $target
+        for ($i = 0; $i -lt 4; $i++) {
+            if ($i -eq ($target - 1)) {
+                $stepLabels[$i].ForeColor  = [System.Drawing.Color]::White
+                $stepLabels[$i].BackColor  = [System.Drawing.Color]::FromArgb(0,90,160)
+                $stepLabels[$i].Font       = New-Object System.Drawing.Font($stepLabels[$i].Font, [System.Drawing.FontStyle]::Bold)
+            } else {
+                $stepLabels[$i].ForeColor  = [System.Drawing.Color]::DimGray
+                $stepLabels[$i].BackColor  = [System.Drawing.Color]::FromArgb(38,38,38)
+                $stepLabels[$i].Font       = New-Object System.Drawing.Font($stepLabels[$i].Font, [System.Drawing.FontStyle]::Regular)
+            }
+        }
+        $panStep1.Visible = ($target -eq 1)
+        $panStep2.Visible = ($target -eq 2)
+        $panStep3.Visible = ($target -eq 3)
+        $panStep4.Visible = ($target -eq 4)
+        if ($target -eq 2 -and $script:CMConnected -and -not $script:CMOnMSDomain) {
+            try {
+                $script:CMOnMSDomain = (Get-MgDomain | Where-Object { $_.IsInitial -eq $true }).Id
+                if ($script:CMOnMSDomain) { $lblDetectedOnMS.Text = "Detected onmicrosoft.com domain: $($script:CMOnMSDomain)" }
+            } catch {}
+        }
+    }
+    #endregion
+
+    #region ---- STEP 1: Unsync Objects ----
+    $panStep1 = New-Object System.Windows.Forms.Panel
+    $panStep1.Location = $stepPanelLoc; $panStep1.Size = $stepPanelSize
+    $panStep1.BackColor = [System.Drawing.Color]::FromArgb(38,38,38); $panStep1.Visible = $true
+    $form.Controls.Add($panStep1)
+
+    $lblUnsyncDesc = New-Object System.Windows.Forms.Label
+    $lblUnsyncDesc.Text = 'Disable Azure AD Connect sync and validate all objects are cloud-only.'
+    $lblUnsyncDesc.Location = New-Object System.Drawing.Point(8, 10); $lblUnsyncDesc.Size = New-Object System.Drawing.Size(870, 20)
+    $lblUnsyncDesc.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep1.Controls.Add($lblUnsyncDesc)
+
+    $lblOrgSyncStatus = New-Object System.Windows.Forms.Label
+    $lblOrgSyncStatus.Text = 'Org sync status: unknown'; $lblOrgSyncStatus.Location = New-Object System.Drawing.Point(8, 36)
+    $lblOrgSyncStatus.Size = New-Object System.Drawing.Size(500, 20); $lblOrgSyncStatus.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep1.Controls.Add($lblOrgSyncStatus)
+
+    $btnCheckSync = New-Object System.Windows.Forms.Button
+    $btnCheckSync.Text = 'Check Sync Status'; $btnCheckSync.Location = New-Object System.Drawing.Point(8, 62)
+    $btnCheckSync.Size = New-Object System.Drawing.Size(150, 28); $btnCheckSync.FlatStyle = 'Flat'
+    $btnCheckSync.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnCheckSync.ForeColor = [System.Drawing.Color]::Silver
+    $panStep1.Controls.Add($btnCheckSync)
+
+    $btnDisableSync = New-Object System.Windows.Forms.Button
+    $btnDisableSync.Text = 'Disable Directory Sync'; $btnDisableSync.Location = New-Object System.Drawing.Point(168, 62)
+    $btnDisableSync.Size = New-Object System.Drawing.Size(180, 28); $btnDisableSync.FlatStyle = 'Flat'
+    $btnDisableSync.BackColor = [System.Drawing.Color]::FromArgb(160,60,0); $btnDisableSync.ForeColor = [System.Drawing.Color]::White
+    $btnDisableSync.Enabled = $false
+    $panStep1.Controls.Add($btnDisableSync)
+
+    $btnStopSyncPoll = New-Object System.Windows.Forms.Button
+    $btnStopSyncPoll.Text = 'Stop Polling'; $btnStopSyncPoll.Location = New-Object System.Drawing.Point(358, 62)
+    $btnStopSyncPoll.Size = New-Object System.Drawing.Size(100, 28); $btnStopSyncPoll.FlatStyle = 'Flat'
+    $btnStopSyncPoll.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnStopSyncPoll.ForeColor = [System.Drawing.Color]::Silver
+    $btnStopSyncPoll.Visible = $false
+    $panStep1.Controls.Add($btnStopSyncPoll)
+
+    $lblUnsyncPollStatus = New-Object System.Windows.Forms.Label
+    $lblUnsyncPollStatus.Text = ''; $lblUnsyncPollStatus.Location = New-Object System.Drawing.Point(470, 68)
+    $lblUnsyncPollStatus.Size = New-Object System.Drawing.Size(410, 20); $lblUnsyncPollStatus.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep1.Controls.Add($lblUnsyncPollStatus)
+
+    $lvUnsync = New-Object System.Windows.Forms.ListView
+    $lvUnsync.Location = New-Object System.Drawing.Point(8, 100); $lvUnsync.Size = New-Object System.Drawing.Size(876, 352)
+    $lvUnsync.View = 'Details'; $lvUnsync.FullRowSelect = $true; $lvUnsync.GridLines = $true
+    $lvUnsync.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvUnsync.ForeColor = [System.Drawing.Color]::Silver
+    foreach ($col in @('UPN','Display Name','Was Synced','Cloud-Only Now')) {
+        $c = $lvUnsync.Columns.Add($col)
+        $c.Width = switch ($col) { 'UPN' { 300 } 'Display Name' { 220 } default { 150 } }
+    }
+    $panStep1.Controls.Add($lvUnsync)
+
+    $lblUnsyncNote = New-Object System.Windows.Forms.Label
+    $lblUnsyncNote.Text = 'CSV exported automatically to Documents\Frankenstein_Cutover_* when complete.'
+    $lblUnsyncNote.Location = New-Object System.Drawing.Point(8, 458); $lblUnsyncNote.Size = New-Object System.Drawing.Size(870, 18)
+    $lblUnsyncNote.ForeColor = [System.Drawing.Color]::FromArgb(80,80,80)
+    $panStep1.Controls.Add($lblUnsyncNote)
+    #endregion
+
+    #region ---- STEP 2: OnMicrosoft Addresses ----
+    $panStep2 = New-Object System.Windows.Forms.Panel
+    $panStep2.Location = $stepPanelLoc; $panStep2.Size = $stepPanelSize
+    $panStep2.BackColor = [System.Drawing.Color]::FromArgb(38,38,38); $panStep2.Visible = $false
+    $form.Controls.Add($panStep2)
+
+    $lblDetectedOnMS = New-Object System.Windows.Forms.Label
+    $lblDetectedOnMS.Text = 'Detected onmicrosoft.com domain: (connect first)'; $lblDetectedOnMS.Location = New-Object System.Drawing.Point(8, 10)
+    $lblDetectedOnMS.Size = New-Object System.Drawing.Size(876, 20); $lblDetectedOnMS.ForeColor = [System.Drawing.Color]::FromArgb(100,200,130)
+    $panStep2.Controls.Add($lblDetectedOnMS)
+
+    # Button row 1
+    $btnBackupAddresses = New-Object System.Windows.Forms.Button
+    $btnBackupAddresses.Text = '1. Backup All Addresses'; $btnBackupAddresses.Location = New-Object System.Drawing.Point(8, 38)
+    $btnBackupAddresses.Size = New-Object System.Drawing.Size(180, 28); $btnBackupAddresses.FlatStyle = 'Flat'
+    $btnBackupAddresses.BackColor = [System.Drawing.Color]::FromArgb(0,100,80); $btnBackupAddresses.ForeColor = [System.Drawing.Color]::White
+    $panStep2.Controls.Add($btnBackupAddresses)
+
+    $btnAddOnMS = New-Object System.Windows.Forms.Button
+    $btnAddOnMS.Text = '2. Add Missing OnMS Addresses'; $btnAddOnMS.Location = New-Object System.Drawing.Point(198, 38)
+    $btnAddOnMS.Size = New-Object System.Drawing.Size(210, 28); $btnAddOnMS.FlatStyle = 'Flat'
+    $btnAddOnMS.BackColor = [System.Drawing.Color]::FromArgb(0,100,160); $btnAddOnMS.ForeColor = [System.Drawing.Color]::White
+    $btnAddOnMS.Enabled = $false
+    $panStep2.Controls.Add($btnAddOnMS)
+
+    # Button row 2
+    $btnPromoteSmtp = New-Object System.Windows.Forms.Button
+    $btnPromoteSmtp.Text = '3. Promote OnMS to Primary SMTP'; $btnPromoteSmtp.Location = New-Object System.Drawing.Point(8, 74)
+    $btnPromoteSmtp.Size = New-Object System.Drawing.Size(240, 28); $btnPromoteSmtp.FlatStyle = 'Flat'
+    $btnPromoteSmtp.BackColor = [System.Drawing.Color]::FromArgb(80,60,130); $btnPromoteSmtp.ForeColor = [System.Drawing.Color]::White
+    $btnPromoteSmtp.Enabled = $false
+    $panStep2.Controls.Add($btnPromoteSmtp)
+
+    $btnUpdateUpn = New-Object System.Windows.Forms.Button
+    $btnUpdateUpn.Text = '4. Update UPNs to OnMS'; $btnUpdateUpn.Location = New-Object System.Drawing.Point(258, 74)
+    $btnUpdateUpn.Size = New-Object System.Drawing.Size(180, 28); $btnUpdateUpn.FlatStyle = 'Flat'
+    $btnUpdateUpn.BackColor = [System.Drawing.Color]::FromArgb(80,60,130); $btnUpdateUpn.ForeColor = [System.Drawing.Color]::White
+    $btnUpdateUpn.Enabled = $false
+    $panStep2.Controls.Add($btnUpdateUpn)
+
+    # Rollback row
+    $lblRollbackPath = New-Object System.Windows.Forms.Label
+    $lblRollbackPath.Text = 'Rollback CSV:'; $lblRollbackPath.Location = New-Object System.Drawing.Point(8, 114)
+    $lblRollbackPath.Size = New-Object System.Drawing.Size(80, 20); $lblRollbackPath.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep2.Controls.Add($lblRollbackPath)
+
+    $txtRollbackPath = New-Object System.Windows.Forms.TextBox
+    $txtRollbackPath.Location = New-Object System.Drawing.Point(92, 111); $txtRollbackPath.Size = New-Object System.Drawing.Size(480, 22)
+    $txtRollbackPath.BackColor = [System.Drawing.Color]::FromArgb(45,45,45); $txtRollbackPath.ForeColor = [System.Drawing.Color]::White
+    $txtRollbackPath.BorderStyle = 'FixedSingle'
+    try { $txtRollbackPath.PlaceholderText = 'Path to backup CSV...' } catch {}
+    $panStep2.Controls.Add($txtRollbackPath)
+
+    $btnBrowseRollback = New-Object System.Windows.Forms.Button
+    $btnBrowseRollback.Text = 'Browse...'; $btnBrowseRollback.Location = New-Object System.Drawing.Point(582, 109)
+    $btnBrowseRollback.Size = New-Object System.Drawing.Size(80, 26); $btnBrowseRollback.FlatStyle = 'Flat'
+    $btnBrowseRollback.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnBrowseRollback.ForeColor = [System.Drawing.Color]::Silver
+    $panStep2.Controls.Add($btnBrowseRollback)
+
+    $btnRollback = New-Object System.Windows.Forms.Button
+    $btnRollback.Text = 'Rollback from CSV'; $btnRollback.Location = New-Object System.Drawing.Point(672, 109)
+    $btnRollback.Size = New-Object System.Drawing.Size(150, 26); $btnRollback.FlatStyle = 'Flat'
+    $btnRollback.BackColor = [System.Drawing.Color]::FromArgb(120,30,30); $btnRollback.ForeColor = [System.Drawing.Color]::White
+    $panStep2.Controls.Add($btnRollback)
+
+    $lvOnMS = New-Object System.Windows.Forms.ListView
+    $lvOnMS.Location = New-Object System.Drawing.Point(8, 144); $lvOnMS.Size = New-Object System.Drawing.Size(876, 316)
+    $lvOnMS.View = 'Details'; $lvOnMS.FullRowSelect = $true; $lvOnMS.GridLines = $true
+    $lvOnMS.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvOnMS.ForeColor = [System.Drawing.Color]::Silver
+    foreach ($col in @('UPN','Display Name','OnMS Address','Primary SMTP','Action')) {
+        $c = $lvOnMS.Columns.Add($col)
+        $c.Width = switch ($col) { 'UPN' { 230 } 'Display Name' { 160 } 'OnMS Address' { 200 } 'Primary SMTP' { 180 } 'Action' { 80 } }
+    }
+    $panStep2.Controls.Add($lvOnMS)
+
+    $lblBackupNote = New-Object System.Windows.Forms.Label
+    $lblBackupNote.Text = 'Always run Backup first. The backup CSV can be used for rollback.'
+    $lblBackupNote.Location = New-Object System.Drawing.Point(8, 466); $lblBackupNote.Size = New-Object System.Drawing.Size(876, 18)
+    $lblBackupNote.ForeColor = [System.Drawing.Color]::FromArgb(160,130,60)
+    $panStep2.Controls.Add($lblBackupNote)
+    #endregion
+
+    #region ---- STEP 3: Remove Domain from Objects ----
+    $panStep3 = New-Object System.Windows.Forms.Panel
+    $panStep3.Location = $stepPanelLoc; $panStep3.Size = $stepPanelSize
+    $panStep3.BackColor = [System.Drawing.Color]::FromArgb(38,38,38); $panStep3.Visible = $false
+    $form.Controls.Add($panStep3)
+
+    $lblDomainDesc = New-Object System.Windows.Forms.Label
+    $lblDomainDesc.Text = 'Remove the old domain from all Entra and Exchange objects.'
+    $lblDomainDesc.Location = New-Object System.Drawing.Point(8, 10); $lblDomainDesc.Size = New-Object System.Drawing.Size(876, 20)
+    $lblDomainDesc.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep3.Controls.Add($lblDomainDesc)
+
+    $lblDomainToRemove = New-Object System.Windows.Forms.Label
+    $lblDomainToRemove.Text = 'Domain to remove:'; $lblDomainToRemove.Location = New-Object System.Drawing.Point(8, 40)
+    $lblDomainToRemove.Size = New-Object System.Drawing.Size(120, 22); $lblDomainToRemove.ForeColor = [System.Drawing.Color]::Silver
+    $panStep3.Controls.Add($lblDomainToRemove)
+
+    $txtDomainToRemove = New-Object System.Windows.Forms.TextBox
+    $txtDomainToRemove.Location = New-Object System.Drawing.Point(132, 37); $txtDomainToRemove.Size = New-Object System.Drawing.Size(260, 22)
+    $txtDomainToRemove.BackColor = [System.Drawing.Color]::FromArgb(45,45,45); $txtDomainToRemove.ForeColor = [System.Drawing.Color]::White
+    $txtDomainToRemove.BorderStyle = 'FixedSingle'
+    try { $txtDomainToRemove.PlaceholderText = 'e.g. contoso.com' } catch {}
+    $panStep3.Controls.Add($txtDomainToRemove)
+
+    $btnScanDomain = New-Object System.Windows.Forms.Button
+    $btnScanDomain.Text = 'Scan Objects'; $btnScanDomain.Location = New-Object System.Drawing.Point(402, 35)
+    $btnScanDomain.Size = New-Object System.Drawing.Size(120, 28); $btnScanDomain.FlatStyle = 'Flat'
+    $btnScanDomain.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnScanDomain.ForeColor = [System.Drawing.Color]::Silver
+    $panStep3.Controls.Add($btnScanDomain)
+
+    $btnRemoveDomainObjs = New-Object System.Windows.Forms.Button
+    $btnRemoveDomainObjs.Text = 'Remove Domain from Objects'; $btnRemoveDomainObjs.Location = New-Object System.Drawing.Point(532, 35)
+    $btnRemoveDomainObjs.Size = New-Object System.Drawing.Size(210, 28); $btnRemoveDomainObjs.FlatStyle = 'Flat'
+    $btnRemoveDomainObjs.BackColor = [System.Drawing.Color]::FromArgb(160,60,0); $btnRemoveDomainObjs.ForeColor = [System.Drawing.Color]::White
+    $btnRemoveDomainObjs.Enabled = $false
+    $panStep3.Controls.Add($btnRemoveDomainObjs)
+
+    $btnConfirmClean = New-Object System.Windows.Forms.Button
+    $btnConfirmClean.Text = 'Confirm Clean'; $btnConfirmClean.Location = New-Object System.Drawing.Point(752, 35)
+    $btnConfirmClean.Size = New-Object System.Drawing.Size(130, 28); $btnConfirmClean.FlatStyle = 'Flat'
+    $btnConfirmClean.BackColor = [System.Drawing.Color]::FromArgb(0,100,80); $btnConfirmClean.ForeColor = [System.Drawing.Color]::White
+    $btnConfirmClean.Enabled = $false
+    $panStep3.Controls.Add($btnConfirmClean)
+
+    $lvDomainObjects = New-Object System.Windows.Forms.ListView
+    $lvDomainObjects.Location = New-Object System.Drawing.Point(8, 74); $lvDomainObjects.Size = New-Object System.Drawing.Size(876, 390)
+    $lvDomainObjects.View = 'Details'; $lvDomainObjects.FullRowSelect = $true; $lvDomainObjects.GridLines = $true
+    $lvDomainObjects.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvDomainObjects.ForeColor = [System.Drawing.Color]::Silver
+    foreach ($col in @('Object','Type','Address Containing Domain','Action')) {
+        $c = $lvDomainObjects.Columns.Add($col)
+        $c.Width = switch ($col) { 'Object' { 260 } 'Type' { 100 } 'Address Containing Domain' { 340 } 'Action' { 150 } }
+    }
+    $panStep3.Controls.Add($lvDomainObjects)
+    #endregion
+
+    #region ---- STEP 4: Remove Domain from Tenant ----
+    $panStep4 = New-Object System.Windows.Forms.Panel
+    $panStep4.Location = $stepPanelLoc; $panStep4.Size = $stepPanelSize
+    $panStep4.BackColor = [System.Drawing.Color]::FromArgb(38,38,38); $panStep4.Visible = $false
+    $form.Controls.Add($panStep4)
+
+    $lblRemoveTenantDesc = New-Object System.Windows.Forms.Label
+    $lblRemoveTenantDesc.Text = 'Remove the domain from the tenant. All objects must be cleaned (Step 3) before this will succeed.'
+    $lblRemoveTenantDesc.Location = New-Object System.Drawing.Point(8, 10); $lblRemoveTenantDesc.Size = New-Object System.Drawing.Size(876, 20)
+    $lblRemoveTenantDesc.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep4.Controls.Add($lblRemoveTenantDesc)
+
+    $lblFinalDomain = New-Object System.Windows.Forms.Label
+    $lblFinalDomain.Text = 'Domain to remove from tenant:'; $lblFinalDomain.Location = New-Object System.Drawing.Point(8, 44)
+    $lblFinalDomain.Size = New-Object System.Drawing.Size(200, 22); $lblFinalDomain.ForeColor = [System.Drawing.Color]::Silver
+    $panStep4.Controls.Add($lblFinalDomain)
+
+    $txtFinalDomain = New-Object System.Windows.Forms.TextBox
+    $txtFinalDomain.Location = New-Object System.Drawing.Point(212, 41); $txtFinalDomain.Size = New-Object System.Drawing.Size(260, 22)
+    $txtFinalDomain.BackColor = [System.Drawing.Color]::FromArgb(45,45,45); $txtFinalDomain.ForeColor = [System.Drawing.Color]::White
+    $txtFinalDomain.BorderStyle = 'FixedSingle'
+    try { $txtFinalDomain.PlaceholderText = 'e.g. contoso.com' } catch {}
+    $panStep4.Controls.Add($txtFinalDomain)
+
+    $btnRemoveTenantDomain = New-Object System.Windows.Forms.Button
+    $btnRemoveTenantDomain.Text = 'Remove Domain from Tenant'; $btnRemoveTenantDomain.Location = New-Object System.Drawing.Point(482, 39)
+    $btnRemoveTenantDomain.Size = New-Object System.Drawing.Size(220, 28); $btnRemoveTenantDomain.FlatStyle = 'Flat'
+    $btnRemoveTenantDomain.BackColor = [System.Drawing.Color]::FromArgb(140,20,20); $btnRemoveTenantDomain.ForeColor = [System.Drawing.Color]::White
+    $panStep4.Controls.Add($btnRemoveTenantDomain)
+
+    $btnStopDomainPoll = New-Object System.Windows.Forms.Button
+    $btnStopDomainPoll.Text = 'Stop Polling'; $btnStopDomainPoll.Location = New-Object System.Drawing.Point(712, 39)
+    $btnStopDomainPoll.Size = New-Object System.Drawing.Size(100, 28); $btnStopDomainPoll.FlatStyle = 'Flat'
+    $btnStopDomainPoll.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnStopDomainPoll.ForeColor = [System.Drawing.Color]::Silver
+    $btnStopDomainPoll.Visible = $false
+    $panStep4.Controls.Add($btnStopDomainPoll)
+
+    $lblDomainPollStatus = New-Object System.Windows.Forms.Label
+    $lblDomainPollStatus.Text = ''; $lblDomainPollStatus.Location = New-Object System.Drawing.Point(8, 80)
+    $lblDomainPollStatus.Size = New-Object System.Drawing.Size(876, 24); $lblDomainPollStatus.ForeColor = [System.Drawing.Color]::DimGray
+    $lblDomainPollStatus.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+    $panStep4.Controls.Add($lblDomainPollStatus)
+
+    $lvDomains = New-Object System.Windows.Forms.ListView
+    $lvDomains.Location = New-Object System.Drawing.Point(8, 112); $lvDomains.Size = New-Object System.Drawing.Size(876, 200)
+    $lvDomains.View = 'Details'; $lvDomains.FullRowSelect = $true; $lvDomains.GridLines = $true
+    $lvDomains.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvDomains.ForeColor = [System.Drawing.Color]::Silver
+    foreach ($col in @('Domain','Type','Is Initial','Is Default','Is Verified')) {
+        $c = $lvDomains.Columns.Add($col)
+        $c.Width = switch ($col) { 'Domain' { 280 } default { 120 } }
+    }
+    $panStep4.Controls.Add($lvDomains)
+
+    $btnRefreshDomains = New-Object System.Windows.Forms.Button
+    $btnRefreshDomains.Text = 'Refresh Domain List'; $btnRefreshDomains.Location = New-Object System.Drawing.Point(8, 320)
+    $btnRefreshDomains.Size = New-Object System.Drawing.Size(160, 26); $btnRefreshDomains.FlatStyle = 'Flat'
+    $btnRefreshDomains.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnRefreshDomains.ForeColor = [System.Drawing.Color]::Silver
+    $panStep4.Controls.Add($btnRefreshDomains)
+    #endregion
+
+    #region ---- Log Panel ----
+    $grpLog = New-Object System.Windows.Forms.GroupBox
+    $grpLog.Text = 'Log'; $grpLog.ForeColor = [System.Drawing.Color]::Silver
+    $grpLog.Location = New-Object System.Drawing.Point(8, 640); $grpLog.Size = New-Object System.Drawing.Size(894, 170)
+    $grpLog.BackColor = [System.Drawing.Color]::FromArgb(25,25,25)
+    $form.Controls.Add($grpLog)
+
+    $rtfLog.Location = New-Object System.Drawing.Point(6, 18); $rtfLog.Size = New-Object System.Drawing.Size(880, 144)
+    $rtfLog.BackColor = [System.Drawing.Color]::FromArgb(20,20,20); $rtfLog.ForeColor = [System.Drawing.Color]::Silver
+    $rtfLog.ReadOnly = $true; $rtfLog.BorderStyle = 'None'; $rtfLog.Font = New-Object System.Drawing.Font('Consolas', 8.5)
+    $rtfLog.ScrollBars = 'Vertical'
+    $grpLog.Controls.Add($rtfLog)
+    #endregion
+
+    #region ---- Timers ----
+    $syncPollTimer = New-Object System.Windows.Forms.Timer
+    $syncPollTimer.Interval = 30000
+
+    $domainPollTimer = New-Object System.Windows.Forms.Timer
+    $domainPollTimer.Interval = 30000
+    #endregion
+
+    #region ---- Event Handlers ----
+
+    # ---- Export folder browse ----
+    $btnBrowseExport.Add_Click({
+        $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dlg.Description = 'Select export folder'
+        $dlg.ShowNewFolderButton = $true
+        if ($txtExportPath.Text.Trim() -and (Test-Path $txtExportPath.Text.Trim())) {
+            $dlg.SelectedPath = $txtExportPath.Text.Trim()
+        }
+        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $txtExportPath.Text = $dlg.SelectedPath
+            $script:CMExportDir = ''  # reset so next export uses the new path
+        }
+    })
+    $txtExportPath.Add_TextChanged({ $script:CMExportDir = '' })
+
+    # ---- Connect ----
+    $btnConnect.Add_Click({
+        $tid = $txtTenantId.Text.Trim()
+        if (-not $tid) { Write-CMLog "Enter Tenant ID first." ([System.Drawing.Color]::Tomato); return }
+        try {
+            $form.UseWaitCursor = $true
+            Write-CMLog "Connecting to Microsoft Graph..." ([System.Drawing.Color]::Silver)
+            Connect-MgGraph -Scopes 'Organization.ReadWrite.All','Directory.ReadWrite.All',
+                                     'User.ReadWrite.All','Group.ReadWrite.All','Domain.ReadWrite.All' `
+                            -TenantId $tid -NoWelcome -ErrorAction Stop
+            $ctx = Get-MgContext
+            $script:CMTenantId = $ctx.TenantId
+            Write-CMLog "Graph connected. Tenant: $($ctx.TenantId)" ([System.Drawing.Color]::LimeGreen)
+            Write-CMLog "Connecting to Exchange Online..." ([System.Drawing.Color]::Silver)
+            Connect-ExchangeOnline -Organization $script:CMTenantId -ShowBanner:$false -ErrorAction Stop
+            $script:CMEXOConnected = $true
+            Write-CMLog "Exchange Online connected." ([System.Drawing.Color]::LimeGreen)
+            $script:CMConnected = $true
+            $lblConnStatus.Text = "Connected — Tenant: $($script:CMTenantId)"
+            $lblConnStatus.ForeColor = [System.Drawing.Color]::FromArgb(100,220,130)
+            $btnDisableSync.Enabled = $true
+            $btnAddOnMS.Enabled = $true
+            $btnPromoteSmtp.Enabled = $true
+            $btnUpdateUpn.Enabled = $true
+            # Detect onmicrosoft domain
+            $script:CMOnMSDomain = (Get-MgDomain | Where-Object { $_.IsInitial -eq $true }).Id
+            if ($script:CMOnMSDomain) {
+                $lblDetectedOnMS.Text = "Detected onmicrosoft.com domain: $($script:CMOnMSDomain)"
+                Write-CMLog "Detected initial domain: $($script:CMOnMSDomain)" ([System.Drawing.Color]::Silver)
+            }
+            & $navTo 1
+        } catch {
+            Write-CMLog "Connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 1: Check Sync Status ----
+    $btnCheckSync.Add_Click({
+        if (-not $script:CMConnected) { return }
+        try {
+            $form.UseWaitCursor = $true
+            Write-CMLog "Checking org sync status..." ([System.Drawing.Color]::Silver)
+            $org = Get-MgOrganization -ErrorAction Stop
+            $syncOn = $org.OnPremisesSyncEnabled
+            $lblOrgSyncStatus.Text = "Org sync status: $(if ($syncOn) { 'ENABLED (AAD Connect active)' } else { 'DISABLED (cloud-only)' })"
+            $lblOrgSyncStatus.ForeColor = if ($syncOn) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
+            Write-CMLog "Org OnPremisesSyncEnabled = $syncOn" ([System.Drawing.Color]::Silver)
+            Write-CMLog "Scanning users for sync state (this may take a moment)..." ([System.Drawing.Color]::Silver)
+            $script:CMSyncedUsers = @()
+            $lvUnsync.Items.Clear()
+            $allUsers = Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop
+            foreach ($u in $allUsers) {
+                $wasSynced = $u.OnPremisesSyncEnabled -eq $true
+                $isCloud   = $u.OnPremisesSyncEnabled -ne $true
+                if ($wasSynced -or -not $isCloud) { $script:CMSyncedUsers += $u }
+                $lvi = New-Object System.Windows.Forms.ListViewItem($u.UserPrincipalName)
+                $lvi.SubItems.Add($u.DisplayName) | Out-Null
+                $lvi.SubItems.Add($(if ($wasSynced) { 'Yes' } else { 'No' })) | Out-Null
+                $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
+                $lvi.ForeColor = if (-not $isCloud) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::Silver }
+                $lvUnsync.Items.Add($lvi) | Out-Null
+            }
+            Write-CMLog "Found $($allUsers.Count) users. $($script:CMSyncedUsers.Count) were/are synced." ([System.Drawing.Color]::Silver)
+        } catch {
+            Write-CMLog "Check failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 1: Disable Sync ----
+    $btnDisableSync.Add_Click({
+        if (-not $script:CMConnected) { return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "This will disable Azure AD Connect sync for tenant '$($script:CMTenantId)'.`n`nAll on-premises synced objects will become cloud-only.`n`nProceed?",
+            'Disable Directory Sync',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Warning)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            $form.UseWaitCursor = $true
+            Write-CMLog "Disabling directory sync..." ([System.Drawing.Color]::DarkGoldenrod)
+            Update-MgOrganization -OrganizationId $script:CMTenantId `
+                                  -BodyParameter @{ onPremisesSyncEnabled = $false } -ErrorAction Stop
+            Write-CMLog "Sync disable command sent. Starting polling every 30 seconds..." ([System.Drawing.Color]::LimeGreen)
+            $lblUnsyncPollStatus.Text = "Polling... checking sync status every 30s"
+            $lblUnsyncPollStatus.ForeColor = [System.Drawing.Color]::DarkGoldenrod
+            $btnStopSyncPoll.Visible = $true
+            $btnDisableSync.Enabled = $false
+            $script:CMSyncPollAttempt = 0
+            $syncPollTimer.Start()
+        } catch {
+            Write-CMLog "Disable sync failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    $btnStopSyncPoll.Add_Click({ $syncPollTimer.Stop(); $btnStopSyncPoll.Visible = $false; $lblUnsyncPollStatus.Text = 'Polling stopped.' })
+
+    $syncPollTimer.Add_Tick({
+        $script:CMSyncPollAttempt++
+        Write-CMLog "Sync poll #$($script:CMSyncPollAttempt)..." ([System.Drawing.Color]::DimGray)
+        try {
+            $org = Get-MgOrganization -ErrorAction Stop
+            $orgDone = $org.OnPremisesSyncEnabled -ne $true
+            $lblOrgSyncStatus.Text = "Org sync status: $(if ($orgDone) { 'DISABLED' } else { 'still ENABLED' })"
+            $lblOrgSyncStatus.ForeColor = if ($orgDone) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::DarkGoldenrod }
+
+            # Smart check: sample 5 users first
+            $allUsers = Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop
+            $sample = $allUsers | Get-Random -Count ([Math]::Min(5, $allUsers.Count))
+            $samplePending = @($sample | Where-Object { $_.OnPremisesSyncEnabled -eq $true }).Count
+            if ($samplePending -gt 0) {
+                Write-CMLog "Sample check: $samplePending of 5 sampled users still synced. Waiting..." ([System.Drawing.Color]::DimGray)
+                $lblUnsyncPollStatus.Text = "Poll #$($script:CMSyncPollAttempt): $samplePending/5 sampled still synced..."
+                return
+            }
+            # Sample clean — check all
+            $stillSynced = @($allUsers | Where-Object { $_.OnPremisesSyncEnabled -eq $true }).Count
+            $lblUnsyncPollStatus.Text = "Poll #$($script:CMSyncPollAttempt): $stillSynced users still synced..."
+            $lvUnsync.Items.Clear()
+            $changes = @()
+            foreach ($u in $allUsers) {
+                $isCloud = $u.OnPremisesSyncEnabled -ne $true
+                $lvi = New-Object System.Windows.Forms.ListViewItem($u.UserPrincipalName)
+                $lvi.SubItems.Add($u.DisplayName) | Out-Null
+                $lvi.SubItems.Add('Yes') | Out-Null
+                $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
+                $lvi.ForeColor = if ($isCloud) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::DarkGoldenrod }
+                $lvUnsync.Items.Add($lvi) | Out-Null
+                $changes += [PSCustomObject]@{
+                    UPN = $u.UserPrincipalName; DisplayName = $u.DisplayName
+                    WasSynced = 'Yes'; IsCloudOnly = if ($isCloud) { 'Yes' } else { 'Pending' }
+                }
+            }
+            if ($orgDone -and $stillSynced -eq 0) {
+                $syncPollTimer.Stop(); $btnStopSyncPoll.Visible = $false
+                $lblUnsyncPollStatus.Text = "Complete — all objects are cloud-only."
+                $lblUnsyncPollStatus.ForeColor = [System.Drawing.Color]::LimeGreen
+                Write-CMLog "All objects confirmed cloud-only. Exporting CSV..." ([System.Drawing.Color]::LimeGreen)
+                $dir = New-CMExportDir
+                $csvPath = Join-Path $dir 'Unsync_Results.csv'
+                $changes | Export-Csv -Path $csvPath -NoTypeInformation
+                Write-CMLog "Exported: $csvPath" ([System.Drawing.Color]::FromArgb(100,200,130))
+                $lblUnsyncNote.Text = "Export complete: $csvPath"
+                $lblUnsyncNote.ForeColor = [System.Drawing.Color]::FromArgb(100,200,130)
+            }
+        } catch {
+            Write-CMLog "Poll error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        }
+    })
+
+    # ---- Step 2: Backup ----
+    $btnBackupAddresses.Add_Click({
+        if (-not $script:CMConnected) { return }
+        if (-not $script:CMEXOConnected) { Write-CMLog "Exchange Online not connected." ([System.Drawing.Color]::Tomato); return }
+        try {
+            $form.UseWaitCursor = $true
+            Write-CMLog "Backing up all mailbox addresses..." ([System.Drawing.Color]::Silver)
+            $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,DisplayName,PrimarySmtpAddress -ErrorAction Stop
+            $backup = foreach ($m in $mbxs) {
+                [PSCustomObject]@{
+                    Identity          = $m.Identity
+                    UserPrincipalName = $m.UserPrincipalName
+                    DisplayName       = $m.DisplayName
+                    PrimarySmtpAddress = $m.PrimarySmtpAddress
+                    EmailAddresses    = ($m.EmailAddresses -join ';')
+                }
+            }
+            $dir = New-CMExportDir
+            $script:CMBackupPath = Join-Path $dir "Mailbox_Address_Backup_$(Get-Date -Format 'HHmmss').csv"
+            $backup | Export-Csv -Path $script:CMBackupPath -NoTypeInformation
+            $txtRollbackPath.Text = $script:CMBackupPath
+            Write-CMLog "Backup saved: $($script:CMBackupPath) ($($mbxs.Count) mailboxes)" ([System.Drawing.Color]::LimeGreen)
+        } catch {
+            Write-CMLog "Backup failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    $btnBrowseRollback.Add_Click({
+        $dlg = New-Object System.Windows.Forms.OpenFileDialog
+        $dlg.Filter = 'CSV files (*.csv)|*.csv|All files (*.*)|*.*'
+        $dlg.Title = 'Select Backup CSV for Rollback'
+        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $txtRollbackPath.Text = $dlg.FileName }
+    })
+
+    # ---- Step 2: Add Missing OnMS Addresses ----
+    $btnAddOnMS.Add_Click({
+        if (-not $script:CMConnected -or -not $script:CMOnMSDomain) {
+            Write-CMLog "Connect first and ensure onmicrosoft.com domain is detected." ([System.Drawing.Color]::Tomato); return
+        }
+        if (-not $script:CMBackupPath) {
+            $warn = [System.Windows.Forms.MessageBox]::Show(
+                "No backup has been taken. It is strongly recommended to backup first.`n`nContinue without backup?",
+                'No Backup', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+            if ($warn -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        }
+        try {
+            $form.UseWaitCursor = $true
+            $lvOnMS.Items.Clear()
+            Write-CMLog "Loading mailboxes..." ([System.Drawing.Color]::Silver)
+            $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,DisplayName,PrimarySmtpAddress -ErrorAction Stop
+            # Build a lookup of all used onmicrosoft.com addresses for conflict detection
+            $usedOnMS = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($m in $mbxs) { foreach ($a in $m.EmailAddresses) { if ($a -match "@$([regex]::Escape($script:CMOnMSDomain))$") { $usedOnMS.Add($a.TrimStart('smtp:','SMTP:').ToLower()) | Out-Null } } }
+            $processed = 0
+            foreach ($m in $mbxs) {
+                $upnPrefix = ($m.UserPrincipalName -split '@')[0]
+                $desired   = "$upnPrefix@$($script:CMOnMSDomain)"
+                $hasOnMS   = $m.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($script:CMOnMSDomain))$" }
+                $hasPrimary = $m.EmailAddresses | Where-Object { $_ -match "^SMTP:$([regex]::Escape($upnPrefix))@$([regex]::Escape($script:CMOnMSDomain))$" }
+
+                if ($hasPrimary) {
+                    $action = 'Already exists'
+                    $onmsAddr = $desired
+                } else {
+                    # Resolve conflicts
+                    $candidate = $desired.ToLower()
+                    $suffix = 0
+                    while ($usedOnMS.Contains($candidate)) {
+                        $suffix++
+                        $candidate = "$upnPrefix$suffix@$($script:CMOnMSDomain)".ToLower()
+                    }
+                    $onmsAddr = $candidate
+                    try {
+                        Set-Mailbox -Identity $m.UserPrincipalName -EmailAddresses @{Add="smtp:$onmsAddr"} -ErrorAction Stop
+                        $usedOnMS.Add($onmsAddr) | Out-Null
+                        $action = if ($suffix -gt 0) { "Added (conflict→$onmsAddr)" } else { 'Added' }
+                        Write-CMLog "Added $onmsAddr → $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
+                    } catch {
+                        $action = "ERROR: $($_.Exception.Message)"
+                        Write-CMLog "Failed $($m.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+                    }
+                }
+                $lvi = New-Object System.Windows.Forms.ListViewItem($m.UserPrincipalName)
+                $lvi.SubItems.Add($m.DisplayName) | Out-Null
+                $lvi.SubItems.Add($onmsAddr) | Out-Null
+                $lvi.SubItems.Add($m.PrimarySmtpAddress) | Out-Null
+                $lvi.SubItems.Add($action) | Out-Null
+                $lvi.ForeColor = if ($action -like 'ERROR*') { [System.Drawing.Color]::Tomato } else { [System.Drawing.Color]::Silver }
+                $lvOnMS.Items.Add($lvi) | Out-Null
+                $processed++
+                if ($processed % 10 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
+            }
+            Write-CMLog "OnMS address pass complete. $processed mailboxes processed." ([System.Drawing.Color]::LimeGreen)
+        } catch {
+            Write-CMLog "Error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 2: Promote OnMS to Primary SMTP ----
+    $btnPromoteSmtp.Add_Click({
+        if (-not $script:CMConnected -or -not $script:CMOnMSDomain) { return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "This will promote each mailbox's *.onmicrosoft.com address to primary SMTP.`n`nAll current primary SMTP addresses will become secondary aliases.`n`nProceed?",
+            'Promote OnMS to Primary SMTP',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            $form.UseWaitCursor = $true
+            $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,PrimarySmtpAddress -ErrorAction Stop
+            $done = 0; $errs = 0
+            foreach ($m in $mbxs) {
+                $onmsAddr = ($m.EmailAddresses | Where-Object { $_ -match "smtp:.*@$([regex]::Escape($script:CMOnMSDomain))$" } | Select-Object -First 1) -replace '^(?i)smtp:', ''
+                if (-not $onmsAddr) {
+                    Write-CMLog "No OnMS address found for $($m.UserPrincipalName) — skipping." ([System.Drawing.Color]::DarkGoldenrod); continue
+                }
+                if ($m.PrimarySmtpAddress -ieq $onmsAddr) {
+                    Write-CMLog "$($m.UserPrincipalName): already primary." ([System.Drawing.Color]::DimGray); $done++; continue
+                }
+                try {
+                    Set-Mailbox -Identity $m.UserPrincipalName -EmailAddressPolicyEnabled $false `
+                                -PrimarySmtpAddress $onmsAddr -ErrorAction Stop
+                    Write-CMLog "Promoted $onmsAddr for $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
+                    $done++
+                } catch {
+                    Write-CMLog "Failed $($m.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                }
+            }
+            Write-CMLog "Primary SMTP promotion complete. $done done, $errs errors." (if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+        } catch {
+            Write-CMLog "Error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 2: Update UPNs ----
+    $btnUpdateUpn.Add_Click({
+        if (-not $script:CMConnected -or -not $script:CMOnMSDomain) { return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "This will update each user's UPN to their *.onmicrosoft.com address.`n`nUsers will need to sign in with the new UPN.`n`nProceed?",
+            'Update UPNs', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            $form.UseWaitCursor = $true
+            $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName -ErrorAction Stop
+            $done = 0; $errs = 0
+            foreach ($m in $mbxs) {
+                if ($m.UserPrincipalName -like "*@$($script:CMOnMSDomain)") {
+                    Write-CMLog "$($m.UserPrincipalName): UPN already onmicrosoft.com." ([System.Drawing.Color]::DimGray); $done++; continue
+                }
+                $onmsAddr = ($m.EmailAddresses | Where-Object { $_ -match "smtp:.*@$([regex]::Escape($script:CMOnMSDomain))$" } | Select-Object -First 1) -replace '^(?i)smtp:', ''
+                if (-not $onmsAddr) {
+                    Write-CMLog "No OnMS address for $($m.UserPrincipalName) — run Add OnMS Addresses first." ([System.Drawing.Color]::Tomato); continue
+                }
+                try {
+                    $mgUser = Get-MgUser -Filter "userPrincipalName eq '$($m.UserPrincipalName)'" -ErrorAction Stop
+                    if ($mgUser) {
+                        Update-MgUser -UserId $mgUser.Id -UserPrincipalName $onmsAddr -ErrorAction Stop
+                        Write-CMLog "UPN: $($m.UserPrincipalName) → $onmsAddr" ([System.Drawing.Color]::LimeGreen)
+                        $done++
+                    }
+                } catch {
+                    Write-CMLog "Failed $($m.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                }
+            }
+            Write-CMLog "UPN update complete. $done done, $errs errors." (if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+        } catch {
+            Write-CMLog "Error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 2: Rollback ----
+    $btnRollback.Add_Click({
+        $csvPath = $txtRollbackPath.Text.Trim()
+        if (-not $csvPath -or -not (Test-Path $csvPath)) { Write-CMLog "Select a valid backup CSV first." ([System.Drawing.Color]::Tomato); return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "This will restore all mailbox email addresses and primary SMTP from:`n$csvPath`n`nAll current addresses will be replaced with the backup values.`n`nProceed?",
+            'Rollback', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            $form.UseWaitCursor = $true
+            $rows = Import-Csv $csvPath
+            $done = 0; $errs = 0
+            foreach ($row in $rows) {
+                try {
+                    $addrs = $row.EmailAddresses -split ';' | Where-Object { $_ -ne '' }
+                    Set-Mailbox -Identity $row.Identity -EmailAddressPolicyEnabled $false `
+                                -EmailAddresses $addrs -PrimarySmtpAddress $row.PrimarySmtpAddress -ErrorAction Stop
+                    Write-CMLog "Restored $($row.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
+                    $done++
+                } catch {
+                    Write-CMLog "Failed $($row.Identity): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                }
+            }
+            Write-CMLog "Rollback complete. $done restored, $errs errors." (if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+        } catch {
+            Write-CMLog "Rollback error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 3: Scan ----
+    $btnScanDomain.Add_Click({
+        $domain = $txtDomainToRemove.Text.Trim().ToLower()
+        if (-not $domain) { Write-CMLog "Enter a domain name to scan." ([System.Drawing.Color]::Tomato); return }
+        if (-not $script:CMConnected) { return }
+        try {
+            $form.UseWaitCursor = $true
+            $lvDomainObjects.Items.Clear()
+            $btnRemoveDomainObjs.Enabled = $false
+            $btnConfirmClean.Enabled = $false
+            Write-CMLog "Scanning for '@$domain' across Exchange and Entra objects..." ([System.Drawing.Color]::Silver)
+            $found = 0
+
+            # Exchange mailboxes
+            if ($script:CMEXOConnected) {
+                $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName -ErrorAction Stop
+                foreach ($m in $mbxs) {
+                    $hits = $m.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                    foreach ($h in $hits) {
+                        $lvi = New-Object System.Windows.Forms.ListViewItem($m.UserPrincipalName)
+                        $lvi.SubItems.Add('Mailbox') | Out-Null; $lvi.SubItems.Add($h) | Out-Null; $lvi.SubItems.Add('Pending') | Out-Null
+                        $lvDomainObjects.Items.Add($lvi) | Out-Null; $found++
+                    }
+                }
+                # Distribution/mail-enabled groups in EXO
+                $exoGroups = Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue
+                foreach ($g in $exoGroups) {
+                    $hits = $g.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                    foreach ($h in $hits) {
+                        $lvi = New-Object System.Windows.Forms.ListViewItem($g.Name)
+                        $lvi.SubItems.Add('DistributionGroup') | Out-Null; $lvi.SubItems.Add($h) | Out-Null; $lvi.SubItems.Add('Pending') | Out-Null
+                        $lvDomainObjects.Items.Add($lvi) | Out-Null; $found++
+                    }
+                }
+            }
+
+            # Entra users (UPN / mail)
+            $mgUsers = Get-MgUser -All -Property Id,UserPrincipalName,Mail,ProxyAddresses,DisplayName -ErrorAction Stop
+            foreach ($u in $mgUsers) {
+                $hits = @()
+                if ($u.UserPrincipalName -match "@$([regex]::Escape($domain))$") { $hits += "UPN:$($u.UserPrincipalName)" }
+                $hits += ($u.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" })
+                foreach ($h in $hits) {
+                    $lvi = New-Object System.Windows.Forms.ListViewItem($u.UserPrincipalName)
+                    $lvi.SubItems.Add('EntraUser') | Out-Null; $lvi.SubItems.Add($h) | Out-Null; $lvi.SubItems.Add('Pending') | Out-Null
+                    $lvDomainObjects.Items.Add($lvi) | Out-Null; $found++
+                }
+            }
+
+            # Entra groups
+            $mgGroups = Get-MgGroup -All -Property Id,DisplayName,Mail,ProxyAddresses -ErrorAction Stop
+            foreach ($g in $mgGroups) {
+                $hits = $g.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                if ($g.Mail -match "@$([regex]::Escape($domain))$") { $hits += "mail:$($g.Mail)" }
+                foreach ($h in $hits) {
+                    $lvi = New-Object System.Windows.Forms.ListViewItem($g.DisplayName)
+                    $lvi.SubItems.Add('EntraGroup') | Out-Null; $lvi.SubItems.Add($h) | Out-Null; $lvi.SubItems.Add('Pending') | Out-Null
+                    $lvDomainObjects.Items.Add($lvi) | Out-Null; $found++
+                }
+            }
+
+            Write-CMLog "Scan complete. Found $found address entries containing '@$domain'." (if ($found -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+            if ($found -gt 0) { $btnRemoveDomainObjs.Enabled = $true }
+            else { $btnConfirmClean.Enabled = $true }
+        } catch {
+            Write-CMLog "Scan error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 3: Remove Domain from Objects ----
+    $btnRemoveDomainObjs.Add_Click({
+        $domain = $txtDomainToRemove.Text.Trim().ToLower()
+        if (-not $domain) { return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Remove all addresses containing '@$domain' from mailboxes, Exchange groups, Entra users, and Entra groups?`n`nThis cannot be undone without a backup.`n`nProceed?",
+            'Remove Domain from Objects',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            $form.UseWaitCursor = $true
+            $done = 0; $errs = 0
+
+            if ($script:CMEXOConnected) {
+                # Mailboxes
+                $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName -ErrorAction Stop
+                foreach ($m in $mbxs) {
+                    $toRemove = $m.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                    foreach ($a in $toRemove) {
+                        try {
+                            Set-Mailbox -Identity $m.UserPrincipalName -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                            Write-CMLog "Removed $a from $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
+                        } catch { Write-CMLog "Failed $($m.UserPrincipalName) ($a): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                    }
+                }
+                # EXO distribution groups
+                $exoGroups = Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue
+                foreach ($g in $exoGroups) {
+                    $toRemove = $g.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                    foreach ($a in $toRemove) {
+                        try {
+                            Set-DistributionGroup -Identity $g.Name -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                            Write-CMLog "Removed $a from group $($g.Name)" ([System.Drawing.Color]::LimeGreen); $done++
+                        } catch { Write-CMLog "Failed group $($g.Name): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                    }
+                }
+            }
+
+            # Entra users — remove proxyAddresses
+            $mgUsers = Get-MgUser -All -Property Id,UserPrincipalName,ProxyAddresses -ErrorAction Stop
+            foreach ($u in $mgUsers) {
+                $toRemove = $u.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                if ($toRemove) {
+                    $newProxies = @($u.ProxyAddresses | Where-Object { $_ -notmatch "@$([regex]::Escape($domain))$" })
+                    try {
+                        Update-MgUser -UserId $u.Id -BodyParameter @{ proxyAddresses = $newProxies } -ErrorAction Stop
+                        Write-CMLog "Cleaned Entra proxyAddresses for $($u.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
+                    } catch { Write-CMLog "Failed Entra user $($u.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                }
+            }
+
+            # Entra groups
+            $mgGroups = Get-MgGroup -All -Property Id,DisplayName,ProxyAddresses -ErrorAction Stop
+            foreach ($g in $mgGroups) {
+                $toRemove = $g.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
+                if ($toRemove) {
+                    $newProxies = @($g.ProxyAddresses | Where-Object { $_ -notmatch "@$([regex]::Escape($domain))$" })
+                    try {
+                        Update-MgGroup -GroupId $g.Id -BodyParameter @{ proxyAddresses = $newProxies } -ErrorAction Stop
+                        Write-CMLog "Cleaned Entra group $($g.DisplayName)" ([System.Drawing.Color]::LimeGreen); $done++
+                    } catch { Write-CMLog "Failed Entra group $($g.DisplayName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                }
+            }
+
+            Write-CMLog "Domain removal from objects complete. $done removed, $errs errors." (if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen })
+            $btnConfirmClean.Enabled = $true
+            # Update grid
+            for ($i = 0; $i -lt $lvDomainObjects.Items.Count; $i++) {
+                $lvDomainObjects.Items[$i].SubItems[3].Text = if ($errs -gt 0) { 'Done (some errors)' } else { 'Removed' }
+                $lvDomainObjects.Items[$i].ForeColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
+            }
+        } catch {
+            Write-CMLog "Error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 3: Confirm Clean ----
+    $btnConfirmClean.Add_Click({
+        $domain = $txtDomainToRemove.Text.Trim()
+        if (-not $domain) { return }
+        Write-CMLog "Re-scanning for '@$domain' to confirm clean..." ([System.Drawing.Color]::Silver)
+        try {
+            $form.UseWaitCursor = $true
+            $remaining = 0
+            if ($script:CMEXOConnected) {
+                $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses -ErrorAction Stop
+                $remaining += ($mbxs | ForEach-Object { $_.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" } }).Count
+            }
+            $mgUsers = Get-MgUser -All -Property ProxyAddresses,UserPrincipalName -ErrorAction Stop
+            $remaining += ($mgUsers | ForEach-Object { $_.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" } } | Measure-Object).Count
+            $remaining += ($mgUsers | Where-Object { $_.UserPrincipalName -match "@$([regex]::Escape($domain))$" }).Count
+            $mgGroups = Get-MgGroup -All -Property ProxyAddresses -ErrorAction Stop
+            $remaining += ($mgGroups | ForEach-Object { $_.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" } } | Measure-Object).Count
+            if ($remaining -eq 0) {
+                Write-CMLog "CONFIRMED: No objects contain '@$domain'. Safe to proceed to Step 4." ([System.Drawing.Color]::LimeGreen)
+            } else {
+                Write-CMLog "WARNING: $remaining addresses still contain '@$domain'. Run Remove again." ([System.Drawing.Color]::Tomato)
+            }
+        } catch {
+            Write-CMLog "Confirm error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    # ---- Step 4: Refresh Domain List ----
+    $doRefreshDomains = {
+        try {
+            $lvDomains.Items.Clear()
+            $domains = Get-MgDomain -All -ErrorAction Stop
+            foreach ($d in $domains) {
+                $lvi = New-Object System.Windows.Forms.ListViewItem($d.Id)
+                $lvi.SubItems.Add($d.SupportedServices -join ',') | Out-Null
+                $lvi.SubItems.Add([string]$d.IsInitial) | Out-Null
+                $lvi.SubItems.Add([string]$d.IsDefault) | Out-Null
+                $lvi.SubItems.Add([string]$d.IsVerified) | Out-Null
+                $lvi.ForeColor = if ($d.IsInitial -or $d.IsDefault) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::Silver }
+                $lvDomains.Items.Add($lvi) | Out-Null
+            }
+        } catch { Write-CMLog "Failed to list domains: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    }
+
+    $btnRefreshDomains.Add_Click({
+        if (-not $script:CMConnected) { return }
+        & $doRefreshDomains
+        Write-CMLog "Domain list refreshed." ([System.Drawing.Color]::Silver)
+    })
+
+    # ---- Step 4: Remove Domain from Tenant ----
+    $btnRemoveTenantDomain.Add_Click({
+        $domain = $txtFinalDomain.Text.Trim()
+        if (-not $domain) { Write-CMLog "Enter the domain name to remove." ([System.Drawing.Color]::Tomato); return }
+        if (-not $script:CMConnected) { return }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "PERMANENTLY remove domain '$domain' from tenant '$($script:CMTenantId)'?`n`nAll objects using this domain must already be cleaned (Step 3).`n`nThis action is irreversible.`n`nProceed?",
+            'Remove Domain from Tenant',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+        try {
+            $form.UseWaitCursor = $true
+            Write-CMLog "Removing domain '$domain' from tenant..." ([System.Drawing.Color]::DarkGoldenrod)
+            Remove-MgDomain -DomainId $domain -ErrorAction Stop
+            Write-CMLog "Remove command sent. Polling every 30 seconds to confirm removal..." ([System.Drawing.Color]::LimeGreen)
+            $lblDomainPollStatus.Text = "Waiting for domain removal confirmation..."
+            $lblDomainPollStatus.ForeColor = [System.Drawing.Color]::DarkGoldenrod
+            $btnStopDomainPoll.Visible = $true
+            $script:CMDomainPollDomain = $domain
+            $script:CMDomainPollAttempt = 0
+            $domainPollTimer.Start()
+        } catch {
+            Write-CMLog "Remove failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+            if ($_.Exception.Message -match 'object.*exist|reference|still|association') {
+                Write-CMLog "Tip: Some objects may still reference this domain. Run Step 3 Confirm Clean first." ([System.Drawing.Color]::DarkGoldenrod)
+            }
+        } finally { $form.UseWaitCursor = $false }
+    })
+
+    $btnStopDomainPoll.Add_Click({ $domainPollTimer.Stop(); $btnStopDomainPoll.Visible = $false; $lblDomainPollStatus.Text = 'Polling stopped.' })
+
+    $domainPollTimer.Add_Tick({
+        $script:CMDomainPollAttempt++
+        Write-CMLog "Domain poll #$($script:CMDomainPollAttempt) for '$($script:CMDomainPollDomain)'..." ([System.Drawing.Color]::DimGray)
+        try {
+            $stillExists = $null
+            try { $stillExists = Get-MgDomain -DomainId $script:CMDomainPollDomain -ErrorAction Stop } catch {}
+            if (-not $stillExists) {
+                $domainPollTimer.Stop(); $btnStopDomainPoll.Visible = $false
+                $lblDomainPollStatus.Text = "Domain '$($script:CMDomainPollDomain)' has been removed."
+                $lblDomainPollStatus.ForeColor = [System.Drawing.Color]::LimeGreen
+                Write-CMLog "CONFIRMED: Domain '$($script:CMDomainPollDomain)' no longer exists in tenant." ([System.Drawing.Color]::LimeGreen)
+                & $doRefreshDomains
+            } else {
+                $lblDomainPollStatus.Text = "Poll #$($script:CMDomainPollAttempt): domain still present, waiting..."
+                $lblDomainPollStatus.ForeColor = [System.Drawing.Color]::DarkGoldenrod
+            }
+        } catch {
+            Write-CMLog "Poll error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        }
+    })
+
+    #endregion ---- Event Handlers ----
+
+    & $navTo 1
+    Write-CMLog "Frankenstein Cutover Migrator ready." ([System.Drawing.Color]::Silver)
+    Write-CMLog "1. Connect using your Tenant ID.  2. Step through each tab in order, or jump to any tab independently." ([System.Drawing.Color]::DimGray)
+
+    $form.Add_FormClosing({
+        $syncPollTimer.Stop(); $syncPollTimer.Dispose()
+        $domainPollTimer.Stop(); $domainPollTimer.Dispose()
+        if ($script:CMEXOConnected) {
+            try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+        }
+        if (Get-MgContext -ErrorAction SilentlyContinue) {
+            try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
+        }
+    })
+
+    $form.ShowDialog() | Out-Null
+    $form.Dispose()
+}

@@ -3030,16 +3030,25 @@ NOTES
     $script:PMSourceData         = [System.Collections.Generic.List[PSCustomObject]]::new()
     $script:PMMappingTable       = @{}
     $script:PMResultLog          = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $script:PMLiveLogPath        = ''
 
     #region ---- Helpers ----
 
     function Write-PMLog {
         Param ([string]$Message, [System.Drawing.Color]$Color = [System.Drawing.Color]::Silver)
+        $ts = (Get-Date).ToString('HH:mm:ss')
         $rtbLog.SelectionStart  = $rtbLog.TextLength
         $rtbLog.SelectionLength = 0
+        $rtbLog.SelectionColor  = [System.Drawing.Color]::FromArgb(80,80,80)
+        $rtbLog.AppendText("[$ts] ")
+        $rtbLog.SelectionStart  = $rtbLog.TextLength
         $rtbLog.SelectionColor  = $Color
-        $rtbLog.AppendText("$(Get-Date -Format 'HH:mm:ss')  $Message`n")
+        $rtbLog.AppendText("$Message`n")
         $rtbLog.ScrollToCaret()
+        $rtbLog.Refresh()
+        if ($script:PMLiveLogPath) {
+            try { "[$ts] $Message" | Out-File -Append -FilePath $script:PMLiveLogPath -Encoding UTF8 } catch {}
+        }
         [System.Windows.Forms.Application]::DoEvents()
     }
 
@@ -3291,18 +3300,19 @@ NOTES
     #region ---- Build Form ----
 
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "Frankenstein - Permission Migrator"
+    $form.Text            = "Frankenstein — Permission Migrator"
     $form.ClientSize      = New-Object System.Drawing.Size(700, 848)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedSingle'
     $form.MaximizeBox     = $false
     $form.Font            = New-Object System.Drawing.Font("Segoe UI", 9)
-    $form.BackColor       = [System.Drawing.Color]::FromArgb(245, 245, 248)
+    $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
+    $form.ForeColor       = [System.Drawing.Color]::White
 
     $lblHeader           = New-Object System.Windows.Forms.Label
-    $lblHeader.Text      = "Frankenstein - Permission Migrator"
+    $lblHeader.Text      = "Frankenstein — Permission Migrator"
     $lblHeader.Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
-    $lblHeader.ForeColor = [System.Drawing.Color]::FromArgb(28, 28, 72)
+    $lblHeader.ForeColor = [System.Drawing.Color]::White
     $lblHeader.Location  = New-Object System.Drawing.Point(14, 12)
     $lblHeader.Size      = New-Object System.Drawing.Size(660, 28)
     $form.Controls.Add($lblHeader)
@@ -3826,6 +3836,10 @@ Important rules:
 
         $btnPreview.Enabled = $false
         $form.UseWaitCursor = $true
+        $outPath = $txtOutPath.Text.Trim()
+        $script:PMLiveLogPath = if ($outPath -and (Test-Path $outPath)) {
+            Join-Path $outPath "PMPreviewLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).txt"
+        } else { '' }
         try {
             Switch-PMToSource
             Set-PMStatusLabel $lblSrcStatus "Connected - reading $($mailboxList.Count) recipient object(s)..." ([System.Drawing.Color]::DarkOrange)
@@ -3887,6 +3901,10 @@ Important rules:
 
         $btnRun.Enabled = $false
         $form.UseWaitCursor = $true
+        $outPath = $txtOutPath.Text.Trim()
+        $script:PMLiveLogPath = if ($outPath -and (Test-Path $outPath)) {
+            Join-Path $outPath "PMMigrationLog_$((Get-Date).ToString('yyyyMMdd_HHmmss')).txt"
+        } else { '' }
         try {
             if ($script:PMSourceData.Count -gt 0) {
                 Write-PMLog "Using source data from Preview ($($script:PMSourceData.Count) record(s)) -- skipping re-scan." ([System.Drawing.Color]::DimGray)
@@ -3938,6 +3956,40 @@ Important rules:
 
     #endregion
 
+    # Apply dark theme to controls that don't inherit colors from the form
+    $pmApplyDark = {
+        param([System.Windows.Forms.Control]$c)
+        switch ($c.GetType().Name) {
+            'TextBox' {
+                $c.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+                $c.ForeColor = [System.Drawing.Color]::White
+                $c.BorderStyle = 'FixedSingle'
+            }
+            'ListView' {
+                $c.BackColor = [System.Drawing.Color]::FromArgb(38,38,38)
+                $c.ForeColor = [System.Drawing.Color]::Silver
+                $c.BorderStyle = 'FixedSingle'
+            }
+            'Button' {
+                if ($c.BackColor.ToArgb() -ne [System.Drawing.Color]::FromArgb(0,120,212).ToArgb()) {
+                    $c.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+                    $c.BackColor = [System.Drawing.Color]::FromArgb(60,60,60)
+                    $c.ForeColor = [System.Drawing.Color]::White
+                }
+            }
+            'Label' {
+                $a = $c.ForeColor.ToArgb()
+                if ($a -eq [System.Drawing.Color]::Gray.ToArgb()) { $c.ForeColor = [System.Drawing.Color]::DimGray }
+                elseif ($a -eq [System.Drawing.Color]::DarkGreen.ToArgb()) { $c.ForeColor = [System.Drawing.Color]::LimeGreen }
+            }
+            'CheckBox'     { $c.ForeColor = [System.Drawing.Color]::Silver }
+            'RadioButton'  { $c.ForeColor = [System.Drawing.Color]::Silver }
+            'GroupBox'     { $c.ForeColor = [System.Drawing.Color]::Silver }
+        }
+        foreach ($child in @($c.Controls)) { & $pmApplyDark $child }
+    }
+    & $pmApplyDark $form
+
     Write-PMLog "Ready. Connect to both tenants first to validate credentials, then load your mapping." ([System.Drawing.Color]::Silver)
     Write-PMLog "Note: Preview and Run Migration re-authenticate to source (to read) then target (to apply)." ([System.Drawing.Color]::DimGray)
 
@@ -3982,8 +4034,11 @@ function Invoke-FrankensteinDLMigrator {
         $ts = (Get-Date).ToString('HH:mm:ss')
         $rtbLog.SelectionStart  = $rtbLog.TextLength
         $rtbLog.SelectionLength = 0
+        $rtbLog.SelectionColor  = [System.Drawing.Color]::FromArgb(80,80,80)
+        $rtbLog.AppendText("[$ts] ")
+        $rtbLog.SelectionStart  = $rtbLog.TextLength
         $rtbLog.SelectionColor  = $color
-        $rtbLog.AppendText("[$ts] $msg`n")
+        $rtbLog.AppendText("$msg`n")
         $rtbLog.ScrollToCaret()
         $rtbLog.Refresh()
         if ($script:DLLiveLogPath) {
@@ -4661,18 +4716,19 @@ function Invoke-FrankensteinDLMigrator {
     #region ---- Build Form ----
 
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "Frankenstein - DL Migrator"
+    $form.Text            = "Frankenstein — DL Migrator"
     $form.ClientSize      = New-Object System.Drawing.Size(800, 994)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedSingle'
     $form.MaximizeBox     = $false
     $form.Font            = New-Object System.Drawing.Font("Segoe UI", 9)
-    $form.BackColor       = [System.Drawing.Color]::FromArgb(245, 245, 248)
+    $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
+    $form.ForeColor       = [System.Drawing.Color]::White
 
     $lblHeader           = New-Object System.Windows.Forms.Label
-    $lblHeader.Text      = "Frankenstein - Distribution Group Migrator"
+    $lblHeader.Text      = "Frankenstein — Distribution Group Migrator"
     $lblHeader.Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
-    $lblHeader.ForeColor = [System.Drawing.Color]::FromArgb(28, 28, 72)
+    $lblHeader.ForeColor = [System.Drawing.Color]::White
     $lblHeader.Location  = New-Object System.Drawing.Point(14, 12)
     $lblHeader.Size      = New-Object System.Drawing.Size(660, 28)
     $form.Controls.Add($lblHeader)
@@ -5845,6 +5901,40 @@ Supported group types: MailUniversalDistributionGroup,
 
     #endregion
 
+    # Apply dark theme to controls that don't inherit colors from the form
+    $dlApplyDark = {
+        param([System.Windows.Forms.Control]$c)
+        switch ($c.GetType().Name) {
+            'TextBox' {
+                $c.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+                $c.ForeColor = [System.Drawing.Color]::White
+                $c.BorderStyle = 'FixedSingle'
+            }
+            'ListView' {
+                $c.BackColor = [System.Drawing.Color]::FromArgb(38,38,38)
+                $c.ForeColor = [System.Drawing.Color]::Silver
+                $c.BorderStyle = 'FixedSingle'
+            }
+            'Button' {
+                if ($c.BackColor.ToArgb() -ne [System.Drawing.Color]::FromArgb(0,120,212).ToArgb()) {
+                    $c.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+                    $c.BackColor = [System.Drawing.Color]::FromArgb(60,60,60)
+                    $c.ForeColor = [System.Drawing.Color]::White
+                }
+            }
+            'Label' {
+                $a = $c.ForeColor.ToArgb()
+                if ($a -eq [System.Drawing.Color]::Gray.ToArgb()) { $c.ForeColor = [System.Drawing.Color]::DimGray }
+                elseif ($a -eq [System.Drawing.Color]::DarkGreen.ToArgb()) { $c.ForeColor = [System.Drawing.Color]::LimeGreen }
+            }
+            'CheckBox'     { $c.ForeColor = [System.Drawing.Color]::Silver }
+            'RadioButton'  { $c.ForeColor = [System.Drawing.Color]::Silver }
+            'GroupBox'     { $c.ForeColor = [System.Drawing.Color]::Silver }
+        }
+        foreach ($child in @($c.Controls)) { & $dlApplyDark $child }
+    }
+    & $dlApplyDark $form
+
     Write-DLLog "Ready. Connect to both tenants first, then load your mapping." ([System.Drawing.Color]::Silver)
     Write-DLLog "Tip: Include both group rows AND member rows in the same mapping CSV." ([System.Drawing.Color]::DimGray)
 
@@ -5924,6 +6014,7 @@ function Invoke-FrankensteinMailboxMigrator {
     $script:MMMaxStep            = 1
     $script:MMMappingRows        = [System.Collections.Generic.List[PSCustomObject]]::new()
     $script:MMCurrentProfileName = ''
+    $script:MMLiveLogPath        = ''
     #endregion
 
     #region ---- Logging ----
@@ -5933,11 +6024,17 @@ function Invoke-FrankensteinMailboxMigrator {
         try {
             $logBox.SelectionStart  = $logBox.TextLength
             $logBox.SelectionLength = 0
+            $logBox.SelectionColor  = [System.Drawing.Color]::FromArgb(80,80,80)
+            $logBox.AppendText("[$ts] ")
+            $logBox.SelectionStart  = $logBox.TextLength
             $logBox.SelectionColor  = $color
-            $logBox.AppendText("[$ts] $msg`n")
-            $logBox.SelectionColor  = $logBox.ForeColor
+            $logBox.AppendText("$msg`n")
             $logBox.ScrollToCaret()
+            $logBox.Refresh()
         } catch {}
+        if ($script:MMLiveLogPath) {
+            try { "[$ts] $msg" | Out-File -Append -FilePath $script:MMLiveLogPath -Encoding UTF8 } catch {}
+        }
         [System.Windows.Forms.Application]::DoEvents()
     }
     #endregion
@@ -6900,6 +6997,12 @@ function Invoke-FrankensteinMailboxMigrator {
             $script:MMFlyConnected = $true
             Set-MMStatusLabel $lblFlyStatus 'Connected' ([System.Drawing.Color]::LimeGreen)
             Write-MMLog "Fly connected." ([System.Drawing.Color]::LimeGreen)
+            if (-not $script:MMLiveLogPath) {
+                $logDir = Join-Path $env:APPDATA 'Frankenstein\Projects'
+                if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+                $script:MMLiveLogPath = Join-Path $logDir "MailboxMigrator_Log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
+                Write-MMLog "Session log: $($script:MMLiveLogPath)" ([System.Drawing.Color]::DimGray)
+            }
             Update-Step1NextButton
         } catch {
             $script:MMFlyConnected = $false
@@ -7766,6 +7869,7 @@ function Invoke-FrankensteinDomainMigrator {
     $script:CMSyncPollTimer = $null
     $script:CMDomainPollTimer = $null
     $script:CMSyncedUsers  = @()
+    $script:CMLiveLogPath  = ''
 
     function New-CMExportDir {
         if (-not $script:CMExportDir) {
@@ -7799,7 +7903,7 @@ function Invoke-FrankensteinDomainMigrator {
     #region ---- Log helper ----
     $rtfLog = New-Object System.Windows.Forms.RichTextBox
     function Write-CMLog ([string]$msg, [System.Drawing.Color]$color = [System.Drawing.Color]::Silver) {
-        $ts = Get-Date -Format 'HH:mm:ss'
+        $ts = (Get-Date).ToString('HH:mm:ss')
         $rtfLog.SelectionStart  = $rtfLog.TextLength
         $rtfLog.SelectionLength = 0
         $rtfLog.SelectionColor  = [System.Drawing.Color]::FromArgb(80,80,80)
@@ -7808,6 +7912,10 @@ function Invoke-FrankensteinDomainMigrator {
         $rtfLog.SelectionColor  = $color
         $rtfLog.AppendText("$msg`n")
         $rtfLog.ScrollToCaret()
+        $rtfLog.Refresh()
+        if ($script:CMLiveLogPath) {
+            try { "[$ts] $msg" | Out-File -Append -FilePath $script:CMLiveLogPath -Encoding UTF8 } catch {}
+        }
         [System.Windows.Forms.Application]::DoEvents()
     }
     #endregion
@@ -8259,7 +8367,10 @@ function Invoke-FrankensteinDomainMigrator {
             Connect-ExchangeOnline @exoParams
             $script:CMEXOConnected = $true
             $script:CMConnected    = $true
+            # Start live log file (matches DL Migrator pattern — captures all activity from connection onward)
+            $script:CMLiveLogPath = Join-Path (New-CMExportDir) "DomainMigrator_Log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
             Write-CMLog "Exchange Online connected." ([System.Drawing.Color]::LimeGreen)
+            Write-CMLog "Session log: $($script:CMLiveLogPath)" ([System.Drawing.Color]::DimGray)
             $lblConnStatus.Text      = "Connected — Tenant: $($script:CMTenantId)"
             $lblConnStatus.ForeColor = [System.Drawing.Color]::FromArgb(100,220,130)
             $btnDisableSync.Enabled  = $true
@@ -8762,9 +8873,15 @@ function Invoke-FrankensteinDomainMigrator {
         if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         try {
             $form.UseWaitCursor = $true
-            $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName -ErrorAction Stop
             $done = 0; $errs = 0
+
+            # Track UPNs handled via Exchange mailboxes so we skip them in the Entra-only pass
+            $handledUpns = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+            Write-CMLog "Updating UPNs for Exchange mailbox users..." ([System.Drawing.Color]::Silver)
+            $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName -ErrorAction Stop
             foreach ($m in $mbxs) {
+                $handledUpns.Add($m.UserPrincipalName) | Out-Null
                 if ($m.UserPrincipalName -like "*@$($script:CMOnMSDomain)") {
                     Write-CMLog "$($m.UserPrincipalName): UPN already onmicrosoft.com." ([System.Drawing.Color]::DimGray); $done++; continue
                 }
@@ -8783,6 +8900,28 @@ function Invoke-FrankensteinDomainMigrator {
                     Write-CMLog "Failed $($m.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
                 }
             }
+
+            # Non-mailbox Entra users (unlicensed, service accounts, etc.) whose UPN still uses a custom domain
+            Write-CMLog "Updating UPNs for non-mailbox Entra users..." ([System.Drawing.Color]::Silver)
+            $allEntraUsers = @(Get-MgUser -All -Property Id,UserPrincipalName,DisplayName -ErrorAction Stop)
+            $nonMbxUsers = @($allEntraUsers | Where-Object {
+                -not $handledUpns.Contains($_.UserPrincipalName) -and
+                $_.UserPrincipalName -notlike "*@$($script:CMOnMSDomain)" -and
+                $_.UserPrincipalName -notlike "*#EXT#*"  # skip external/guest accounts
+            })
+            Write-CMLog "  Found $($nonMbxUsers.Count) non-mailbox users with non-OnMS UPNs." ([System.Drawing.Color]::Silver)
+            foreach ($u in $nonMbxUsers) {
+                $localPart = $u.UserPrincipalName -replace '@.*$', ''
+                $newUpn = "$localPart@$($script:CMOnMSDomain)"
+                try {
+                    Update-MgUser -UserId $u.Id -BodyParameter @{ userPrincipalName = $newUpn } -ErrorAction Stop
+                    Write-CMLog "UPN: $($u.UserPrincipalName) → $newUpn" ([System.Drawing.Color]::LimeGreen)
+                    $done++
+                } catch {
+                    Write-CMLog "Failed $($u.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                }
+            }
+
             $finalColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
             Write-CMLog "UPN update complete. $done done, $errs errors." $finalColor
         } catch {
@@ -9015,16 +9154,36 @@ function Invoke-FrankensteinDomainMigrator {
                 }
             }
 
-            # Entra users — remove proxyAddresses
-            $mgUsers = Get-MgUser -All -Property Id,UserPrincipalName,ProxyAddresses -ErrorAction Stop
+            # Entra users — remove proxyAddresses AND update UPN if it uses the domain
+            $mgUsers = Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,ProxyAddresses -ErrorAction Stop
             foreach ($u in $mgUsers) {
+                # Remove matching proxy addresses
                 $toRemove = $u.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
                 if ($toRemove) {
                     $newProxies = @($u.ProxyAddresses | Where-Object { $_ -notmatch "@$([regex]::Escape($domain))$" })
                     try {
                         Update-MgUser -UserId $u.Id -BodyParameter @{ proxyAddresses = $newProxies } -ErrorAction Stop
-                        Write-CMLog "Cleaned Entra proxyAddresses for $($u.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
-                    } catch { Write-CMLog "Failed Entra user $($u.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                        Write-CMLog "Removed domain addresses from $($u.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
+                    } catch {
+                        if ($_.Exception.Message -match 'read-only') {
+                            Write-CMLog "Skipped proxyAddresses for $($u.UserPrincipalName) — managed by Exchange" ([System.Drawing.Color]::DimGray)
+                        } else {
+                            Write-CMLog "Failed Entra user $($u.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                        }
+                    }
+                }
+                # Update UPN if it uses the domain being removed (catches unlicensed users with no Exchange object)
+                if ($u.UserPrincipalName -match "@$([regex]::Escape($domain))$") {
+                    if ($script:CMOnMSDomain) {
+                        $localPart = $u.UserPrincipalName -replace '@.*$', ''
+                        $newUpn = "$localPart@$($script:CMOnMSDomain)"
+                        try {
+                            Update-MgUser -UserId $u.Id -BodyParameter @{ userPrincipalName = $newUpn } -ErrorAction Stop
+                            Write-CMLog "UPN: $($u.UserPrincipalName) → $newUpn" ([System.Drawing.Color]::LimeGreen); $done++
+                        } catch { Write-CMLog "Failed UPN change for $($u.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++ }
+                    } else {
+                        Write-CMLog "Cannot update UPN $($u.UserPrincipalName) — OnMS domain not detected; run Update UPNs (Tab 2) manually." ([System.Drawing.Color]::DarkGoldenrod)
+                    }
                 }
             }
 

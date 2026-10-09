@@ -8415,31 +8415,38 @@ function Invoke-FrankensteinDomainMigrator {
             $lvOnMS.Items.Clear()
             Write-CMLog "Loading mailboxes..." ([System.Drawing.Color]::Silver)
             $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,DisplayName,PrimarySmtpAddress -ErrorAction Stop
-            # Build a lookup of all used onmicrosoft.com addresses for conflict detection
-            $usedOnMS = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            foreach ($m in $mbxs) { foreach ($a in $m.EmailAddresses) { if ($a -match "@$([regex]::Escape($script:CMOnMSDomain))$") { $usedOnMS.Add($a.TrimStart('smtp:','SMTP:').ToLower()) | Out-Null } } }
+            # Build ownership map: onms_address.lower() → user identity (to detect cross-user conflicts only)
+            $onmsOwner = @{}
+            foreach ($m in $mbxs) {
+                foreach ($a in $m.EmailAddresses) {
+                    if ($a -match "@$([regex]::Escape($script:CMOnMSDomain))$") {
+                        $clean = ($a -replace '^(?i)smtp:', '').ToLower()
+                        $onmsOwner[$clean] = $m.UserPrincipalName
+                    }
+                }
+            }
             $processed = 0
             foreach ($m in $mbxs) {
                 $upnPrefix = ($m.UserPrincipalName -split '@')[0]
-                $desired   = "$upnPrefix@$($script:CMOnMSDomain)"
-                $hasOnMS   = $m.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($script:CMOnMSDomain))$" }
-                $hasPrimary = $m.EmailAddresses | Where-Object { $_ -match "^SMTP:$([regex]::Escape($upnPrefix))@$([regex]::Escape($script:CMOnMSDomain))$" }
+                $desired   = "$upnPrefix@$($script:CMOnMSDomain)".ToLower()
+                # Check if this user already owns the desired address
+                $alreadyOwned = $onmsOwner.ContainsKey($desired) -and $onmsOwner[$desired] -ieq $m.UserPrincipalName
 
-                if ($hasPrimary) {
+                if ($alreadyOwned) {
                     $action = 'Already exists'
                     $onmsAddr = $desired
                 } else {
-                    # Resolve conflicts
-                    $candidate = $desired.ToLower()
+                    # Find a non-conflicting address (skip addresses owned by other users)
+                    $candidate = $desired
                     $suffix = 0
-                    while ($usedOnMS.Contains($candidate)) {
+                    while ($onmsOwner.ContainsKey($candidate) -and $onmsOwner[$candidate] -ine $m.UserPrincipalName) {
                         $suffix++
                         $candidate = "$upnPrefix$suffix@$($script:CMOnMSDomain)".ToLower()
                     }
                     $onmsAddr = $candidate
                     try {
                         Set-Mailbox -Identity $m.UserPrincipalName -EmailAddresses @{Add="smtp:$onmsAddr"} -ErrorAction Stop
-                        $usedOnMS.Add($onmsAddr) | Out-Null
+                        $onmsOwner[$onmsAddr] = $m.UserPrincipalName
                         $action = if ($suffix -gt 0) { "Added (conflict→$onmsAddr)" } else { 'Added' }
                         Write-CMLog "Added $onmsAddr → $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
                     } catch {

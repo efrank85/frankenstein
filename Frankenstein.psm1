@@ -8215,80 +8215,100 @@ function Invoke-FrankensteinDomainMigrator {
 
         $btnConnect.Enabled = $false
         $form.UseWaitCursor  = $true
-        Write-CMLog "Connecting — a browser window will open for authentication. Form stays responsive." ([System.Drawing.Color]::DarkGoldenrod)
 
-        # Run auth in a background runspace so the WinForms message pump is never blocked.
-        # EXO v3 and MgGraph both use process-wide MSAL/REST sessions — connecting from a
-        # background runspace makes the session available on the UI thread immediately.
-        $exoCmdlets = @('Set-Mailbox','Get-Mailbox','Get-MailUser','Set-MailUser',
-                        'Get-DistributionGroup','Set-DistributionGroup',
-                        'Get-UnifiedGroup','Set-UnifiedGroup',
-                        'Get-ConnectionInformation','Get-OrganizationConfig')
+        # Phase 1: Graph auth on the UI thread.
+        # MSAL browser/WAM auth requires the calling thread — keeping this synchronous
+        # is correct. The form is briefly unresponsive only while the browser is open,
+        # which is acceptable because the user is in the browser, not the form.
+        Write-CMLog "Connecting to Microsoft Graph (browser will open)..." ([System.Drawing.Color]::DarkGoldenrod)
+        [System.Windows.Forms.Application]::DoEvents()
+        try {
+            Connect-MgGraph -Scopes 'Organization.ReadWrite.All','Directory.ReadWrite.All',
+                                     'User.ReadWrite.All','Group.ReadWrite.All','Domain.ReadWrite.All' `
+                            -TenantId $tid -NoWelcome -ErrorAction Stop
+            $ctx = Get-MgContext
+            $script:CMTenantId = $ctx.TenantId
+            $script:CMAdminUpn = $ctx.Account
+            Write-CMLog "Graph connected. Tenant: $($ctx.TenantId)  Account: $($ctx.Account)" ([System.Drawing.Color]::LimeGreen)
+        } catch {
+            Write-CMLog "Graph connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+            $btnConnect.Enabled = $true
+            $form.UseWaitCursor  = $false
+            return
+        }
 
-        $ps = [System.Management.Automation.PowerShell]::Create()
-        [void]$ps.AddScript({
-            param($tenantId, $cmdlets)
-            $r = @{ OK = $false; Err = ''; Tenant = ''; Upn = ''; OnMS = '' }
+        # Phase 2: EXO in a background runspace.
+        # After Graph auth MSAL has a cached token, so EXO authenticates silently — no
+        # browser opens, just 5-10 s of cmdlet loading. Running this off the UI thread
+        # keeps the form fully responsive during that wait.
+        $lblConnStatus.Text      = "Graph connected — Exchange Online connecting..."
+        $lblConnStatus.ForeColor = [System.Drawing.Color]::DarkGoldenrod
+        $form.UseWaitCursor = $false
+        Write-CMLog "Connecting to Exchange Online in background (form stays responsive)..." ([System.Drawing.Color]::Silver)
+        [System.Windows.Forms.Application]::DoEvents()
+
+        $exoCmdlets  = @('Set-Mailbox','Get-Mailbox','Get-MailUser','Set-MailUser',
+                         'Get-DistributionGroup','Set-DistributionGroup',
+                         'Get-UnifiedGroup','Set-UnifiedGroup',
+                         'Get-ConnectionInformation','Get-OrganizationConfig')
+        $capturedUpn = $script:CMAdminUpn
+
+        $exoPs = [System.Management.Automation.PowerShell]::Create()
+        [void]$exoPs.AddScript({
+            param($upn, $cmdlets)
+            $r = @{ OK = $false; Err = '' }
             try {
-                Connect-MgGraph -Scopes 'Organization.ReadWrite.All','Directory.ReadWrite.All',
-                                         'User.ReadWrite.All','Group.ReadWrite.All','Domain.ReadWrite.All' `
-                                -TenantId $tenantId -NoWelcome -ErrorAction Stop
-                $ctx = Get-MgContext
-                $r.Tenant = $ctx.TenantId
-                $r.Upn    = $ctx.Account
-                $exoP = @{ ShowBanner = $false; ErrorAction = 'Stop'; CommandName = $cmdlets }
-                if ($ctx.Account) { $exoP['UserPrincipalName'] = $ctx.Account }
-                Connect-ExchangeOnline @exoP
-                $r.OnMS = (Get-MgDomain | Where-Object { $_.IsInitial -eq $true }).Id
-                $r.OK   = $true
-            } catch {
-                $r.Err = $_.Exception.Message
-            }
+                # Import explicitly — background runspace starts with no loaded modules
+                Import-Module ExchangeOnlineManagement -ErrorAction Stop
+                $p = @{ ShowBanner = $false; ErrorAction = 'Stop'; CommandName = $cmdlets }
+                if ($upn) { $p['UserPrincipalName'] = $upn }
+                Connect-ExchangeOnline @p
+                $r.OK = $true
+            } catch { $r.Err = $_.Exception.Message }
             return $r
-        }).AddArgument($tid).AddArgument($exoCmdlets)
+        }).AddArgument($capturedUpn).AddArgument($exoCmdlets)
 
-        $handle = $ps.BeginInvoke()
+        $exoHandle = $exoPs.BeginInvoke()
 
-        # Timer polls job; tick runs on UI thread so controls are safe to touch
-        $connectPollTimer = New-Object System.Windows.Forms.Timer
-        $connectPollTimer.Interval = 400
-        $connectPollTimer.Add_Tick({
-            if (-not $handle.IsCompleted) { return }
-            $connectPollTimer.Stop()
+        # Timer polls on UI thread — safe to touch controls
+        $exoPollTimer = New-Object System.Windows.Forms.Timer
+        $exoPollTimer.Interval = 400
+        $exoPollTimer.Add_Tick({
+            if (-not $exoHandle.IsCompleted) { return }
+            $exoPollTimer.Stop()
             try {
-                $res = $ps.EndInvoke($handle) | Select-Object -Last 1
-                $psErr = if ($ps.Streams.Error.Count -gt 0) { $ps.Streams.Error[0].ToString() } else { '' }
+                $res   = $exoPs.EndInvoke($exoHandle) | Select-Object -Last 1
+                $psErr = if ($exoPs.Streams.Error.Count -gt 0) { $exoPs.Streams.Error[0].ToString() } else { '' }
                 if ($res -and $res.OK) {
-                    $script:CMTenantId     = $res.Tenant
-                    $script:CMAdminUpn     = $res.Upn
-                    $script:CMOnMSDomain   = $res.OnMS
                     $script:CMEXOConnected = $true
                     $script:CMConnected    = $true
-                    $lblConnStatus.Text      = "Connected — Tenant: $($res.Tenant)"
+                    $lblConnStatus.Text      = "Connected — Tenant: $($script:CMTenantId)"
                     $lblConnStatus.ForeColor = [System.Drawing.Color]::FromArgb(100,220,130)
                     $btnDisableSync.Enabled  = $true
                     $btnAddOnMS.Enabled      = $true
                     $btnPromoteSmtp.Enabled  = $true
                     $btnUpdateUpn.Enabled    = $true
-                    if ($res.OnMS) {
-                        $lblDetectedOnMS.Text = "Detected onmicrosoft.com domain: $($res.OnMS)"
-                        Write-CMLog "Detected initial domain: $($res.OnMS)" ([System.Drawing.Color]::Silver)
+                    $script:CMOnMSDomain = (Get-MgDomain | Where-Object { $_.IsInitial -eq $true }).Id
+                    if ($script:CMOnMSDomain) {
+                        $lblDetectedOnMS.Text = "Detected onmicrosoft.com domain: $($script:CMOnMSDomain)"
+                        Write-CMLog "Detected initial domain: $($script:CMOnMSDomain)" ([System.Drawing.Color]::Silver)
                     }
-                    Write-CMLog "Connected. Tenant: $($res.Tenant)  Account: $($res.Upn)" ([System.Drawing.Color]::LimeGreen)
+                    Write-CMLog "Exchange Online connected. Ready." ([System.Drawing.Color]::LimeGreen)
                     & $navTo 1
                 } else {
-                    $msg = if ($res -and $res.Err) { $res.Err } elseif ($psErr) { $psErr } else { 'Connection did not complete.' }
-                    Write-CMLog "Connection failed: $msg" ([System.Drawing.Color]::Tomato)
+                    $msg = if ($res -and $res.Err) { $res.Err } elseif ($psErr) { $psErr } else { 'EXO connection did not complete.' }
+                    Write-CMLog "Exchange Online connection failed: $msg" ([System.Drawing.Color]::Tomato)
+                    $lblConnStatus.Text      = "EXO connection failed — retry Connect"
+                    $lblConnStatus.ForeColor = [System.Drawing.Color]::Tomato
                 }
             } catch {
-                Write-CMLog "Connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+                Write-CMLog "Exchange Online connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
             } finally {
-                $ps.Dispose()
+                $exoPs.Dispose()
                 $btnConnect.Enabled = $true
-                $form.UseWaitCursor  = $false
             }
         })
-        $connectPollTimer.Start()
+        $exoPollTimer.Start()
     })
 
     # ---- Step 1: Check Sync Status ----

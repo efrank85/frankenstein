@@ -8228,7 +8228,9 @@ function Invoke-FrankensteinDomainMigrator {
             $exoParams = @{
                 ShowBanner  = $false
                 ErrorAction = 'Stop'
-                CommandName = @('Set-Mailbox','Get-Mailbox','Get-DistributionGroup','Set-DistributionGroup',
+                CommandName = @('Set-Mailbox','Get-Mailbox','Get-MailUser','Set-MailUser',
+                                'Get-DistributionGroup','Set-DistributionGroup',
+                                'Get-UnifiedGroup','Set-UnifiedGroup',
                                 'Get-ConnectionInformation','Get-OrganizationConfig')
             }
             if ($script:CMAdminUpn) { $exoParams['UserPrincipalName'] = $script:CMAdminUpn }
@@ -8419,58 +8421,93 @@ function Invoke-FrankensteinDomainMigrator {
         try {
             $form.UseWaitCursor = $true
             $lvOnMS.Items.Clear()
-            Write-CMLog "Loading mailboxes..." ([System.Drawing.Color]::Silver)
-            $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,DisplayName,PrimarySmtpAddress -ErrorAction Stop
-            # Build ownership map: onms_address.lower() → user identity (to detect cross-user conflicts only)
-            $onmsOwner = @{}
-            foreach ($m in $mbxs) {
-                foreach ($a in $m.EmailAddresses) {
-                    if ($a -match "@$([regex]::Escape($script:CMOnMSDomain))$") {
-                        $clean = ($a -replace '^(?i)smtp:', '').ToLower()
-                        $onmsOwner[$clean] = $m.UserPrincipalName
-                    }
-                }
-            }
-            $processed = 0
-            foreach ($m in $mbxs) {
-                $upnPrefix = ($m.UserPrincipalName -split '@')[0]
-                $desired   = "$upnPrefix@$($script:CMOnMSDomain)".ToLower()
-                # Check if this user already owns the desired address
-                $alreadyOwned = $onmsOwner.ContainsKey($desired) -and $onmsOwner[$desired] -ieq $m.UserPrincipalName
+            $onmsDom = $script:CMOnMSDomain
 
+            # Helper: resolve conflict-free onms address for a given prefix against the ownership map
+            $resolveOnms = {
+                param($prefix, $identity)
+                $candidate = "$prefix@$onmsDom".ToLower()
+                $suffix = 0
+                while ($onmsOwner.ContainsKey($candidate) -and $onmsOwner[$candidate] -ine $identity) {
+                    $suffix++; $candidate = "$prefix$suffix@$onmsDom".ToLower()
+                }
+                return $candidate
+            }
+
+            # Helper: add onms address to any object type and log the result
+            $addOnmsToObject = {
+                param($identity, $displayName, $objectType, $prefix, $primarySmtp, $currentAddresses)
+                $desired = "$prefix@$onmsDom".ToLower()
+                $alreadyOwned = $onmsOwner.ContainsKey($desired) -and $onmsOwner[$desired] -ieq $identity
                 if ($alreadyOwned) {
-                    $action = 'Already exists'
-                    $onmsAddr = $desired
+                    $action = 'Already exists'; $onmsAddr = $desired
                 } else {
-                    # Find a non-conflicting address (skip addresses owned by other users)
-                    $candidate = $desired
-                    $suffix = 0
-                    while ($onmsOwner.ContainsKey($candidate) -and $onmsOwner[$candidate] -ine $m.UserPrincipalName) {
-                        $suffix++
-                        $candidate = "$upnPrefix$suffix@$($script:CMOnMSDomain)".ToLower()
-                    }
-                    $onmsAddr = $candidate
+                    $onmsAddr = & $resolveOnms $prefix $identity
                     try {
-                        Set-Mailbox -Identity $m.UserPrincipalName -EmailAddresses @{Add="smtp:$onmsAddr"} -ErrorAction Stop
-                        $onmsOwner[$onmsAddr] = $m.UserPrincipalName
-                        $action = if ($suffix -gt 0) { "Added (conflict→$onmsAddr)" } else { 'Added' }
-                        Write-CMLog "Added $onmsAddr → $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
+                        switch ($objectType) {
+                            'Mailbox'   { Set-Mailbox          -Identity $identity -EmailAddresses @{Add="smtp:$onmsAddr"} -ErrorAction Stop }
+                            'MailUser'  { Set-MailUser         -Identity $identity -EmailAddresses @{Add="smtp:$onmsAddr"} -ErrorAction Stop }
+                            'DistGroup' { Set-DistributionGroup -Identity $identity -EmailAddresses @{Add="smtp:$onmsAddr"} -ErrorAction Stop }
+                            'M365Group' { Set-UnifiedGroup      -Identity $identity -EmailAddresses @{Add="smtp:$onmsAddr"} -ErrorAction Stop }
+                        }
+                        $onmsOwner[$onmsAddr] = $identity
+                        $action = if ($onmsAddr -ne "$prefix@$onmsDom".ToLower()) { "Added (conflict→$onmsAddr)" } else { 'Added' }
+                        Write-CMLog "[$objectType] Added $onmsAddr → $identity" ([System.Drawing.Color]::LimeGreen)
                     } catch {
                         $action = "ERROR: $($_.Exception.Message)"
-                        Write-CMLog "Failed $($m.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+                        Write-CMLog "[$objectType] Failed $identity`: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
                     }
                 }
-                $lvi = New-Object System.Windows.Forms.ListViewItem($m.UserPrincipalName)
-                $lvi.SubItems.Add($m.DisplayName) | Out-Null
+                $lvi = New-Object System.Windows.Forms.ListViewItem($identity)
+                $lvi.SubItems.Add("[$objectType] $displayName") | Out-Null
                 $lvi.SubItems.Add($onmsAddr) | Out-Null
-                $lvi.SubItems.Add($m.PrimarySmtpAddress) | Out-Null
+                $lvi.SubItems.Add($primarySmtp) | Out-Null
                 $lvi.SubItems.Add($action) | Out-Null
                 $lvi.ForeColor = if ($action -like 'ERROR*') { [System.Drawing.Color]::Tomato } else { [System.Drawing.Color]::Silver }
                 $lvOnMS.Items.Add($lvi) | Out-Null
-                $processed++
-                if ($processed % 10 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
             }
-            Write-CMLog "OnMS address pass complete. $processed mailboxes processed." ([System.Drawing.Color]::LimeGreen)
+
+            # Build global ownership map across all object types first
+            $onmsOwner = @{}
+            Write-CMLog "Loading all mail objects to build address map..." ([System.Drawing.Color]::Silver)
+            $mbxs   = @(Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,DisplayName,PrimarySmtpAddress -ErrorAction Stop)
+            $musr   = @(try { Get-MailUser -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+            $dgrps  = @(try { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+            $ugrps  = @(try { Get-UnifiedGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+
+            foreach ($obj in (@($mbxs) + @($musr) + @($dgrps) + @($ugrps))) {
+                $id = if ($obj.UserPrincipalName) { $obj.UserPrincipalName } else { $obj.PrimarySmtpAddress }
+                foreach ($a in $obj.EmailAddresses) {
+                    if ($a -match "@$([regex]::Escape($onmsDom))$") {
+                        $onmsOwner[($a -replace '^(?i)smtp:','').ToLower()] = $id
+                    }
+                }
+            }
+
+            $processed = 0
+            Write-CMLog "Processing $($mbxs.Count) mailboxes, $($musr.Count) mail users, $($dgrps.Count) distribution groups, $($ugrps.Count) M365 groups..." ([System.Drawing.Color]::Silver)
+
+            foreach ($m in $mbxs) {
+                $prefix = ($m.UserPrincipalName -split '@')[0]
+                & $addOnmsToObject $m.UserPrincipalName $m.DisplayName 'Mailbox' $prefix $m.PrimarySmtpAddress $m.EmailAddresses
+                $processed++; if ($processed % 10 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
+            }
+            foreach ($m in $musr) {
+                $prefix = ($m.UserPrincipalName -split '@')[0]
+                & $addOnmsToObject $m.UserPrincipalName $m.DisplayName 'MailUser' $prefix $m.PrimarySmtpAddress $m.EmailAddresses
+                $processed++; if ($processed % 10 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
+            }
+            foreach ($g in $dgrps) {
+                $prefix = ($g.PrimarySmtpAddress -split '@')[0]
+                & $addOnmsToObject $g.PrimarySmtpAddress $g.DisplayName 'DistGroup' $prefix $g.PrimarySmtpAddress $g.EmailAddresses
+                $processed++; if ($processed % 10 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
+            }
+            foreach ($g in $ugrps) {
+                $prefix = ($g.PrimarySmtpAddress -split '@')[0]
+                & $addOnmsToObject $g.PrimarySmtpAddress $g.DisplayName 'M365Group' $prefix $g.PrimarySmtpAddress $g.EmailAddresses
+                $processed++; if ($processed % 10 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
+            }
+            Write-CMLog "OnMS address pass complete. $processed objects processed." ([System.Drawing.Color]::LimeGreen)
         } catch {
             Write-CMLog "Error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally { $form.UseWaitCursor = $false }
@@ -8570,9 +8607,13 @@ function Invoke-FrankensteinDomainMigrator {
             $done = 0; $errs = 0
             foreach ($row in $rows) {
                 try {
-                    $addrs = $row.EmailAddresses -split ';' | Where-Object { $_ -ne '' }
-                    Set-Mailbox -Identity $row.Identity -EmailAddressPolicyEnabled $false `
-                                -EmailAddresses $addrs -PrimarySmtpAddress $row.PrimarySmtpAddress -ErrorAction Stop
+                    # Rebuild address array: ensure PrimarySmtpAddress is SMTP: (uppercase), all others smtp:
+                    $primary = $row.PrimarySmtpAddress.Trim().ToLower()
+                    $addrs = ($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' }) | ForEach-Object {
+                        $clean = ($_ -replace '^(?i)smtp:', '').Trim().ToLower()
+                        if ($clean -eq $primary) { "SMTP:$($row.PrimarySmtpAddress.Trim())" } else { "smtp:$clean" }
+                    }
+                    Set-Mailbox -Identity $row.Identity -EmailAddresses $addrs -ErrorAction Stop
                     Write-CMLog "Restored $($row.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
                     $done++
                 } catch {

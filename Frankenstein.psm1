@@ -8522,10 +8522,9 @@ function Invoke-FrankensteinDomainMigrator {
             }
             Write-CMLog "  $($ugrps.Count) M365 groups." ([System.Drawing.Color]::Silver)
 
-            Write-CMLog "Backing up Entra users (proxyAddresses + UPN)..." ([System.Drawing.Color]::Silver)
+            Write-CMLog "Backing up Entra users (all users — includes unlicensed)..." ([System.Drawing.Color]::Silver)
             $mgUsers = @(Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,ProxyAddresses,Mail -ErrorAction Stop)
-            $mgUsersWithAddr = @($mgUsers | Where-Object { $_.ProxyAddresses -or $_.Mail })
-            foreach ($u in $mgUsersWithAddr) {
+            foreach ($u in $mgUsers) {
                 $backup.Add([PSCustomObject]@{
                     ObjectType        = 'EntraUser'
                     Identity          = $u.Id
@@ -8535,12 +8534,14 @@ function Invoke-FrankensteinDomainMigrator {
                     EmailAddresses    = ($u.ProxyAddresses -join ';')
                 })
             }
-            Write-CMLog "  $($mgUsersWithAddr.Count) Entra users with addresses." ([System.Drawing.Color]::Silver)
+            Write-CMLog "  $($mgUsers.Count) Entra users." ([System.Drawing.Color]::Silver)
 
-            Write-CMLog "Backing up Entra groups (proxyAddresses + mail)..." ([System.Drawing.Color]::Silver)
-            $mgGroups = @(Get-MgGroup -All -Property Id,DisplayName,Mail,ProxyAddresses -ErrorAction Stop)
-            $mgGroupsWithAddr = @($mgGroups | Where-Object { $_.ProxyAddresses -or $_.Mail })
-            foreach ($g in $mgGroupsWithAddr) {
+            Write-CMLog "Backing up Entra groups (non-mail-enabled only)..." ([System.Drawing.Color]::Silver)
+            $mgGroups = @(Get-MgGroup -All -Property Id,DisplayName,Mail,ProxyAddresses,MailEnabled -ErrorAction Stop)
+            # Mail-enabled groups (distribution lists, mail-enabled security groups) are already backed up
+            # via Get-DistributionGroup above — skip them here to avoid duplicate rollback failures
+            $mgGroupsCloudOnly = @($mgGroups | Where-Object { -not $_.MailEnabled -and ($_.ProxyAddresses -or $_.Mail) })
+            foreach ($g in $mgGroupsCloudOnly) {
                 $backup.Add([PSCustomObject]@{
                     ObjectType        = 'EntraGroup'
                     Identity          = $g.Id
@@ -8550,7 +8551,7 @@ function Invoke-FrankensteinDomainMigrator {
                     EmailAddresses    = ($g.ProxyAddresses -join ';')
                 })
             }
-            Write-CMLog "  $($mgGroupsWithAddr.Count) Entra groups with addresses." ([System.Drawing.Color]::Silver)
+            Write-CMLog "  $($mgGroupsCloudOnly.Count) Entra cloud-only groups." ([System.Drawing.Color]::Silver)
 
             $dir = New-CMExportDir
             $script:CMBackupPath = Join-Path $dir "Address_Backup_$(Get-Date -Format 'HHmmss').csv"
@@ -8802,14 +8803,21 @@ function Invoke-FrankensteinDomainMigrator {
             $rows = Import-Csv $csvPath
             $done = 0; $errs = 0
             foreach ($row in $rows) {
+                $skipRow = $false
                 try {
                     $objType = if ($row.PSObject.Properties.Name -contains 'ObjectType') { $row.ObjectType } else { 'Mailbox' }
                     switch ($objType) {
                         { $_ -in 'Mailbox','MailUser','DistGroup','M365Group' } {
                             $primary = $row.PrimarySmtpAddress.Trim().ToLower()
                             $addrs = ($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' }) | ForEach-Object {
-                                $clean = ($_ -replace '^(?i)smtp:', '').Trim().ToLower()
-                                if ($clean -eq $primary) { "SMTP:$($row.PrimarySmtpAddress.Trim())" } else { "smtp:$clean" }
+                                $addr = $_.Trim()
+                                if ($addr -match '^(?i)smtp:') {
+                                    # SMTP-type: normalize primary to SMTP: and aliases to smtp:
+                                    $clean = ($addr -replace '^(?i)smtp:', '').ToLower()
+                                    if ($clean -eq $primary) { "SMTP:$($row.PrimarySmtpAddress.Trim())" } else { "smtp:$clean" }
+                                } else {
+                                    $addr  # SIP:, SPO:, X500:, EUM: etc. — pass through as-is
+                                }
                             }
                             switch ($objType) {
                                 'Mailbox'   { Set-Mailbox           -Identity $row.Identity -EmailAddresses $addrs -ErrorAction Stop }
@@ -8820,15 +8828,33 @@ function Invoke-FrankensteinDomainMigrator {
                         }
                         'EntraUser' {
                             $proxies = @($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' })
-                            Update-MgUser -UserId $row.Identity -BodyParameter @{ proxyAddresses = $proxies } -ErrorAction Stop
+                            try {
+                                Update-MgUser -UserId $row.Identity -BodyParameter @{ proxyAddresses = $proxies } -ErrorAction Stop
+                            } catch {
+                                if ($_.Exception.Message -match 'read-only') {
+                                    # Exchange owns proxyAddresses for this user — already restored via Mailbox/MailUser above
+                                    Write-CMLog "Skipped [EntraUser] $($row.DisplayName) — proxyAddresses managed by Exchange" ([System.Drawing.Color]::DimGray)
+                                    $skipRow = $true
+                                } else { throw }
+                            }
                         }
                         'EntraGroup' {
                             $proxies = @($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' })
-                            Update-MgGroup -GroupId $row.Identity -BodyParameter @{ proxyAddresses = $proxies } -ErrorAction Stop
+                            try {
+                                Update-MgGroup -GroupId $row.Identity -BodyParameter @{ proxyAddresses = $proxies } -ErrorAction Stop
+                            } catch {
+                                if ($_.Exception.Message -match 'mail-enabled|distribution list|not authorized') {
+                                    # Exchange-managed group — already restored via DistGroup/M365Group above
+                                    Write-CMLog "Skipped [EntraGroup] $($row.DisplayName) — Exchange-managed group" ([System.Drawing.Color]::DimGray)
+                                    $skipRow = $true
+                                } else { throw }
+                            }
                         }
                     }
-                    Write-CMLog "Restored [$objType] $($row.DisplayName)" ([System.Drawing.Color]::LimeGreen)
-                    $done++
+                    if (-not $skipRow) {
+                        Write-CMLog "Restored [$objType] $($row.DisplayName)" ([System.Drawing.Color]::LimeGreen)
+                        $done++
+                    }
                 } catch {
                     Write-CMLog "Failed [$($row.ObjectType)] $($row.Identity): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
                 }

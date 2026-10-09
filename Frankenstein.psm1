@@ -9322,7 +9322,8 @@ function Invoke-FrankensteinDomainMigrator {
                         foreach ($a in $toRemove) { & $markRow 'EntraGroup' $a 'Removed' ([System.Drawing.Color]::LimeGreen) }
                         Write-CMLog "Cleaned Entra group $($g.DisplayName)" ([System.Drawing.Color]::LimeGreen); $done++
                     } catch {
-                        if ($_.Exception.Message -match 'mail-enabled|distribution list|not authorized') {
+                        $errText = "$($_.Exception.Message) $($_.ErrorDetails.Message) $($_.CategoryInfo.Reason)"
+                        if ($errText -match 'mail-enabled|distribution list|not authorized|Request_BadRequest|Authorization_RequestDenied') {
                             foreach ($a in $toRemove) { & $markRow 'EntraGroup' $a 'Skipped (Exchange-managed)' ([System.Drawing.Color]::DimGray) }
                             Write-CMLog "Skipped Entra group $($g.DisplayName) — Exchange-managed (already cleaned via Exchange cmdlets)" ([System.Drawing.Color]::DimGray)
                         } else {
@@ -9414,8 +9415,31 @@ function Invoke-FrankensteinDomainMigrator {
             $domainPollTimer.Start()
         } catch {
             Write-CMLog "Remove failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
-            if ($_.Exception.Message -match 'object.*exist|reference|still|association') {
-                Write-CMLog "Tip: Some objects may still reference this domain. Run Step 3 Confirm Clean first." ([System.Drawing.Color]::DarkGoldenrod)
+            Write-CMLog "Scanning for Entra objects still referencing '$domain'..." ([System.Drawing.Color]::DarkGoldenrod)
+            try {
+                $blocking = [System.Collections.Generic.List[string]]::new()
+                $allUsers = @(Get-MgUser -All -Property UserPrincipalName,ProxyAddresses -ErrorAction SilentlyContinue)
+                foreach ($u in $allUsers) {
+                    if ($u.UserPrincipalName -match "@$([regex]::Escape($domain))$" -or
+                        ($u.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" })) {
+                        $blocking.Add("User: $($u.UserPrincipalName)")
+                    }
+                }
+                $allGroups = @(Get-MgGroup -All -Property DisplayName,ProxyAddresses -ErrorAction SilentlyContinue)
+                foreach ($g in $allGroups) {
+                    if ($g.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }) {
+                        $blocking.Add("Group: $($g.DisplayName)")
+                    }
+                }
+                if ($blocking.Count -gt 0) {
+                    Write-CMLog "$($blocking.Count) Entra object(s) still reference the domain:" ([System.Drawing.Color]::DarkGoldenrod)
+                    foreach ($b in $blocking) { Write-CMLog "  $b" ([System.Drawing.Color]::DarkGoldenrod) }
+                    Write-CMLog "If these are Exchange-managed groups, wait 30-60 seconds for Entra sync to catch up, then retry." ([System.Drawing.Color]::DimGray)
+                } else {
+                    Write-CMLog "No Entra objects found referencing '$domain' — may be a transient API error. Try clicking Remove again." ([System.Drawing.Color]::DimGray)
+                }
+            } catch {
+                Write-CMLog "Could not identify blocking objects: $($_.Exception.Message)" ([System.Drawing.Color]::DimGray)
             }
         } finally { $form.UseWaitCursor = $false }
     })

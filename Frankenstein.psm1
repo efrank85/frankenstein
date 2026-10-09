@@ -7959,9 +7959,9 @@ function Invoke-FrankensteinDomainMigrator {
     $lvUnsync.Location = New-Object System.Drawing.Point(8, 100); $lvUnsync.Size = New-Object System.Drawing.Size(876, 352)
     $lvUnsync.View = 'Details'; $lvUnsync.FullRowSelect = $true; $lvUnsync.GridLines = $true
     $lvUnsync.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvUnsync.ForeColor = [System.Drawing.Color]::Silver
-    foreach ($col in @('UPN','Display Name','Was Synced','Cloud-Only Now')) {
+    foreach ($col in @('Object / UPN','Display Name','Type','Was Synced','Cloud-Only Now')) {
         $c = $lvUnsync.Columns.Add($col)
-        $c.Width = switch ($col) { 'UPN' { 300 } 'Display Name' { 220 } default { 150 } }
+        $c.Width = switch ($col) { 'Object / UPN' { 260 } 'Display Name' { 200 } 'Type' { 90 } default { 110 } }
     }
     $panStep1.Controls.Add($lvUnsync)
 
@@ -8214,8 +8214,6 @@ function Invoke-FrankensteinDomainMigrator {
         if (-not $tid) { Write-CMLog "Enter Tenant ID first." ([System.Drawing.Color]::Tomato); return }
         try {
             $form.UseWaitCursor = $true
-            # Minimize so browser auth popups can come to the front
-            $form.WindowState = [System.Windows.Forms.FormWindowState]::Minimized
             Write-CMLog "Connecting to Microsoft Graph..." ([System.Drawing.Color]::Silver)
             Connect-MgGraph -Scopes 'Organization.ReadWrite.All','Directory.ReadWrite.All',
                                      'User.ReadWrite.All','Group.ReadWrite.All','Domain.ReadWrite.All' `
@@ -8255,10 +8253,6 @@ function Invoke-FrankensteinDomainMigrator {
             Write-CMLog "Connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally {
             $form.UseWaitCursor = $false
-            $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
-            $form.TopMost = $true
-            $form.Activate()
-            $form.TopMost = $false
         }
     })
 
@@ -8273,22 +8267,50 @@ function Invoke-FrankensteinDomainMigrator {
             $lblOrgSyncStatus.Text = "Org sync status: $(if ($syncOn) { 'ENABLED (AAD Connect active)' } else { 'DISABLED (cloud-only)' })"
             $lblOrgSyncStatus.ForeColor = if ($syncOn) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }
             Write-CMLog "Org OnPremisesSyncEnabled = $syncOn" ([System.Drawing.Color]::Silver)
-            Write-CMLog "Scanning users for sync state (this may take a moment)..." ([System.Drawing.Color]::Silver)
+            Write-CMLog "Scanning all Entra objects for sync state (users, groups, contacts)..." ([System.Drawing.Color]::Silver)
             $script:CMSyncedUsers = @()
             $lvUnsync.Items.Clear()
-            $allUsers = Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop
+            $allUsers    = @(Get-MgUser    -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
+            $allGroups   = @(Get-MgGroup   -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
+            $allContacts = @(try { Get-MgContact -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop } catch { @() })
             foreach ($u in $allUsers) {
                 $wasSynced = $u.OnPremisesSyncEnabled -eq $true
                 $isCloud   = $u.OnPremisesSyncEnabled -ne $true
-                if ($wasSynced -or -not $isCloud) { $script:CMSyncedUsers += $u }
+                if ($wasSynced) { $script:CMSyncedUsers += $u }
                 $lvi = New-Object System.Windows.Forms.ListViewItem($u.UserPrincipalName)
                 $lvi.SubItems.Add($u.DisplayName) | Out-Null
+                $lvi.SubItems.Add('User') | Out-Null
                 $lvi.SubItems.Add($(if ($wasSynced) { 'Yes' } else { 'No' })) | Out-Null
                 $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
                 $lvi.ForeColor = if (-not $isCloud) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::Silver }
                 $lvUnsync.Items.Add($lvi) | Out-Null
             }
-            Write-CMLog "Found $($allUsers.Count) users. $($script:CMSyncedUsers.Count) were/are synced." ([System.Drawing.Color]::Silver)
+            foreach ($g in $allGroups) {
+                $wasSynced = $g.OnPremisesSyncEnabled -eq $true
+                $isCloud   = $g.OnPremisesSyncEnabled -ne $true
+                if ($wasSynced) { $script:CMSyncedUsers += $g }
+                $lvi = New-Object System.Windows.Forms.ListViewItem($g.DisplayName)
+                $lvi.SubItems.Add('') | Out-Null
+                $lvi.SubItems.Add('Group') | Out-Null
+                $lvi.SubItems.Add($(if ($wasSynced) { 'Yes' } else { 'No' })) | Out-Null
+                $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
+                $lvi.ForeColor = if (-not $isCloud) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::Silver }
+                $lvUnsync.Items.Add($lvi) | Out-Null
+            }
+            foreach ($c2 in $allContacts) {
+                $wasSynced = $c2.OnPremisesSyncEnabled -eq $true
+                $isCloud   = $c2.OnPremisesSyncEnabled -ne $true
+                if ($wasSynced) { $script:CMSyncedUsers += $c2 }
+                $lvi = New-Object System.Windows.Forms.ListViewItem($c2.DisplayName)
+                $lvi.SubItems.Add('') | Out-Null
+                $lvi.SubItems.Add('Contact') | Out-Null
+                $lvi.SubItems.Add($(if ($wasSynced) { 'Yes' } else { 'No' })) | Out-Null
+                $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
+                $lvi.ForeColor = if (-not $isCloud) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::Silver }
+                $lvUnsync.Items.Add($lvi) | Out-Null
+            }
+            $total = $allUsers.Count + $allGroups.Count + $allContacts.Count
+            Write-CMLog "Scanned $total objects ($($allUsers.Count) users, $($allGroups.Count) groups, $($allContacts.Count) contacts). $($script:CMSyncedUsers.Count) synced from on-prem." ([System.Drawing.Color]::Silver)
         } catch {
             Write-CMLog "Check failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally { $form.UseWaitCursor = $false }
@@ -8331,30 +8353,62 @@ function Invoke-FrankensteinDomainMigrator {
             $lblOrgSyncStatus.Text = "Org sync status: $(if ($orgDone) { 'DISABLED' } else { 'still ENABLED' })"
             $lblOrgSyncStatus.ForeColor = if ($orgDone) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::DarkGoldenrod }
 
-            # Smart check: sample 5 users first
-            $allUsers = Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop
-            $sample = $allUsers | Get-Random -Count ([Math]::Min(5, $allUsers.Count))
+            # Smart check: sample 5 objects first
+            $allUsers    = @(Get-MgUser    -All -Property Id,UserPrincipalName,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
+            $allGroups   = @(Get-MgGroup   -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop)
+            $allContacts = @(try { Get-MgContact -All -Property Id,DisplayName,OnPremisesSyncEnabled -ErrorAction Stop } catch { @() })
+            $allObjects  = @($allUsers) + @($allGroups) + @($allContacts)
+            $sample = $allObjects | Get-Random -Count ([Math]::Min(5, $allObjects.Count))
             $samplePending = @($sample | Where-Object { $_.OnPremisesSyncEnabled -eq $true }).Count
             if ($samplePending -gt 0) {
-                Write-CMLog "Sample check: $samplePending of 5 sampled users still synced. Waiting..." ([System.Drawing.Color]::DimGray)
+                Write-CMLog "Sample check: $samplePending of 5 sampled objects still synced. Waiting..." ([System.Drawing.Color]::DimGray)
                 $lblUnsyncPollStatus.Text = "Poll #$($script:CMSyncPollAttempt): $samplePending/5 sampled still synced..."
                 return
             }
             # Sample clean — check all
-            $stillSynced = @($allUsers | Where-Object { $_.OnPremisesSyncEnabled -eq $true }).Count
-            $lblUnsyncPollStatus.Text = "Poll #$($script:CMSyncPollAttempt): $stillSynced users still synced..."
+            $stillSynced = @($allObjects | Where-Object { $_.OnPremisesSyncEnabled -eq $true }).Count
+            $lblUnsyncPollStatus.Text = "Poll #$($script:CMSyncPollAttempt): $stillSynced objects still synced..."
             $lvUnsync.Items.Clear()
             $changes = @()
             foreach ($u in $allUsers) {
                 $isCloud = $u.OnPremisesSyncEnabled -ne $true
                 $lvi = New-Object System.Windows.Forms.ListViewItem($u.UserPrincipalName)
                 $lvi.SubItems.Add($u.DisplayName) | Out-Null
+                $lvi.SubItems.Add('User') | Out-Null
                 $lvi.SubItems.Add('Yes') | Out-Null
                 $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
                 $lvi.ForeColor = if ($isCloud) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::DarkGoldenrod }
                 $lvUnsync.Items.Add($lvi) | Out-Null
                 $changes += [PSCustomObject]@{
-                    UPN = $u.UserPrincipalName; DisplayName = $u.DisplayName
+                    ObjectType = 'User'; UPN = $u.UserPrincipalName; DisplayName = $u.DisplayName
+                    WasSynced = 'Yes'; IsCloudOnly = if ($isCloud) { 'Yes' } else { 'Pending' }
+                }
+            }
+            foreach ($g in $allGroups) {
+                $isCloud = $g.OnPremisesSyncEnabled -ne $true
+                $lvi = New-Object System.Windows.Forms.ListViewItem($g.DisplayName)
+                $lvi.SubItems.Add('') | Out-Null
+                $lvi.SubItems.Add('Group') | Out-Null
+                $lvi.SubItems.Add('Yes') | Out-Null
+                $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
+                $lvi.ForeColor = if ($isCloud) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::DarkGoldenrod }
+                $lvUnsync.Items.Add($lvi) | Out-Null
+                $changes += [PSCustomObject]@{
+                    ObjectType = 'Group'; UPN = ''; DisplayName = $g.DisplayName
+                    WasSynced = 'Yes'; IsCloudOnly = if ($isCloud) { 'Yes' } else { 'Pending' }
+                }
+            }
+            foreach ($c2 in $allContacts) {
+                $isCloud = $c2.OnPremisesSyncEnabled -ne $true
+                $lvi = New-Object System.Windows.Forms.ListViewItem($c2.DisplayName)
+                $lvi.SubItems.Add('') | Out-Null
+                $lvi.SubItems.Add('Contact') | Out-Null
+                $lvi.SubItems.Add('Yes') | Out-Null
+                $lvi.SubItems.Add($(if ($isCloud) { 'Yes' } else { 'Pending' })) | Out-Null
+                $lvi.ForeColor = if ($isCloud) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::DarkGoldenrod }
+                $lvUnsync.Items.Add($lvi) | Out-Null
+                $changes += [PSCustomObject]@{
+                    ObjectType = 'Contact'; UPN = ''; DisplayName = $c2.DisplayName
                     WasSynced = 'Yes'; IsCloudOnly = if ($isCloud) { 'Yes' } else { 'Pending' }
                 }
             }
@@ -8381,22 +8435,99 @@ function Invoke-FrankensteinDomainMigrator {
         if (-not $script:CMEXOConnected) { Write-CMLog "Exchange Online not connected." ([System.Drawing.Color]::Tomato); return }
         try {
             $form.UseWaitCursor = $true
-            Write-CMLog "Backing up all mailbox addresses..." ([System.Drawing.Color]::Silver)
-            $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,DisplayName,PrimarySmtpAddress -ErrorAction Stop
-            $backup = foreach ($m in $mbxs) {
-                [PSCustomObject]@{
+            $backup = [System.Collections.Generic.List[object]]::new()
+
+            Write-CMLog "Backing up Exchange mailboxes..." ([System.Drawing.Color]::Silver)
+            $mbxs = @(Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses,UserPrincipalName,DisplayName,PrimarySmtpAddress -ErrorAction Stop)
+            foreach ($m in $mbxs) {
+                $backup.Add([PSCustomObject]@{
+                    ObjectType        = 'Mailbox'
                     Identity          = $m.Identity
                     UserPrincipalName = $m.UserPrincipalName
                     DisplayName       = $m.DisplayName
                     PrimarySmtpAddress = $m.PrimarySmtpAddress
                     EmailAddresses    = ($m.EmailAddresses -join ';')
-                }
+                })
             }
+            Write-CMLog "  $($mbxs.Count) mailboxes." ([System.Drawing.Color]::Silver)
+
+            Write-CMLog "Backing up mail users..." ([System.Drawing.Color]::Silver)
+            $musr = @(try { Get-MailUser -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+            foreach ($m in $musr) {
+                $backup.Add([PSCustomObject]@{
+                    ObjectType        = 'MailUser'
+                    Identity          = $m.Identity
+                    UserPrincipalName = $m.UserPrincipalName
+                    DisplayName       = $m.DisplayName
+                    PrimarySmtpAddress = $m.PrimarySmtpAddress
+                    EmailAddresses    = ($m.EmailAddresses -join ';')
+                })
+            }
+            Write-CMLog "  $($musr.Count) mail users." ([System.Drawing.Color]::Silver)
+
+            Write-CMLog "Backing up distribution groups..." ([System.Drawing.Color]::Silver)
+            $dgrps = @(try { Get-DistributionGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+            foreach ($g in $dgrps) {
+                $backup.Add([PSCustomObject]@{
+                    ObjectType        = 'DistGroup'
+                    Identity          = $g.Identity
+                    UserPrincipalName = $g.PrimarySmtpAddress
+                    DisplayName       = $g.DisplayName
+                    PrimarySmtpAddress = $g.PrimarySmtpAddress
+                    EmailAddresses    = ($g.EmailAddresses -join ';')
+                })
+            }
+            Write-CMLog "  $($dgrps.Count) distribution groups." ([System.Drawing.Color]::Silver)
+
+            Write-CMLog "Backing up M365 groups..." ([System.Drawing.Color]::Silver)
+            $ugrps = @(try { Get-UnifiedGroup -ResultSize Unlimited -ErrorAction Stop } catch { @() })
+            foreach ($g in $ugrps) {
+                $backup.Add([PSCustomObject]@{
+                    ObjectType        = 'M365Group'
+                    Identity          = $g.Identity
+                    UserPrincipalName = $g.PrimarySmtpAddress
+                    DisplayName       = $g.DisplayName
+                    PrimarySmtpAddress = $g.PrimarySmtpAddress
+                    EmailAddresses    = ($g.EmailAddresses -join ';')
+                })
+            }
+            Write-CMLog "  $($ugrps.Count) M365 groups." ([System.Drawing.Color]::Silver)
+
+            Write-CMLog "Backing up Entra users (proxyAddresses + UPN)..." ([System.Drawing.Color]::Silver)
+            $mgUsers = @(Get-MgUser -All -Property Id,UserPrincipalName,DisplayName,ProxyAddresses,Mail -ErrorAction Stop)
+            $mgUsersWithAddr = @($mgUsers | Where-Object { $_.ProxyAddresses -or $_.Mail })
+            foreach ($u in $mgUsersWithAddr) {
+                $backup.Add([PSCustomObject]@{
+                    ObjectType        = 'EntraUser'
+                    Identity          = $u.Id
+                    UserPrincipalName = $u.UserPrincipalName
+                    DisplayName       = $u.DisplayName
+                    PrimarySmtpAddress = $u.Mail
+                    EmailAddresses    = ($u.ProxyAddresses -join ';')
+                })
+            }
+            Write-CMLog "  $($mgUsersWithAddr.Count) Entra users with addresses." ([System.Drawing.Color]::Silver)
+
+            Write-CMLog "Backing up Entra groups (proxyAddresses + mail)..." ([System.Drawing.Color]::Silver)
+            $mgGroups = @(Get-MgGroup -All -Property Id,DisplayName,Mail,ProxyAddresses -ErrorAction Stop)
+            $mgGroupsWithAddr = @($mgGroups | Where-Object { $_.ProxyAddresses -or $_.Mail })
+            foreach ($g in $mgGroupsWithAddr) {
+                $backup.Add([PSCustomObject]@{
+                    ObjectType        = 'EntraGroup'
+                    Identity          = $g.Id
+                    UserPrincipalName = ''
+                    DisplayName       = $g.DisplayName
+                    PrimarySmtpAddress = $g.Mail
+                    EmailAddresses    = ($g.ProxyAddresses -join ';')
+                })
+            }
+            Write-CMLog "  $($mgGroupsWithAddr.Count) Entra groups with addresses." ([System.Drawing.Color]::Silver)
+
             $dir = New-CMExportDir
-            $script:CMBackupPath = Join-Path $dir "Mailbox_Address_Backup_$(Get-Date -Format 'HHmmss').csv"
+            $script:CMBackupPath = Join-Path $dir "Address_Backup_$(Get-Date -Format 'HHmmss').csv"
             $backup | Export-Csv -Path $script:CMBackupPath -NoTypeInformation
             $txtRollbackPath.Text = $script:CMBackupPath
-            Write-CMLog "Backup saved: $($script:CMBackupPath) ($($mbxs.Count) mailboxes)" ([System.Drawing.Color]::LimeGreen)
+            Write-CMLog "Backup saved: $($script:CMBackupPath) ($($backup.Count) total objects)" ([System.Drawing.Color]::LimeGreen)
         } catch {
             Write-CMLog "Backup failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
         } finally { $form.UseWaitCursor = $false }
@@ -8600,7 +8731,7 @@ function Invoke-FrankensteinDomainMigrator {
         $csvPath = $txtRollbackPath.Text.Trim()
         if (-not $csvPath -or -not (Test-Path $csvPath)) { Write-CMLog "Select a valid backup CSV first." ([System.Drawing.Color]::Tomato); return }
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "This will restore all mailbox email addresses and primary SMTP from:`n$csvPath`n`nAll current addresses will be replaced with the backup values.`n`nProceed?",
+            "This will restore all email addresses from:`n$csvPath`n`nAll current addresses for each object will be replaced with the backup values.`n`nProceed?",
             'Rollback', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
         if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         try {
@@ -8609,17 +8740,34 @@ function Invoke-FrankensteinDomainMigrator {
             $done = 0; $errs = 0
             foreach ($row in $rows) {
                 try {
-                    # Rebuild address array: ensure PrimarySmtpAddress is SMTP: (uppercase), all others smtp:
-                    $primary = $row.PrimarySmtpAddress.Trim().ToLower()
-                    $addrs = ($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' }) | ForEach-Object {
-                        $clean = ($_ -replace '^(?i)smtp:', '').Trim().ToLower()
-                        if ($clean -eq $primary) { "SMTP:$($row.PrimarySmtpAddress.Trim())" } else { "smtp:$clean" }
+                    $objType = if ($row.PSObject.Properties.Name -contains 'ObjectType') { $row.ObjectType } else { 'Mailbox' }
+                    switch ($objType) {
+                        { $_ -in 'Mailbox','MailUser','DistGroup','M365Group' } {
+                            $primary = $row.PrimarySmtpAddress.Trim().ToLower()
+                            $addrs = ($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' }) | ForEach-Object {
+                                $clean = ($_ -replace '^(?i)smtp:', '').Trim().ToLower()
+                                if ($clean -eq $primary) { "SMTP:$($row.PrimarySmtpAddress.Trim())" } else { "smtp:$clean" }
+                            }
+                            switch ($objType) {
+                                'Mailbox'   { Set-Mailbox           -Identity $row.Identity -EmailAddresses $addrs -ErrorAction Stop }
+                                'MailUser'  { Set-MailUser          -Identity $row.Identity -EmailAddresses $addrs -ErrorAction Stop }
+                                'DistGroup' { Set-DistributionGroup -Identity $row.Identity -EmailAddresses $addrs -ErrorAction Stop }
+                                'M365Group' { Set-UnifiedGroup      -Identity $row.Identity -EmailAddresses $addrs -ErrorAction Stop }
+                            }
+                        }
+                        'EntraUser' {
+                            $proxies = @($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' })
+                            Update-MgUser -UserId $row.Identity -BodyParameter @{ proxyAddresses = $proxies } -ErrorAction Stop
+                        }
+                        'EntraGroup' {
+                            $proxies = @($row.EmailAddresses -split ';' | Where-Object { $_ -ne '' })
+                            Update-MgGroup -GroupId $row.Identity -BodyParameter @{ proxyAddresses = $proxies } -ErrorAction Stop
+                        }
                     }
-                    Set-Mailbox -Identity $row.Identity -EmailAddresses $addrs -ErrorAction Stop
-                    Write-CMLog "Restored $($row.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen)
+                    Write-CMLog "Restored [$objType] $($row.DisplayName)" ([System.Drawing.Color]::LimeGreen)
                     $done++
                 } catch {
-                    Write-CMLog "Failed $($row.Identity): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
+                    Write-CMLog "Failed [$($row.ObjectType)] $($row.Identity): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++
                 }
             }
             $finalColor = if ($errs -gt 0) { [System.Drawing.Color]::DarkGoldenrod } else { [System.Drawing.Color]::LimeGreen }

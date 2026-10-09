@@ -7737,7 +7737,7 @@ function Set-FrankensteinPSWindowTitle {
 
 #endregion
 
-function Invoke-FrankensteinCutoverMigrator {
+function Invoke-FrankensteinDomainMigrator {
     [CmdletBinding()]
     param()
 
@@ -7758,6 +7758,7 @@ function Invoke-FrankensteinCutoverMigrator {
     $script:CMConnected    = $false
     $script:CMEXOConnected = $false
     $script:CMTenantId     = ''
+    $script:CMAdminUpn     = ''
     $script:CMOnMSDomain   = ''
     $script:CMCurrentStep  = 1
     $script:CMExportDir    = ''
@@ -7785,7 +7786,7 @@ function Invoke-FrankensteinCutoverMigrator {
     [System.Windows.Forms.Application]::EnableVisualStyles()
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'Frankenstein — Cutover Migrator'
+    $form.Text = 'Frankenstein — Domain Migrator'
     $form.Size = New-Object System.Drawing.Size(920, 868)
     $form.MinimumSize = New-Object System.Drawing.Size(920, 868)
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -8219,9 +8220,17 @@ function Invoke-FrankensteinCutoverMigrator {
                             -TenantId $tid -NoWelcome -ErrorAction Stop
             $ctx = Get-MgContext
             $script:CMTenantId = $ctx.TenantId
-            Write-CMLog "Graph connected. Tenant: $($ctx.TenantId)" ([System.Drawing.Color]::LimeGreen)
-            Write-CMLog "Connecting to Exchange Online..." ([System.Drawing.Color]::Silver)
-            Connect-ExchangeOnline -Organization $script:CMTenantId -ShowBanner:$false -ErrorAction Stop
+            $script:CMAdminUpn = $ctx.Account
+            Write-CMLog "Graph connected. Tenant: $($ctx.TenantId)  Account: $($ctx.Account)" ([System.Drawing.Color]::LimeGreen)
+            Write-CMLog "Connecting to Exchange Online (loading required cmdlets only)..." ([System.Drawing.Color]::Silver)
+            $exoParams = @{
+                ShowBanner  = $false
+                ErrorAction = 'Stop'
+                CommandName = @('Set-Mailbox','Get-Mailbox','Get-DistributionGroup','Set-DistributionGroup',
+                                'Get-ConnectionInformation','Get-OrganizationConfig')
+            }
+            if ($script:CMAdminUpn) { $exoParams['UserPrincipalName'] = $script:CMAdminUpn }
+            Connect-ExchangeOnline @exoParams
             $script:CMEXOConnected = $true
             Write-CMLog "Exchange Online connected." ([System.Drawing.Color]::LimeGreen)
             $script:CMConnected = $true

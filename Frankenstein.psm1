@@ -8399,6 +8399,29 @@ function Invoke-FrankensteinDomainMigrator {
             $script:CMExoPS.Dispose(); $script:CMExoAsync = $null
 
             if ($script:CMExoResult.Success) {
+                # Background runspace warmed the MSAL token cache.
+                # Re-connect in the main runspace so cmdlet stubs (Set-Mailbox, etc.)
+                # are imported here. Token is cached — no WAM dialog, nearly instant.
+                Write-CMLog "Importing Exchange cmdlets into session..." ([System.Drawing.Color]::Silver)
+                [System.Windows.Forms.Application]::DoEvents()
+                $mainExoParams = @{
+                    ShowBanner  = $false
+                    ErrorAction = 'Stop'
+                    CommandName = @('Set-Mailbox','Get-Mailbox','Get-MailUser','Set-MailUser',
+                                    'Get-DistributionGroup','Set-DistributionGroup',
+                                    'Get-UnifiedGroup','Set-UnifiedGroup',
+                                    'Get-ConnectionInformation','Get-OrganizationConfig')
+                }
+                if ($script:CMAdminUpn) { $mainExoParams['UserPrincipalName'] = $script:CMAdminUpn }
+                try {
+                    Connect-ExchangeOnline @mainExoParams
+                } catch {
+                    Write-CMLog "EXO cmdlet import failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+                    $lblConnStatus.Text      = "EXO cmdlet import failed — click Connect to retry"
+                    $lblConnStatus.ForeColor = [System.Drawing.Color]::Tomato
+                    $btnConnect.Enabled = $true
+                    return
+                }
                 $script:CMEXOConnected = $true
                 $script:CMConnected    = $true
                 $script:CMLiveLogPath  = Join-Path (New-CMExportDir) "DomainMigrator_Log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"

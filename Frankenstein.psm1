@@ -11056,4 +11056,4 @@ function Invoke-FrankensteinMigrator {
     $form.Dispose()
 }
 
-Export-ModuleMember -Function Invoke-FrankensteinMigrator
+Export-ModuleMember -Function *

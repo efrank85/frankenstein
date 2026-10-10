@@ -9410,6 +9410,24 @@ function Invoke-FrankensteinDomainMigrator {
         if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         try {
             $form.UseWaitCursor = $true
+
+            # Cannot delete the default domain — promote the onmicrosoft.com domain first
+            $domainInfo = Get-MgDomain -DomainId $domain -ErrorAction SilentlyContinue
+            if ($domainInfo.IsDefault) {
+                $fallback = $script:CMOnMSDomain
+                if (-not $fallback) {
+                    $fallback = (Get-MgDomain | Where-Object { $_.IsInitial -eq $true } | Select-Object -First 1).Id
+                }
+                if ($fallback) {
+                    Write-CMLog "'$domain' is the default domain — promoting '$fallback' as default first..." ([System.Drawing.Color]::DarkGoldenrod)
+                    Update-MgDomain -DomainId $fallback -IsDefault -ErrorAction Stop
+                    Write-CMLog "'$fallback' is now the default domain." ([System.Drawing.Color]::LimeGreen)
+                } else {
+                    Write-CMLog "Cannot delete '$domain' — it is the default domain and no onmicrosoft.com domain was found to promote." ([System.Drawing.Color]::Tomato)
+                    return
+                }
+            }
+
             Write-CMLog "Removing domain '$domain' from tenant..." ([System.Drawing.Color]::DarkGoldenrod)
             Remove-MgDomain -DomainId $domain -ErrorAction Stop
             Write-CMLog "Remove command sent. Polling every 30 seconds to confirm removal..." ([System.Drawing.Color]::LimeGreen)
@@ -9422,7 +9440,6 @@ function Invoke-FrankensteinDomainMigrator {
         } catch {
             Write-CMLog "Remove failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
             if ($_.ErrorDetails.Message) { Write-CMLog "API detail: $($_.ErrorDetails.Message)" ([System.Drawing.Color]::Tomato) }
-            # Log domain state so we know what Microsoft thinks is still blocking
             try {
                 $di = Get-MgDomain -DomainId $domain -ErrorAction SilentlyContinue
                 if ($di) { Write-CMLog "Domain state — IsVerified:$($di.IsVerified) IsDefault:$($di.IsDefault) SupportedServices:$($di.SupportedServices -join ',')" ([System.Drawing.Color]::DimGray) }

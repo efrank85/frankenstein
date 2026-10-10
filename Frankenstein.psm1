@@ -9350,23 +9350,25 @@ function Invoke-FrankensteinDomainMigrator {
     $btnConfirmClean.Add_Click({
         $domain = $txtDomainToRemove.Text.Trim()
         if (-not $domain) { return }
-        Write-CMLog "Re-scanning for '@$domain' to confirm clean..." ([System.Drawing.Color]::Silver)
+        Write-CMLog "Checking Microsoft's domain reference list for '$domain'..." ([System.Drawing.Color]::Silver)
         try {
             $form.UseWaitCursor = $true
-            $remaining = 0
-            if ($script:CMEXOConnected) {
-                $mbxs = Get-EXOMailbox -ResultSize Unlimited -Properties EmailAddresses -ErrorAction Stop
-                $remaining += ($mbxs | ForEach-Object { $_.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" } }).Count
-            }
-            $mgUsers = Get-MgUser -All -Property ProxyAddresses,UserPrincipalName -ErrorAction Stop
-            $remaining += ($mgUsers | ForEach-Object { $_.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" } } | Measure-Object).Count
-            $remaining += ($mgUsers | Where-Object { $_.UserPrincipalName -match "@$([regex]::Escape($domain))$" }).Count
-            $mgGroups = Get-MgGroup -All -Property ProxyAddresses -ErrorAction Stop
-            $remaining += ($mgGroups | ForEach-Object { $_.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" } } | Measure-Object).Count
-            if ($remaining -eq 0) {
-                Write-CMLog "CONFIRMED: No objects contain '@$domain'. Safe to proceed to Step 4." ([System.Drawing.Color]::LimeGreen)
+            # Use the same API Microsoft uses before allowing domain deletion — far more accurate
+            # than scanning individual object attributes, as it catches mail properties, SPNs, etc.
+            $resp = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/domains/$domain/domainNameReferences" -ErrorAction Stop
+            $refs = @($resp.value)
+            if ($refs.Count -eq 0) {
+                Write-CMLog "CONFIRMED: Microsoft reports no objects reference '$domain'. Safe to proceed to Step 4." ([System.Drawing.Color]::LimeGreen)
             } else {
-                Write-CMLog "WARNING: $remaining addresses still contain '@$domain'. Run Remove again." ([System.Drawing.Color]::Tomato)
+                Write-CMLog "WARNING: $($refs.Count) object(s) still reference '$domain' — domain cannot be deleted yet:" ([System.Drawing.Color]::Tomato)
+                foreach ($r in $refs) {
+                    $label = if ($r['displayName']) { $r['displayName'] }
+                             elseif ($r['userPrincipalName']) { $r['userPrincipalName'] }
+                             else { $r['id'] }
+                    $type  = if ($r['@odata.type']) { $r['@odata.type'] -replace '#microsoft\.graph\.','' } else { 'unknown' }
+                    Write-CMLog "  [$type] $label" ([System.Drawing.Color]::DarkGoldenrod)
+                }
+                Write-CMLog "Clean the listed objects and run Confirm Clean again before proceeding to Step 4." ([System.Drawing.Color]::DimGray)
             }
         } catch {
             Write-CMLog "Confirm error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
@@ -9421,19 +9423,20 @@ function Invoke-FrankensteinDomainMigrator {
             Write-CMLog "Remove failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
             Write-CMLog "Querying domain references blocking deletion..." ([System.Drawing.Color]::DarkGoldenrod)
             try {
-                $refs = @(Get-MgDomainDomainNameReference -DomainId $domain -ErrorAction SilentlyContinue)
+                $resp = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/domains/$domain/domainNameReferences" -ErrorAction Stop
+                $refs = @($resp.value)
                 if ($refs.Count -gt 0) {
                     Write-CMLog "$($refs.Count) object(s) still reference '$domain':" ([System.Drawing.Color]::DarkGoldenrod)
                     foreach ($r in $refs) {
-                        $label = if ($r.AdditionalProperties['displayName']) { $r.AdditionalProperties['displayName'] }
-                                 elseif ($r.AdditionalProperties['userPrincipalName']) { $r.AdditionalProperties['userPrincipalName'] }
-                                 else { $r.Id }
-                        $type  = if ($r.AdditionalProperties['@odata.type']) { $r.AdditionalProperties['@odata.type'] -replace '#microsoft\.graph\.','' } else { 'unknown' }
+                        $label = if ($r['displayName']) { $r['displayName'] }
+                                 elseif ($r['userPrincipalName']) { $r['userPrincipalName'] }
+                                 else { $r['id'] }
+                        $type  = if ($r['@odata.type']) { $r['@odata.type'] -replace '#microsoft\.graph\.','' } else { 'unknown' }
                         Write-CMLog "  [$type] $label" ([System.Drawing.Color]::DarkGoldenrod)
                     }
                     Write-CMLog "Clean these objects (Step 3), wait ~60 s for Entra sync, then retry." ([System.Drawing.Color]::DimGray)
                 } else {
-                    Write-CMLog "No domain references found — this may be a transient Microsoft API error. Wait a moment and try again." ([System.Drawing.Color]::DimGray)
+                    Write-CMLog "No domain references found via API — this may be a transient Microsoft error. Wait 30 s and try again." ([System.Drawing.Color]::DimGray)
                 }
             } catch {
                 Write-CMLog "Could not query domain references: $($_.Exception.Message)" ([System.Drawing.Color]::DimGray)

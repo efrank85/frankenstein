@@ -9961,6 +9961,901 @@ function Show-FrankensteinPrereqs {
     $form.Dispose()
 }
 
+function Invoke-FrankensteinOneDriveMigrator {
+    [CmdletBinding()]
+    param()
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    #region ---- Profile management ----
+    $script:OMProfileDir = Join-Path $env:APPDATA 'Frankenstein\Projects'
+    if (-not (Test-Path $script:OMProfileDir)) { New-Item -ItemType Directory -Path $script:OMProfileDir -Force | Out-Null }
+
+    function Get-OMProfiles {
+        @(Get-ChildItem -Path $script:OMProfileDir -Filter 'ODB-*.json' -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.BaseName } | Sort-Object)
+    }
+    function Load-OMProfile ([string]$name) {
+        $path = Join-Path $script:OMProfileDir "$name.json"
+        if (-not (Test-Path $path)) { return $null }
+        $p = Get-Content $path -Raw | ConvertFrom-Json
+        if ($p.FlyClientSecretEncrypted) {
+            try {
+                $sec = $p.FlyClientSecretEncrypted | ConvertTo-SecureString
+                $p | Add-Member -NotePropertyName FlyClientSecret `
+                    -NotePropertyValue ([System.Net.NetworkCredential]::new('', $sec).Password) -Force
+            } catch { $p | Add-Member -NotePropertyName FlyClientSecret -NotePropertyValue '' -Force }
+        } else { $p | Add-Member -NotePropertyName FlyClientSecret -NotePropertyValue '' -Force }
+        return $p
+    }
+    function Save-OMProfile ([string]$name, [hashtable]$data) {
+        $path = Join-Path $script:OMProfileDir "$name.json"
+        $save = @{}; $data.Keys | ForEach-Object { $save[$_] = $data[$_] }
+        if ($save.FlyClientSecret) {
+            $save.FlyClientSecretEncrypted = ($save.FlyClientSecret | ConvertTo-SecureString -AsPlainText -Force | ConvertFrom-SecureString)
+            $save.Remove('FlyClientSecret')
+        }
+        $save | ConvertTo-Json -Depth 5 | Set-Content $path -Force -Encoding UTF8
+    }
+    #endregion
+
+    #region ---- State ----
+    $script:OMFlyConnected    = $false
+    $script:OMSpoConnected    = $false
+    $script:OMFlyBaseUrl      = ''
+    $script:OMFlyClientId     = ''
+    $script:OMFlyClientSecret = ''
+    $script:OMSpoAdminUrl     = ''
+    $script:OMSourceConnName  = ''
+    $script:OMTargetConnName  = ''
+    $script:OMFlyPolicyName   = ''
+    $script:OMProjectName     = ''
+    $script:OMCurrentStep     = 1
+    $script:OMMaxStep         = 1
+    $script:OMMappingPairs    = [System.Collections.Generic.List[hashtable]]::new()
+    $script:OMCurrentProfile  = ''
+    $script:OMRefreshing      = $false
+    #endregion
+
+    #region ---- Helpers ----
+    function Write-OMLog ([string]$msg, [System.Drawing.Color]$color) {
+        if (-not $color) { $color = [System.Drawing.Color]::Silver }
+        $ts = (Get-Date).ToString('HH:mm:ss')
+        try {
+            $logBox.SelectionStart  = $logBox.TextLength
+            $logBox.SelectionLength = 0
+            $logBox.SelectionColor  = [System.Drawing.Color]::FromArgb(80,80,80)
+            $logBox.AppendText("[$ts] ")
+            $logBox.SelectionStart  = $logBox.TextLength
+            $logBox.SelectionColor  = $color
+            $logBox.AppendText("$msg`n")
+            $logBox.ScrollToCaret()
+            $logBox.Refresh()
+        } catch {}
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    function Connect-OMFly {
+        if (-not (Get-Module -Name 'Fly.Client' -ListAvailable -ErrorAction SilentlyContinue)) {
+            Write-OMLog "Installing Fly.Client..." ([System.Drawing.Color]::Silver)
+            Install-Module -Name 'Fly.Client' -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+        }
+        Import-Module 'Fly.Client' -ErrorAction Stop
+        Connect-Fly -Url $script:OMFlyBaseUrl -ClientId $script:OMFlyClientId `
+            -ClientSecret $script:OMFlyClientSecret -ErrorAction Stop
+    }
+
+    function Update-OMStepIndicator {
+        $sl = @($lblStep1, $lblStep2, $lblStep3, $lblStep4)
+        for ($i = 0; $i -lt 4; $i++) {
+            $n = $i + 1
+            if ($n -lt $script:OMCurrentStep) {
+                $sl[$i].BackColor = [System.Drawing.Color]::FromArgb(40,167,69)
+                $sl[$i].ForeColor = [System.Drawing.Color]::White
+            } elseif ($n -eq $script:OMCurrentStep) {
+                $sl[$i].BackColor = [System.Drawing.Color]::FromArgb(0,120,212)
+                $sl[$i].ForeColor = [System.Drawing.Color]::White
+            } else {
+                $sl[$i].BackColor = [System.Drawing.Color]::FromArgb(80,80,80)
+                $sl[$i].ForeColor = [System.Drawing.Color]::FromArgb(180,180,180)
+            }
+            $sl[$i].Cursor = if ($n -le $script:OMMaxStep -and $n -ne $script:OMCurrentStep) {
+                [System.Windows.Forms.Cursors]::Hand
+            } else { [System.Windows.Forms.Cursors]::Default }
+        }
+        $panStep1.Visible = ($script:OMCurrentStep -eq 1)
+        $panStep2.Visible = ($script:OMCurrentStep -eq 2)
+        $panStep3.Visible = ($script:OMCurrentStep -eq 3)
+        $panStep4.Visible = ($script:OMCurrentStep -eq 4)
+        $btnBack.Enabled  = ($script:OMCurrentStep -gt 1)
+        $btnNext.Visible  = ($script:OMCurrentStep -lt 4)
+    }
+
+    function Populate-OMProfileFields ([object]$p) {
+        if (-not $p) { return }
+        try { $txtFlyUrl.Text      = $p.FlyBaseUrl    } catch {}
+        try { $txtFlyClientId.Text = $p.FlyClientId   } catch {}
+        try { $txtFlySecret.Text   = $p.FlyClientSecret } catch {}
+        try { $txtSpoAdminUrl.Text = $p.SpoAdminUrl   } catch {}
+        try { $txtMappingPath.Text = $p.MappingFilePath } catch {}
+        $script:OMFlyBaseUrl      = [string]$p.FlyBaseUrl
+        $script:OMFlyClientId     = [string]$p.FlyClientId
+        $script:OMFlyClientSecret = [string]$p.FlyClientSecret
+        $script:OMSpoAdminUrl     = [string]$p.SpoAdminUrl
+        $script:OMSourceConnName  = [string]$p.SourceConnName
+        $script:OMTargetConnName  = [string]$p.TargetConnName
+        $script:OMFlyPolicyName   = [string]$p.FlyPolicyName
+        $script:OMProjectName     = [string]$p.FlyProjectName
+        try { $txtSrcConnName.Text  = $script:OMSourceConnName } catch {}
+        try { $txtTgtConnName.Text  = $script:OMTargetConnName } catch {}
+        try { $txtFlyPolicy.Text    = $script:OMFlyPolicyName  } catch {}
+        try { $txtProjectName.Text  = $script:OMProjectName    } catch {}
+    }
+
+    function Get-OMProfileData {
+        return @{
+            FlyBaseUrl      = $script:OMFlyBaseUrl
+            FlyClientId     = $script:OMFlyClientId
+            FlyClientSecret = $script:OMFlyClientSecret
+            SpoAdminUrl     = $script:OMSpoAdminUrl
+            SourceConnName  = $script:OMSourceConnName
+            TargetConnName  = $script:OMTargetConnName
+            FlyPolicyName   = $script:OMFlyPolicyName
+            FlyProjectName  = $script:OMProjectName
+            MappingFilePath = $(try { $txtMappingPath.Text.Trim() } catch { '' })
+        }
+    }
+    #endregion
+
+    #region ---- Form ----
+    $form                 = New-Object System.Windows.Forms.Form
+    $form.Text            = 'Frankenstein — OneDrive Migrator'
+    $form.Size            = New-Object System.Drawing.Size(870, 1010)
+    $form.StartPosition   = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox     = $false
+    $form.BackColor       = [System.Drawing.Color]::FromArgb(30,30,30)
+
+    # ---- Profile bar ----
+    $grpProfile            = New-Object System.Windows.Forms.GroupBox
+    $grpProfile.Text       = 'Profile'
+    $grpProfile.Location   = New-Object System.Drawing.Point(10, 8)
+    $grpProfile.Size       = New-Object System.Drawing.Size(838, 46)
+    $grpProfile.ForeColor  = [System.Drawing.Color]::Silver
+    $form.Controls.Add($grpProfile)
+
+    $cboProfile               = New-Object System.Windows.Forms.ComboBox
+    $cboProfile.Location      = New-Object System.Drawing.Point(8, 16)
+    $cboProfile.Size          = New-Object System.Drawing.Size(260, 22)
+    $cboProfile.DropDownStyle = 'DropDownList'
+    $grpProfile.Controls.Add($cboProfile)
+
+    foreach ($spec in @(
+        @{ Name='btnLoadProfile'; Text='Load'; X=275 }
+        @{ Name='btnSaveProfile'; Text='Save'; X=341 }
+        @{ Name='btnNewProfile';  Text='New';  X=407 }
+    )) {
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = $spec.Text; $b.FlatStyle = 'Flat'
+        $b.Location = New-Object System.Drawing.Point($spec.X, 14)
+        $b.Size = New-Object System.Drawing.Size(60, 24)
+        $b.BackColor = [System.Drawing.Color]::FromArgb(50,50,50); $b.ForeColor = [System.Drawing.Color]::Silver
+        $grpProfile.Controls.Add($b)
+        Set-Variable -Name $spec.Name -Value $b
+    }
+
+    $lblProfileStatus           = New-Object System.Windows.Forms.Label
+    $lblProfileStatus.Location  = New-Object System.Drawing.Point(478, 18)
+    $lblProfileStatus.Size      = New-Object System.Drawing.Size(348, 18)
+    $lblProfileStatus.ForeColor = [System.Drawing.Color]::DimGray
+    $lblProfileStatus.Text      = 'No profile loaded'
+    $grpProfile.Controls.Add($lblProfileStatus)
+
+    # ---- Step indicators ----
+    $stepNames = @('1  Connect','2  Connections','3  Map & Provision','4  Migrate')
+    $lblStep1  = $null; $lblStep2 = $null; $lblStep3 = $null; $lblStep4 = $null
+    for ($si = 0; $si -lt 4; $si++) {
+        $sl           = New-Object System.Windows.Forms.Label
+        $sl.Text      = $stepNames[$si]; $sl.TextAlign = 'MiddleCenter'
+        $sl.Location  = New-Object System.Drawing.Point((10 + $si * 212), 62)
+        $sl.Size      = New-Object System.Drawing.Size(204, 28)
+        $sl.BackColor = [System.Drawing.Color]::FromArgb(80,80,80)
+        $sl.ForeColor = [System.Drawing.Color]::FromArgb(180,180,180)
+        $sl.Font      = New-Object System.Drawing.Font('Segoe UI', 9)
+        $sl.Tag       = $si + 1
+        $sl.Add_Click({
+            $n = [int]$this.Tag
+            if ($n -le $script:OMMaxStep -and $n -ne $script:OMCurrentStep) {
+                $script:OMCurrentStep = $n; Update-OMStepIndicator
+            }
+        })
+        $form.Controls.Add($sl)
+        switch ($si) { 0 { $lblStep1 = $sl } 1 { $lblStep2 = $sl } 2 { $lblStep3 = $sl } 3 { $lblStep4 = $sl } }
+    }
+
+    $stepPanelLoc  = New-Object System.Drawing.Point(10, 98)
+    $stepPanelSize = New-Object System.Drawing.Size(848, 548)
+
+    # =====================================================================
+    # STEP 1 — Connect
+    # =====================================================================
+    $panStep1           = New-Object System.Windows.Forms.Panel
+    $panStep1.Location  = $stepPanelLoc; $panStep1.Size = $stepPanelSize
+    $panStep1.BackColor = [System.Drawing.Color]::FromArgb(38,38,38)
+    $form.Controls.Add($panStep1)
+
+    $lbl1Fly           = New-Object System.Windows.Forms.Label
+    $lbl1Fly.Text      = 'AvePoint Fly'
+    $lbl1Fly.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $lbl1Fly.ForeColor = [System.Drawing.Color]::Silver
+    $lbl1Fly.Location  = New-Object System.Drawing.Point(8, 12); $lbl1Fly.Size = New-Object System.Drawing.Size(200, 18)
+    $panStep1.Controls.Add($lbl1Fly)
+
+    foreach ($spec in @(
+        @{ Var='lblFlyUrlLbl';  Y=36;  Text='Base URL';       W=160; Hint=$false }
+        @{ Var='lblFlyIdLbl';   Y=86;  Text='Client ID';      W=160; Hint=$false }
+        @{ Var='lblFlySecLbl';  Y=136; Text='Client Secret';  W=160; Hint=$false }
+    )) {
+        $l = New-Object System.Windows.Forms.Label
+        $l.Text = $spec.Text; $l.ForeColor = [System.Drawing.Color]::Silver
+        $l.Location = New-Object System.Drawing.Point(8, $spec.Y); $l.Size = New-Object System.Drawing.Size($spec.W, 18)
+        $panStep1.Controls.Add($l)
+    }
+
+    $txtFlyUrl                    = New-Object System.Windows.Forms.TextBox
+    $txtFlyUrl.Location           = New-Object System.Drawing.Point(8, 56); $txtFlyUrl.Size = New-Object System.Drawing.Size(380, 22)
+    $txtFlyUrl.BackColor          = [System.Drawing.Color]::FromArgb(50,50,50); $txtFlyUrl.ForeColor = [System.Drawing.Color]::White
+    try { $txtFlyUrl.PlaceholderText = 'https://fly.yourcompany.com' } catch {}
+    $panStep1.Controls.Add($txtFlyUrl)
+
+    $txtFlyClientId               = New-Object System.Windows.Forms.TextBox
+    $txtFlyClientId.Location      = New-Object System.Drawing.Point(8, 106); $txtFlyClientId.Size = New-Object System.Drawing.Size(380, 22)
+    $txtFlyClientId.BackColor     = [System.Drawing.Color]::FromArgb(50,50,50); $txtFlyClientId.ForeColor = [System.Drawing.Color]::White
+    $panStep1.Controls.Add($txtFlyClientId)
+
+    $txtFlySecret                 = New-Object System.Windows.Forms.TextBox
+    $txtFlySecret.Location        = New-Object System.Drawing.Point(8, 156); $txtFlySecret.Size = New-Object System.Drawing.Size(380, 22)
+    $txtFlySecret.BackColor       = [System.Drawing.Color]::FromArgb(50,50,50); $txtFlySecret.ForeColor = [System.Drawing.Color]::White
+    $txtFlySecret.UseSystemPasswordChar = $true
+    $panStep1.Controls.Add($txtFlySecret)
+
+    $btnConnFly                   = New-Object System.Windows.Forms.Button
+    $btnConnFly.Text              = 'Connect to Fly'; $btnConnFly.FlatStyle = 'Flat'
+    $btnConnFly.Location          = New-Object System.Drawing.Point(8, 186); $btnConnFly.Size = New-Object System.Drawing.Size(150, 26)
+    $btnConnFly.BackColor         = [System.Drawing.Color]::FromArgb(0,120,212); $btnConnFly.ForeColor = [System.Drawing.Color]::White
+    $panStep1.Controls.Add($btnConnFly)
+
+    $lblFlyStatus                 = New-Object System.Windows.Forms.Label
+    $lblFlyStatus.Text            = 'Not connected'; $lblFlyStatus.ForeColor = [System.Drawing.Color]::DimGray
+    $lblFlyStatus.Location        = New-Object System.Drawing.Point(170, 192); $lblFlyStatus.Size = New-Object System.Drawing.Size(340, 18)
+    $panStep1.Controls.Add($lblFlyStatus)
+
+    $sepSpo                       = New-Object System.Windows.Forms.Panel
+    $sepSpo.BackColor             = [System.Drawing.Color]::FromArgb(55,55,55)
+    $sepSpo.Location              = New-Object System.Drawing.Point(8, 228); $sepSpo.Size = New-Object System.Drawing.Size(830, 1)
+    $panStep1.Controls.Add($sepSpo)
+
+    $lbl1Spo                      = New-Object System.Windows.Forms.Label
+    $lbl1Spo.Text                 = 'SharePoint Online Admin — Target Tenant'
+    $lbl1Spo.Font                 = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $lbl1Spo.ForeColor            = [System.Drawing.Color]::Silver
+    $lbl1Spo.Location             = New-Object System.Drawing.Point(8, 238); $lbl1Spo.Size = New-Object System.Drawing.Size(400, 18)
+    $panStep1.Controls.Add($lbl1Spo)
+
+    $lblSpoUrlLbl                 = New-Object System.Windows.Forms.Label
+    $lblSpoUrlLbl.Text            = 'SPO Admin URL'; $lblSpoUrlLbl.ForeColor = [System.Drawing.Color]::Silver
+    $lblSpoUrlLbl.Location        = New-Object System.Drawing.Point(8, 262); $lblSpoUrlLbl.Size = New-Object System.Drawing.Size(160, 18)
+    $panStep1.Controls.Add($lblSpoUrlLbl)
+
+    $lblSpoHint                   = New-Object System.Windows.Forms.Label
+    $lblSpoHint.Text              = 'Required for pre-provisioning OneDrive sites on the target tenant before migration.'
+    $lblSpoHint.ForeColor         = [System.Drawing.Color]::DimGray
+    $lblSpoHint.Location          = New-Object System.Drawing.Point(8, 282); $lblSpoHint.Size = New-Object System.Drawing.Size(830, 16)
+    $panStep1.Controls.Add($lblSpoHint)
+
+    $txtSpoAdminUrl               = New-Object System.Windows.Forms.TextBox
+    $txtSpoAdminUrl.Location      = New-Object System.Drawing.Point(8, 302); $txtSpoAdminUrl.Size = New-Object System.Drawing.Size(380, 22)
+    $txtSpoAdminUrl.BackColor     = [System.Drawing.Color]::FromArgb(50,50,50); $txtSpoAdminUrl.ForeColor = [System.Drawing.Color]::White
+    try { $txtSpoAdminUrl.PlaceholderText = 'https://contoso-admin.sharepoint.com' } catch {}
+    $panStep1.Controls.Add($txtSpoAdminUrl)
+
+    $btnConnSpo                   = New-Object System.Windows.Forms.Button
+    $btnConnSpo.Text              = 'Connect to SPO'; $btnConnSpo.FlatStyle = 'Flat'
+    $btnConnSpo.Location          = New-Object System.Drawing.Point(8, 334); $btnConnSpo.Size = New-Object System.Drawing.Size(150, 26)
+    $btnConnSpo.BackColor         = [System.Drawing.Color]::FromArgb(0,120,212); $btnConnSpo.ForeColor = [System.Drawing.Color]::White
+    $panStep1.Controls.Add($btnConnSpo)
+
+    $lblSpoStatus                 = New-Object System.Windows.Forms.Label
+    $lblSpoStatus.Text            = 'Not connected'; $lblSpoStatus.ForeColor = [System.Drawing.Color]::DimGray
+    $lblSpoStatus.Location        = New-Object System.Drawing.Point(170, 340); $lblSpoStatus.Size = New-Object System.Drawing.Size(340, 18)
+    $panStep1.Controls.Add($lblSpoStatus)
+
+    $lblConnSummary               = New-Object System.Windows.Forms.Label
+    $lblConnSummary.Location      = New-Object System.Drawing.Point(8, 380); $lblConnSummary.Size = New-Object System.Drawing.Size(830, 40)
+    $lblConnSummary.ForeColor     = [System.Drawing.Color]::FromArgb(160,160,90); $lblConnSummary.Text = ''
+    $panStep1.Controls.Add($lblConnSummary)
+
+    # =====================================================================
+    # STEP 2 — Connections & Policy
+    # =====================================================================
+    $panStep2           = New-Object System.Windows.Forms.Panel
+    $panStep2.Location  = $stepPanelLoc; $panStep2.Size = $stepPanelSize
+    $panStep2.BackColor = [System.Drawing.Color]::FromArgb(38,38,38); $panStep2.Visible = $false
+    $form.Controls.Add($panStep2)
+
+    $lbl2Title           = New-Object System.Windows.Forms.Label
+    $lbl2Title.Text      = 'Connection and Policy Names (pre-configured in Fly web UI)'
+    $lbl2Title.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $lbl2Title.ForeColor = [System.Drawing.Color]::Silver
+    $lbl2Title.Location  = New-Object System.Drawing.Point(8, 12); $lbl2Title.Size = New-Object System.Drawing.Size(700, 18)
+    $panStep2.Controls.Add($lbl2Title)
+
+    foreach ($spec in @(
+        @{ Var='txtSrcConnName'; LblY=46; TxtY=66; Lbl='Source ODB Connection Name'; Ph='e.g. Source Tenant ODB' }
+        @{ Var='txtTgtConnName'; LblY=100; TxtY=120; Lbl='Destination ODB Connection Name'; Ph='e.g. Target Tenant ODB' }
+        @{ Var='txtFlyPolicy';   LblY=154; TxtY=174; Lbl='Policy Name'; Ph='e.g. Default ODB Policy' }
+    )) {
+        $l = New-Object System.Windows.Forms.Label
+        $l.Text = $spec.Lbl; $l.ForeColor = [System.Drawing.Color]::Silver
+        $l.Location = New-Object System.Drawing.Point(8, $spec.LblY); $l.Size = New-Object System.Drawing.Size(300, 18)
+        $panStep2.Controls.Add($l)
+        $t = New-Object System.Windows.Forms.TextBox
+        $t.Location = New-Object System.Drawing.Point(8, $spec.TxtY); $t.Size = New-Object System.Drawing.Size(340, 22)
+        $t.BackColor = [System.Drawing.Color]::FromArgb(50,50,50); $t.ForeColor = [System.Drawing.Color]::White
+        try { $t.PlaceholderText = $spec.Ph } catch {}
+        $panStep2.Controls.Add($t)
+        Set-Variable -Name $spec.Var -Value $t
+    }
+
+    $lbl2Hint           = New-Object System.Windows.Forms.Label
+    $lbl2Hint.Text      = 'Connection names and policy must already exist in Fly (Settings → Connections and Policies → OneDrive).'
+    $lbl2Hint.ForeColor = [System.Drawing.Color]::FromArgb(100,130,160)
+    $lbl2Hint.Location  = New-Object System.Drawing.Point(8, 210); $lbl2Hint.Size = New-Object System.Drawing.Size(830, 18)
+    $panStep2.Controls.Add($lbl2Hint)
+
+    # =====================================================================
+    # STEP 3 — Mapping & Pre-Provision
+    # =====================================================================
+    $panStep3           = New-Object System.Windows.Forms.Panel
+    $panStep3.Location  = $stepPanelLoc; $panStep3.Size = $stepPanelSize
+    $panStep3.BackColor = [System.Drawing.Color]::FromArgb(38,38,38); $panStep3.Visible = $false
+    $form.Controls.Add($panStep3)
+
+    $lbl3Title           = New-Object System.Windows.Forms.Label
+    $lbl3Title.Text      = 'Mapping CSV'
+    $lbl3Title.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $lbl3Title.ForeColor = [System.Drawing.Color]::Silver
+    $lbl3Title.Location  = New-Object System.Drawing.Point(8, 12); $lbl3Title.Size = New-Object System.Drawing.Size(200, 18)
+    $panStep3.Controls.Add($lbl3Title)
+
+    $lbl3CsvHint           = New-Object System.Windows.Forms.Label
+    $lbl3CsvHint.Text      = 'Two columns required:  "Source user" (source UPN)  and  "Destination user" (target UPN).  One row per user.'
+    $lbl3CsvHint.ForeColor = [System.Drawing.Color]::FromArgb(100,130,160)
+    $lbl3CsvHint.Location  = New-Object System.Drawing.Point(8, 32); $lbl3CsvHint.Size = New-Object System.Drawing.Size(830, 18)
+    $panStep3.Controls.Add($lbl3CsvHint)
+
+    $txtMappingPath           = New-Object System.Windows.Forms.TextBox
+    $txtMappingPath.Location  = New-Object System.Drawing.Point(8, 58); $txtMappingPath.Size = New-Object System.Drawing.Size(580, 22)
+    $txtMappingPath.BackColor = [System.Drawing.Color]::FromArgb(50,50,50); $txtMappingPath.ForeColor = [System.Drawing.Color]::White
+    try { $txtMappingPath.PlaceholderText = 'Path to mapping CSV...' } catch {}
+    $panStep3.Controls.Add($txtMappingPath)
+
+    $btnBrowseCsv             = New-Object System.Windows.Forms.Button
+    $btnBrowseCsv.Text        = 'Browse...'; $btnBrowseCsv.FlatStyle = 'Flat'
+    $btnBrowseCsv.Location    = New-Object System.Drawing.Point(594, 57); $btnBrowseCsv.Size = New-Object System.Drawing.Size(80, 24)
+    $btnBrowseCsv.BackColor   = [System.Drawing.Color]::FromArgb(60,60,60); $btnBrowseCsv.ForeColor = [System.Drawing.Color]::Silver
+    $panStep3.Controls.Add($btnBrowseCsv)
+
+    $btnLoadCsv               = New-Object System.Windows.Forms.Button
+    $btnLoadCsv.Text          = 'Load & Validate'; $btnLoadCsv.FlatStyle = 'Flat'
+    $btnLoadCsv.Location      = New-Object System.Drawing.Point(682, 57); $btnLoadCsv.Size = New-Object System.Drawing.Size(120, 24)
+    $btnLoadCsv.BackColor     = [System.Drawing.Color]::FromArgb(0,120,212); $btnLoadCsv.ForeColor = [System.Drawing.Color]::White
+    $panStep3.Controls.Add($btnLoadCsv)
+
+    $lvMapping = New-Object System.Windows.Forms.ListView
+    $lvMapping.Location = New-Object System.Drawing.Point(8, 90); $lvMapping.Size = New-Object System.Drawing.Size(830, 254)
+    $lvMapping.View = 'Details'; $lvMapping.FullRowSelect = $true; $lvMapping.GridLines = $true
+    $lvMapping.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvMapping.ForeColor = [System.Drawing.Color]::Silver
+    foreach ($colSpec in @(
+        @{ Name='Source User';       Width=240 }
+        @{ Name='Destination User';  Width=240 }
+        @{ Name='Validation';        Width=160 }
+        @{ Name='Provision Status';  Width=160 }
+    )) { $c = $lvMapping.Columns.Add($colSpec.Name); $c.Width = $colSpec.Width }
+    $panStep3.Controls.Add($lvMapping)
+
+    $lblMapSummary           = New-Object System.Windows.Forms.Label
+    $lblMapSummary.Location  = New-Object System.Drawing.Point(8, 352); $lblMapSummary.Size = New-Object System.Drawing.Size(830, 20)
+    $lblMapSummary.ForeColor = [System.Drawing.Color]::DimGray; $lblMapSummary.Text = ''
+    $panStep3.Controls.Add($lblMapSummary)
+
+    $btnProvision             = New-Object System.Windows.Forms.Button
+    $btnProvision.Text        = 'Request OneDrive Provisioning'; $btnProvision.FlatStyle = 'Flat'
+    $btnProvision.Location    = New-Object System.Drawing.Point(8, 382); $btnProvision.Size = New-Object System.Drawing.Size(228, 28)
+    $btnProvision.BackColor   = [System.Drawing.Color]::FromArgb(70,100,150); $btnProvision.ForeColor = [System.Drawing.Color]::White
+    $btnProvision.Enabled     = $false
+    $panStep3.Controls.Add($btnProvision)
+
+    $lblProvHint           = New-Object System.Windows.Forms.Label
+    $lblProvHint.Text      = 'Submits provisioning requests for target-tenant OneDrives. Sites typically appear within 5–15 minutes.'
+    $lblProvHint.ForeColor = [System.Drawing.Color]::FromArgb(100,130,160)
+    $lblProvHint.Location  = New-Object System.Drawing.Point(246, 388); $lblProvHint.Size = New-Object System.Drawing.Size(592, 16)
+    $panStep3.Controls.Add($lblProvHint)
+
+    $sepProjLine           = New-Object System.Windows.Forms.Panel
+    $sepProjLine.BackColor = [System.Drawing.Color]::FromArgb(55,55,55)
+    $sepProjLine.Location  = New-Object System.Drawing.Point(8, 424); $sepProjLine.Size = New-Object System.Drawing.Size(830, 1)
+    $panStep3.Controls.Add($sepProjLine)
+
+    $txtProjectName           = New-Object System.Windows.Forms.TextBox
+    $txtProjectName.Location  = New-Object System.Drawing.Point(8, 438); $txtProjectName.Size = New-Object System.Drawing.Size(360, 22)
+    $txtProjectName.BackColor = [System.Drawing.Color]::FromArgb(50,50,50); $txtProjectName.ForeColor = [System.Drawing.Color]::White
+    try { $txtProjectName.PlaceholderText = 'e.g. Air - OneDrive Migration' } catch {}
+    $panStep3.Controls.Add($txtProjectName)
+
+    $lblProjName           = New-Object System.Windows.Forms.Label
+    $lblProjName.Text      = '← project name in AvePoint Fly'
+    $lblProjName.Location  = New-Object System.Drawing.Point(376, 442); $lblProjName.Size = New-Object System.Drawing.Size(460, 18)
+    $lblProjName.ForeColor = [System.Drawing.Color]::DimGray
+    $panStep3.Controls.Add($lblProjName)
+
+    $lblProjHint           = New-Object System.Windows.Forms.Label
+    $lblProjHint.Text      = 'Existing project? Type its exact name and click Next.   New project? Load CSV above, type a name, then click Build Project.'
+    $lblProjHint.Location  = New-Object System.Drawing.Point(8, 466); $lblProjHint.Size = New-Object System.Drawing.Size(830, 18)
+    $lblProjHint.ForeColor = [System.Drawing.Color]::FromArgb(100,130,160)
+    $panStep3.Controls.Add($lblProjHint)
+
+    $btnBuildProject          = New-Object System.Windows.Forms.Button
+    $btnBuildProject.Text     = 'Build Project in Fly'; $btnBuildProject.FlatStyle = 'Flat'
+    $btnBuildProject.Location = New-Object System.Drawing.Point(8, 494); $btnBuildProject.Size = New-Object System.Drawing.Size(155, 28)
+    $btnBuildProject.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnBuildProject.ForeColor = [System.Drawing.Color]::White
+    $btnBuildProject.Enabled  = $false
+    $panStep3.Controls.Add($btnBuildProject)
+
+    # =====================================================================
+    # STEP 4 — Migrate & Status
+    # =====================================================================
+    $panStep4           = New-Object System.Windows.Forms.Panel
+    $panStep4.Location  = $stepPanelLoc; $panStep4.Size = $stepPanelSize
+    $panStep4.BackColor = [System.Drawing.Color]::FromArgb(38,38,38); $panStep4.Visible = $false
+    $form.Controls.Add($panStep4)
+
+    $btnPreScan           = New-Object System.Windows.Forms.Button
+    $btnPreScan.Text      = 'Pre-Scan'; $btnPreScan.FlatStyle = 'Flat'
+    $btnPreScan.Location  = New-Object System.Drawing.Point(8, 8); $btnPreScan.Size = New-Object System.Drawing.Size(100, 26)
+    $btnPreScan.BackColor = [System.Drawing.Color]::FromArgb(50,50,50); $btnPreScan.ForeColor = [System.Drawing.Color]::Silver
+    $panStep4.Controls.Add($btnPreScan)
+
+    $btnVerify            = New-Object System.Windows.Forms.Button
+    $btnVerify.Text       = 'Verify'; $btnVerify.FlatStyle = 'Flat'
+    $btnVerify.Location   = New-Object System.Drawing.Point(116, 8); $btnVerify.Size = New-Object System.Drawing.Size(100, 26)
+    $btnVerify.BackColor  = [System.Drawing.Color]::FromArgb(50,50,50); $btnVerify.ForeColor = [System.Drawing.Color]::Silver
+    $panStep4.Controls.Add($btnVerify)
+
+    $btnRunFull           = New-Object System.Windows.Forms.Button
+    $btnRunFull.Text      = 'Run Full Migration'; $btnRunFull.FlatStyle = 'Flat'
+    $btnRunFull.Location  = New-Object System.Drawing.Point(8, 42); $btnRunFull.Size = New-Object System.Drawing.Size(155, 26)
+    $btnRunFull.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnRunFull.ForeColor = [System.Drawing.Color]::White
+    $panStep4.Controls.Add($btnRunFull)
+
+    $btnRunDelta          = New-Object System.Windows.Forms.Button
+    $btnRunDelta.Text     = 'Run Delta Migration'; $btnRunDelta.FlatStyle = 'Flat'
+    $btnRunDelta.Location = New-Object System.Drawing.Point(171, 42); $btnRunDelta.Size = New-Object System.Drawing.Size(155, 26)
+    $btnRunDelta.BackColor = [System.Drawing.Color]::FromArgb(40,167,69); $btnRunDelta.ForeColor = [System.Drawing.Color]::White
+    $panStep4.Controls.Add($btnRunDelta)
+
+    $btnRetryErrors          = New-Object System.Windows.Forms.Button
+    $btnRetryErrors.Text     = 'Retry Errors'; $btnRetryErrors.FlatStyle = 'Flat'
+    $btnRetryErrors.Location = New-Object System.Drawing.Point(334, 42); $btnRetryErrors.Size = New-Object System.Drawing.Size(115, 26)
+    $btnRetryErrors.BackColor = [System.Drawing.Color]::FromArgb(160,80,0); $btnRetryErrors.ForeColor = [System.Drawing.Color]::White
+    $panStep4.Controls.Add($btnRetryErrors)
+
+    $btnRefreshStatus          = New-Object System.Windows.Forms.Button
+    $btnRefreshStatus.Text     = 'Refresh Status'; $btnRefreshStatus.FlatStyle = 'Flat'
+    $btnRefreshStatus.Location = New-Object System.Drawing.Point(8, 76); $btnRefreshStatus.Size = New-Object System.Drawing.Size(115, 26)
+    $btnRefreshStatus.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnRefreshStatus.ForeColor = [System.Drawing.Color]::Silver
+    $panStep4.Controls.Add($btnRefreshStatus)
+
+    $btnOpenFly            = New-Object System.Windows.Forms.Button
+    $btnOpenFly.Text       = 'Open in Fly ↗'; $btnOpenFly.FlatStyle = 'Flat'
+    $btnOpenFly.Location   = New-Object System.Drawing.Point(131, 76); $btnOpenFly.Size = New-Object System.Drawing.Size(120, 26)
+    $btnOpenFly.BackColor  = [System.Drawing.Color]::FromArgb(60,60,60); $btnOpenFly.ForeColor = [System.Drawing.Color]::Silver
+    $panStep4.Controls.Add($btnOpenFly)
+
+    $btnExportStatus          = New-Object System.Windows.Forms.Button
+    $btnExportStatus.Text     = 'Export CSV'; $btnExportStatus.FlatStyle = 'Flat'
+    $btnExportStatus.Location = New-Object System.Drawing.Point(259, 76); $btnExportStatus.Size = New-Object System.Drawing.Size(90, 26)
+    $btnExportStatus.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnExportStatus.ForeColor = [System.Drawing.Color]::Silver
+    $panStep4.Controls.Add($btnExportStatus)
+
+    $btnReconnectFly4          = New-Object System.Windows.Forms.Button
+    $btnReconnectFly4.Text     = 'Reconnect Fly'; $btnReconnectFly4.FlatStyle = 'Flat'
+    $btnReconnectFly4.Location = New-Object System.Drawing.Point(600, 76); $btnReconnectFly4.Size = New-Object System.Drawing.Size(130, 26)
+    $btnReconnectFly4.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnReconnectFly4.ForeColor = [System.Drawing.Color]::Silver
+    $panStep4.Controls.Add($btnReconnectFly4)
+
+    $lblLastRun           = New-Object System.Windows.Forms.Label
+    $lblLastRun.Location  = New-Object System.Drawing.Point(8, 110); $lblLastRun.Size = New-Object System.Drawing.Size(550, 18)
+    $lblLastRun.ForeColor = [System.Drawing.Color]::DimGray; $lblLastRun.Text = 'No migration run yet.'
+    $panStep4.Controls.Add($lblLastRun)
+
+    $chkAutoRefresh           = New-Object System.Windows.Forms.CheckBox
+    $chkAutoRefresh.Text      = 'Auto-refresh (30s)'; $chkAutoRefresh.Checked = $true
+    $chkAutoRefresh.Location  = New-Object System.Drawing.Point(660, 108); $chkAutoRefresh.Size = New-Object System.Drawing.Size(160, 20)
+    $chkAutoRefresh.ForeColor = [System.Drawing.Color]::DimGray
+    $chkAutoRefresh.BackColor = [System.Drawing.Color]::FromArgb(38,38,38)
+    $panStep4.Controls.Add($chkAutoRefresh)
+
+    $refreshTimer          = New-Object System.Windows.Forms.Timer
+    $refreshTimer.Interval = 30000
+
+    $lvStatus = New-Object System.Windows.Forms.ListView
+    $lvStatus.Location = New-Object System.Drawing.Point(8, 134); $lvStatus.Size = New-Object System.Drawing.Size(830, 406)
+    $lvStatus.View = 'Details'; $lvStatus.FullRowSelect = $true; $lvStatus.GridLines = $true
+    $lvStatus.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $lvStatus.ForeColor = [System.Drawing.Color]::Silver
+    foreach ($colSpec in @(
+        @{ Name='Source';      Width=220 }
+        @{ Name='Destination'; Width=220 }
+        @{ Name='Stage';       Width=100 }
+        @{ Name='Status';      Width=155 }
+        @{ Name='Progress';    Width=75  }
+    )) { $c = $lvStatus.Columns.Add($colSpec.Name); $c.Width = $colSpec.Width }
+    $panStep4.Controls.Add($lvStatus)
+
+    # ---- Navigation + Log ----
+    $btnBack           = New-Object System.Windows.Forms.Button
+    $btnBack.Text      = '← Back'; $btnBack.FlatStyle = 'Flat'
+    $btnBack.Location  = New-Object System.Drawing.Point(10, 656); $btnBack.Size = New-Object System.Drawing.Size(100, 28)
+    $btnBack.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnBack.ForeColor = [System.Drawing.Color]::Silver
+    $btnBack.Enabled   = $false
+    $form.Controls.Add($btnBack)
+
+    $btnNext           = New-Object System.Windows.Forms.Button
+    $btnNext.Text      = 'Next →'; $btnNext.FlatStyle = 'Flat'
+    $btnNext.Location  = New-Object System.Drawing.Point(748, 656); $btnNext.Size = New-Object System.Drawing.Size(100, 28)
+    $btnNext.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnNext.ForeColor = [System.Drawing.Color]::White
+    $btnNext.Enabled   = $false
+    $form.Controls.Add($btnNext)
+
+    $grpLog           = New-Object System.Windows.Forms.GroupBox
+    $grpLog.Text      = 'Log'; $grpLog.Location = New-Object System.Drawing.Point(10, 692)
+    $grpLog.Size      = New-Object System.Drawing.Size(838, 220); $grpLog.ForeColor = [System.Drawing.Color]::Silver
+    $form.Controls.Add($grpLog)
+
+    $logBox           = New-Object System.Windows.Forms.RichTextBox
+    $logBox.Location  = New-Object System.Drawing.Point(6, 16); $logBox.Size = New-Object System.Drawing.Size(824, 196)
+    $logBox.ReadOnly  = $true; $logBox.BackColor = [System.Drawing.Color]::FromArgb(18,18,18)
+    $logBox.ForeColor = [System.Drawing.Color]::Silver
+    $logBox.Font      = New-Object System.Drawing.Font('Consolas', 8.5)
+    $grpLog.Controls.Add($logBox)
+    #endregion ---- Form ----
+
+    #region ---- Event Handlers ----
+
+    # ---- Profile bar ----
+    $cboProfile.Items.Clear()
+    @(Get-OMProfiles) | ForEach-Object { $cboProfile.Items.Add($_) | Out-Null }
+    if ($cboProfile.Items.Count -gt 0) { $cboProfile.SelectedIndex = 0 }
+
+    $btnLoadProfile.Add_Click({
+        $n = $cboProfile.Text; if (-not $n) { return }
+        $p = Load-OMProfile $n
+        if ($p) {
+            Populate-OMProfileFields $p
+            $script:OMCurrentProfile = $n
+            $lblProfileStatus.Text = "Loaded: $n"; $lblProfileStatus.ForeColor = [System.Drawing.Color]::LimeGreen
+            Write-OMLog "Profile '$n' loaded." ([System.Drawing.Color]::LimeGreen)
+            if ($p.FlyProjectName) {
+                $script:OMMaxStep = 4; $btnNext.Enabled = $true
+                $lblConnSummary.Text = "Project '$($p.FlyProjectName)' loaded. Connect Fly and click Next, or go to Step 4."
+                $lblConnSummary.ForeColor = [System.Drawing.Color]::FromArgb(100,220,130)
+            }
+        }
+    })
+
+    $btnSaveProfile.Add_Click({
+        $n = $script:OMCurrentProfile
+        if (-not $n) {
+            $f2 = New-Object System.Windows.Forms.Form
+            $f2.Text = 'Save Profile'; $f2.Size = New-Object System.Drawing.Size(340,120)
+            $f2.StartPosition = 'CenterParent'; $f2.FormBorderStyle = 'FixedDialog'; $f2.MaximizeBox = $false
+            $t2 = New-Object System.Windows.Forms.TextBox; $t2.Location = New-Object System.Drawing.Point(10,10); $t2.Size = New-Object System.Drawing.Size(300,22); $t2.Text = 'ODB-My Migration'
+            $ok2 = New-Object System.Windows.Forms.Button; $ok2.Text = 'OK'; $ok2.Location = New-Object System.Drawing.Point(230,42); $ok2.Size = New-Object System.Drawing.Size(80,26); $ok2.DialogResult = 'OK'
+            $f2.Controls.AddRange(@($t2,$ok2)); $f2.AcceptButton = $ok2
+            $dlg2 = $f2.ShowDialog(); $n = if ($dlg2 -eq 'OK') { $t2.Text.Trim() } else { '' }; $f2.Dispose()
+        }
+        if (-not $n) { return }
+        Save-OMProfile $n (Get-OMProfileData)
+        $script:OMCurrentProfile = $n
+        if ($cboProfile.Items -notcontains $n) { $cboProfile.Items.Add($n) | Out-Null }
+        $cboProfile.SelectedItem = $n
+        $lblProfileStatus.Text = "Saved: $n"; $lblProfileStatus.ForeColor = [System.Drawing.Color]::LimeGreen
+        Write-OMLog "Profile '$n' saved." ([System.Drawing.Color]::LimeGreen)
+    })
+
+    $btnNewProfile.Add_Click({
+        $script:OMCurrentProfile = ''; $script:OMFlyConnected = $false; $script:OMSpoConnected = $false
+        $script:OMProjectName = ''
+        $txtFlyUrl.Text = ''; $txtFlyClientId.Text = ''; $txtFlySecret.Text = ''; $txtSpoAdminUrl.Text = ''
+        $lblFlyStatus.Text = 'Not connected'; $lblFlyStatus.ForeColor = [System.Drawing.Color]::DimGray
+        $lblSpoStatus.Text = 'Not connected'; $lblSpoStatus.ForeColor = [System.Drawing.Color]::DimGray
+        $lblProfileStatus.Text = 'New profile (unsaved)'; $lblProfileStatus.ForeColor = [System.Drawing.Color]::DarkGoldenrod
+        Write-OMLog "New profile started." ([System.Drawing.Color]::DimGray)
+    })
+
+    # ---- Step 1: Connect Fly ----
+    $btnConnFly.Add_Click({
+        try {
+            $script:OMFlyBaseUrl      = $txtFlyUrl.Text.Trim()
+            $script:OMFlyClientId     = $txtFlyClientId.Text.Trim()
+            $script:OMFlyClientSecret = $txtFlySecret.Text.Trim()
+            Write-OMLog "Connecting to Fly ($($script:OMFlyBaseUrl))..." ([System.Drawing.Color]::Silver)
+            $lblFlyStatus.Text = 'Connecting...'; $lblFlyStatus.ForeColor = [System.Drawing.Color]::DarkGoldenrod; $form.Refresh()
+            Connect-OMFly
+            $script:OMFlyConnected = $true
+            $lblFlyStatus.Text = 'Connected'; $lblFlyStatus.ForeColor = [System.Drawing.Color]::LimeGreen
+            Write-OMLog "Fly connected." ([System.Drawing.Color]::LimeGreen)
+            if ($script:OMFlyConnected -and $script:OMSpoConnected) {
+                $btnNext.Enabled = $true; $script:OMMaxStep = [Math]::Max($script:OMMaxStep, 2)
+            } elseif ($script:OMFlyConnected) {
+                $lblConnSummary.Text = 'Fly connected. Connect to SPO to enable pre-provisioning, then click Next.'
+                $lblConnSummary.ForeColor = [System.Drawing.Color]::FromArgb(160,160,90)
+                $btnNext.Enabled = $true; $script:OMMaxStep = [Math]::Max($script:OMMaxStep, 2)
+            }
+        } catch {
+            $lblFlyStatus.Text = 'Failed'; $lblFlyStatus.ForeColor = [System.Drawing.Color]::Tomato
+            Write-OMLog "Fly connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        }
+    })
+
+    # ---- Step 1: Connect SPO ----
+    $btnConnSpo.Add_Click({
+        try {
+            $script:OMSpoAdminUrl = $txtSpoAdminUrl.Text.Trim()
+            if (-not $script:OMSpoAdminUrl) {
+                Write-OMLog "Enter the SPO Admin URL first." ([System.Drawing.Color]::Tomato); return
+            }
+            Write-OMLog "Connecting to SPO Admin ($($script:OMSpoAdminUrl))..." ([System.Drawing.Color]::Silver)
+            $lblSpoStatus.Text = 'Connecting...'; $lblSpoStatus.ForeColor = [System.Drawing.Color]::DarkGoldenrod; $form.Refresh()
+            Import-Module 'Microsoft.Online.SharePoint.PowerShell' -ErrorAction Stop
+            Connect-SPOService -Url $script:OMSpoAdminUrl -ErrorAction Stop
+            $script:OMSpoConnected = $true
+            $lblSpoStatus.Text = 'Connected'; $lblSpoStatus.ForeColor = [System.Drawing.Color]::LimeGreen
+            Write-OMLog "SPO Admin connected." ([System.Drawing.Color]::LimeGreen)
+        } catch {
+            $lblSpoStatus.Text = 'Failed'; $lblSpoStatus.ForeColor = [System.Drawing.Color]::Tomato
+            Write-OMLog "SPO connection failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
+        }
+    })
+
+    # ---- Step 3: Browse & Load CSV ----
+    $btnBrowseCsv.Add_Click({
+        $dlg = New-Object System.Windows.Forms.OpenFileDialog
+        $dlg.Filter = 'CSV files (*.csv)|*.csv|All files (*.*)|*.*'; $dlg.Title = 'Select Mapping CSV'
+        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $txtMappingPath.Text = $dlg.FileName }
+    })
+
+    $btnLoadCsv.Add_Click({
+        $path = $txtMappingPath.Text.Trim()
+        if (-not (Test-Path $path)) { Write-OMLog "CSV file not found: $path" ([System.Drawing.Color]::Tomato); return }
+        try {
+            $csvRows = Import-Csv $path -ErrorAction Stop
+            if (-not $csvRows -or $csvRows.Count -eq 0) { Write-OMLog "CSV is empty." ([System.Drawing.Color]::Tomato); return }
+            $srcCol = $csvRows[0].PSObject.Properties.Name | Where-Object { $_ -match '^source\s?user$' } | Select-Object -First 1
+            $dstCol = $csvRows[0].PSObject.Properties.Name | Where-Object { $_ -match '^destination\s?user$' } | Select-Object -First 1
+            if (-not $srcCol -or -not $dstCol) {
+                Write-OMLog "CSV must have columns: 'Source user' and 'Destination user'" ([System.Drawing.Color]::Tomato); return
+            }
+            $script:OMMappingPairs.Clear(); $lvMapping.Items.Clear()
+            $skipped = 0
+            foreach ($r in $csvRows) {
+                $src = ([string]$r.$srcCol).Trim(); $dst = ([string]$r.$dstCol).Trim()
+                if (-not $src -or -not $dst) { $skipped++; continue }
+                $item = New-Object System.Windows.Forms.ListViewItem($src)
+                $item.SubItems.Add($dst)        | Out-Null
+                $item.SubItems.Add('Valid')      | Out-Null
+                $item.SubItems.Add('Not checked') | Out-Null
+                $lvMapping.Items.Add($item) | Out-Null
+                $script:OMMappingPairs.Add(@{ Source = $src; Destination = $dst })
+            }
+            $sum = "$($script:OMMappingPairs.Count) mappings loaded"
+            if ($skipped -gt 0) { $sum += " ($skipped blank rows skipped)" }
+            $lblMapSummary.Text = $sum; $lblMapSummary.ForeColor = [System.Drawing.Color]::LimeGreen
+            $btnProvision.Enabled    = $script:OMSpoConnected
+            $btnBuildProject.Enabled = ($script:OMMappingPairs.Count -gt 0 -and $txtProjectName.Text.Trim() -ne '')
+            Write-OMLog "CSV loaded: $($script:OMMappingPairs.Count) rows." ([System.Drawing.Color]::LimeGreen)
+        } catch { Write-OMLog "Failed to load CSV: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    })
+
+    $txtProjectName.Add_TextChanged({
+        $btnBuildProject.Enabled = ($script:OMMappingPairs.Count -gt 0 -and $txtProjectName.Text.Trim() -ne '')
+    })
+
+    # ---- Step 3: Pre-Provision ----
+    $btnProvision.Add_Click({
+        $targets = @($script:OMMappingPairs | ForEach-Object { $_['Destination'] })
+        if ($targets.Count -eq 0) { Write-OMLog "No mappings loaded." ([System.Drawing.Color]::Tomato); return }
+        try {
+            Write-OMLog "Requesting OneDrive provisioning for $($targets.Count) target user(s)..." ([System.Drawing.Color]::Silver)
+            $i = 0
+            while ($i -lt $targets.Count) {
+                $batch = $targets[$i..[Math]::Min(($i + 199), ($targets.Count - 1))]
+                Request-SPOPersonalSite -UserEmails $batch -ErrorAction Stop
+                $i += 200
+            }
+            foreach ($lvi in $lvMapping.Items) { $lvi.SubItems[3].Text = 'Provisioning requested' }
+            Write-OMLog "Provisioning requested for $($targets.Count) users. Sites typically appear within 5–15 minutes." ([System.Drawing.Color]::LimeGreen)
+        } catch { Write-OMLog "Provisioning error: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    })
+
+    # ---- Step 3: Build Project ----
+    $btnBuildProject.Add_Click({
+        $projName = $txtProjectName.Text.Trim()
+        if (-not $projName) { Write-OMLog "Enter a project name." ([System.Drawing.Color]::Tomato); return }
+        $sc = $txtSrcConnName.Text.Trim(); $tc = $txtTgtConnName.Text.Trim(); $pol = $txtFlyPolicy.Text.Trim()
+        if (-not $sc -or -not $tc -or -not $pol) {
+            Write-OMLog "Go back to Step 2 and fill in the connection and policy names." ([System.Drawing.Color]::Tomato); return
+        }
+        try {
+            Write-OMLog "Creating Fly project '$projName'..." ([System.Drawing.Color]::Silver)
+            New-FlyMigrationProject -Name $projName -SourceConnection $sc `
+                -DestinationConnection $tc -Policy $pol -ErrorAction Stop | Out-Null
+            Write-OMLog "Project created." ([System.Drawing.Color]::LimeGreen)
+            $tempCsv = [System.IO.Path]::Combine($env:TEMP, "OM_map_$(Get-Date -Format 'yyyyMMddHHmmss').csv")
+            $script:OMMappingPairs | ForEach-Object {
+                [PSCustomObject]@{ 'Source user' = $_['Source']; 'Destination user' = $_['Destination'] }
+            } | Export-Csv $tempCsv -NoTypeInformation -Encoding UTF8
+            Write-OMLog "Importing $($script:OMMappingPairs.Count) mapping(s) into Fly..." ([System.Drawing.Color]::Silver)
+            Import-FlyOneDriveMappings -Project $projName -Path $tempCsv -ErrorAction Stop
+            Remove-Item $tempCsv -Force -ErrorAction SilentlyContinue
+            $script:OMProjectName     = $projName
+            $script:OMSourceConnName  = $sc; $script:OMTargetConnName = $tc; $script:OMFlyPolicyName = $pol
+            $lblProjName.Text         = "Project: $projName — ready"
+            $lblProjName.ForeColor    = [System.Drawing.Color]::LimeGreen
+            $script:OMMaxStep         = 4
+            Write-OMLog "Project built: $($script:OMMappingPairs.Count) mapping(s) imported." ([System.Drawing.Color]::LimeGreen)
+        } catch { Write-OMLog "Build project failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    })
+
+    # ---- Step 4: Refresh status ----
+    $doRefreshStatus = {
+        param([bool]$silent = $false)
+        if ($script:OMRefreshing) { return }
+        $proj = $script:OMProjectName
+        if (-not $proj) { if (-not $silent) { Write-OMLog "No project set." ([System.Drawing.Color]::Tomato) }; return }
+        $script:OMRefreshing = $true
+        try {
+            $tmpCsv = [System.IO.Path]::Combine($env:TEMP, "OM_status_$(Get-Date -Format 'yyyyMMddHHmmss').csv")
+            Export-FlyOneDriveMappingStatus -Project $proj -OutFile $tmpCsv -ErrorAction Stop
+            $rows = Import-Csv $tmpCsv -ErrorAction Stop
+            Remove-Item $tmpCsv -Force -ErrorAction SilentlyContinue
+            $lvStatus.Items.Clear()
+            foreach ($r in $rows) {
+                $item = New-Object System.Windows.Forms.ListViewItem([string]$r.Source)
+                $item.SubItems.Add([string]$r.Destination)       | Out-Null
+                $item.SubItems.Add([string]$r.Stage)             | Out-Null
+                $item.SubItems.Add([string]$r.'Stage status')    | Out-Null
+                $item.SubItems.Add([string]$r.'Job progress (%)') | Out-Null
+                $item.ForeColor = switch -Wildcard ([string]$r.'Stage status') {
+                    '*Successful*' { [System.Drawing.Color]::LimeGreen   }
+                    '*Failed*'     { [System.Drawing.Color]::Tomato       }
+                    '*Exception*'  { [System.Drawing.Color]::Tomato       }
+                    '*InProgress*' { [System.Drawing.Color]::DodgerBlue   }
+                    '*Waiting*'    { [System.Drawing.Color]::DarkGoldenrod }
+                    default        { [System.Drawing.Color]::Silver        }
+                }
+                $lvStatus.Items.Add($item) | Out-Null
+            }
+            if (-not $silent) {
+                $lblLastRun.Text = "Last refreshed: $(Get-Date -Format 'HH:mm:ss')  ($($rows.Count) mappings)"
+                $lblLastRun.ForeColor = [System.Drawing.Color]::DimGray
+            }
+        } catch {
+            if (-not $silent) { Write-OMLog "Refresh failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+        }
+        $script:OMRefreshing = $false
+    }
+
+    $btnRefreshStatus.Add_Click({ & $doRefreshStatus $false })
+    $refreshTimer.Add_Tick({ if ($chkAutoRefresh.Checked -and $script:OMProjectName) { & $doRefreshStatus $true } })
+
+    $runMigration = {
+        param([string]$mode)
+        $proj = $script:OMProjectName
+        if (-not $proj) { Write-OMLog "No project set." ([System.Drawing.Color]::Tomato); return }
+        try {
+            Write-OMLog "Starting $mode for project '$proj'..." ([System.Drawing.Color]::Silver)
+            $result = Start-FlyOneDriveMigration -Project $proj -Mode $mode -ErrorAction Stop
+            $lblLastRun.Text = "$mode started: $(Get-Date -Format 'HH:mm:ss')"
+            $lblLastRun.ForeColor = [System.Drawing.Color]::LimeGreen
+            Write-OMLog "$mode started. Result: $result" ([System.Drawing.Color]::LimeGreen)
+            & $doRefreshStatus $true
+        } catch { Write-OMLog "$mode failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    }
+
+    $btnRunFull.Add_Click({     & $runMigration 'FullMigration'        })
+    $btnRunDelta.Add_Click({    & $runMigration 'IncrementalMigration' })
+    $btnRetryErrors.Add_Click({ & $runMigration 'ErrorOnly'            })
+
+    $btnPreScan.Add_Click({
+        $proj = $script:OMProjectName
+        if (-not $proj) { Write-OMLog "No project set." ([System.Drawing.Color]::Tomato); return }
+        try {
+            Write-OMLog "Starting pre-scan for '$proj'..." ([System.Drawing.Color]::Silver)
+            $r = Start-FlyOneDrivePreScan -Project $proj -ErrorAction Stop
+            Write-OMLog "Pre-scan started. Result: $r" ([System.Drawing.Color]::LimeGreen)
+        } catch { Write-OMLog "Pre-scan failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    })
+
+    $btnVerify.Add_Click({
+        $proj = $script:OMProjectName
+        if (-not $proj) { Write-OMLog "No project set." ([System.Drawing.Color]::Tomato); return }
+        try {
+            Write-OMLog "Starting verification for '$proj'..." ([System.Drawing.Color]::Silver)
+            $r = Start-FlyOneDriveVerification -Project $proj -ErrorAction Stop
+            Write-OMLog "Verification started. Result: $r" ([System.Drawing.Color]::LimeGreen)
+        } catch { Write-OMLog "Verification failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    })
+
+    $btnOpenFly.Add_Click({ if ($script:OMFlyBaseUrl) { Start-Process $script:OMFlyBaseUrl } })
+
+    $btnExportStatus.Add_Click({
+        $proj = $script:OMProjectName
+        if (-not $proj) { Write-OMLog "No project set." ([System.Drawing.Color]::Tomato); return }
+        $dlg = New-Object System.Windows.Forms.SaveFileDialog
+        $dlg.Filter = 'CSV files (*.csv)|*.csv'; $dlg.FileName = "ODB_Status_$(Get-Date -Format 'yyyyMMdd').csv"
+        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            try {
+                Export-FlyOneDriveMappingStatus -Project $proj -OutFile $dlg.FileName -ErrorAction Stop
+                Write-OMLog "Status exported: $($dlg.FileName)" ([System.Drawing.Color]::LimeGreen)
+            } catch { Write-OMLog "Export failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+        }
+    })
+
+    $btnReconnectFly4.Add_Click({
+        try { Write-OMLog "Reconnecting to Fly..." ([System.Drawing.Color]::Silver); Connect-OMFly; Write-OMLog "Fly reconnected." ([System.Drawing.Color]::LimeGreen) } catch { Write-OMLog "Reconnect failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato) }
+    })
+
+    # ---- Back / Next ----
+    $btnBack.Add_Click({
+        if ($script:OMCurrentStep -gt 1) { $script:OMCurrentStep--; Update-OMStepIndicator }
+    })
+
+    $btnNext.Add_Click({
+        if ($script:OMCurrentStep -eq 1) {
+            if (-not $script:OMFlyConnected) { Write-OMLog "Connect to Fly before proceeding." ([System.Drawing.Color]::Tomato); return }
+            $script:OMCurrentStep = 2; $script:OMMaxStep = [Math]::Max($script:OMMaxStep, 2)
+        } elseif ($script:OMCurrentStep -eq 2) {
+            $sc = $txtSrcConnName.Text.Trim(); $tc = $txtTgtConnName.Text.Trim(); $pol = $txtFlyPolicy.Text.Trim()
+            if (-not $sc -or -not $tc -or -not $pol) { Write-OMLog "Enter source/target connection names and policy." ([System.Drawing.Color]::Tomato); return }
+            $script:OMSourceConnName = $sc; $script:OMTargetConnName = $tc; $script:OMFlyPolicyName = $pol
+            $script:OMCurrentStep = 3; $script:OMMaxStep = [Math]::Max($script:OMMaxStep, 3)
+        } elseif ($script:OMCurrentStep -eq 3) {
+            $proj = $txtProjectName.Text.Trim()
+            if (-not $proj) { Write-OMLog "Enter a project name (or build one above)." ([System.Drawing.Color]::Tomato); return }
+            $script:OMProjectName = $proj
+            $script:OMCurrentStep = 4; $script:OMMaxStep = 4
+            & $doRefreshStatus $true
+            $refreshTimer.Start()
+        }
+        Update-OMStepIndicator
+    })
+
+    $form.Add_FormClosed({
+        $refreshTimer.Stop(); $refreshTimer.Dispose()
+        try { Disconnect-SPOService -ErrorAction SilentlyContinue } catch {}
+    })
+
+    Update-OMStepIndicator
+    #endregion
+
+    $form.ShowDialog() | Out-Null
+    $form.Dispose()
+}
+
+
 function Invoke-FrankensteinMigrator {
     [CmdletBinding()]
     param()

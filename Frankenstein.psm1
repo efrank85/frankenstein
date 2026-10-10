@@ -7512,6 +7512,11 @@ list — copy it exactly (case-sensitive) into this tool.",
     # ---- Step 4: Retry Errors ----
     $btnRetryErrors.Add_Click({
         if (-not $script:MMProjectId) { Write-MMLog "No project — complete Step 3 first." ([System.Drawing.Color]::Tomato); return }
+        $inFlight = @($lvStatus.Items | Where-Object { $_.SubItems[3].Text -in 'In progress','In queue' })
+        if ($inFlight.Count -gt 0) {
+            Write-MMLog "Cannot retry — $($inFlight.Count) item(s) still running or queued. Wait for all items to finish first." ([System.Drawing.Color]::DarkGoldenrod)
+            return
+        }
         if (-not (& $warnPartialSelection)) { return }
         $confirm = [System.Windows.Forms.MessageBox]::Show(
             "Re-run only failed items in project '$($script:MMProjectId)'?",
@@ -9247,7 +9252,7 @@ function Invoke-FrankensteinDomainMigrator {
                     $toRemove = $g.EmailAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }
                     foreach ($a in $toRemove) {
                         try {
-                            Set-DistributionGroup -Identity $g.Name -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                            Set-DistributionGroup -Identity $g.PrimarySmtpAddress -EmailAddresses @{Remove=$a} -ErrorAction Stop
                             & $markRow 'DistGroup' "$a" 'Removed' ([System.Drawing.Color]::LimeGreen)
                             & $markRow 'EntraGroup' "$a" 'Removed (via Exchange)' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "Removed $a from group $($g.Name)" ([System.Drawing.Color]::LimeGreen); $done++
@@ -9287,8 +9292,30 @@ function Invoke-FrankensteinDomainMigrator {
                         Write-CMLog "Removed domain addresses from $($u.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
                     } catch {
                         if ($_.Exception.Message -match 'read-only') {
-                            foreach ($a in $toRemove) { & $markRow 'EntraUser' $a 'Skipped (Exchange-managed)' ([System.Drawing.Color]::DimGray) }
-                            Write-CMLog "Skipped proxyAddresses for $($u.UserPrincipalName) — managed by Exchange" ([System.Drawing.Color]::DimGray)
+                            # proxyAddresses owned by Exchange — try Exchange cmdlets as fallback
+                            # (catches users with Exchange attributes but no mailbox in the earlier EXO scan)
+                            $exchCleaned = 0
+                            foreach ($a in $toRemove) {
+                                $exchOk = $false
+                                try {
+                                    Set-Mailbox -Identity $u.UserPrincipalName -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                                    $exchOk = $true
+                                } catch {
+                                    try {
+                                        Set-MailUser -Identity $u.UserPrincipalName -EmailAddresses @{Remove=$a} -ErrorAction Stop
+                                        $exchOk = $true
+                                    } catch {}
+                                }
+                                if ($exchOk) {
+                                    & $markRow 'EntraUser' $a 'Removed (via Exchange)' ([System.Drawing.Color]::LimeGreen)
+                                    $exchCleaned++; $done++
+                                } else {
+                                    & $markRow 'EntraUser' $a 'Skipped (Exchange-managed)' ([System.Drawing.Color]::DimGray)
+                                }
+                            }
+                            if ($exchCleaned -lt $toRemove.Count) {
+                                Write-CMLog "Skipped proxyAddresses for $($u.UserPrincipalName) — managed by Exchange (no EXO object found)" ([System.Drawing.Color]::DimGray)
+                            }
                         } else {
                             foreach ($a in $toRemove) { & $markRow 'EntraUser' $a 'Failed' ([System.Drawing.Color]::Tomato) }
                             Write-CMLog "Failed Entra user $($u.UserPrincipalName): $($_.Exception.Message)" ([System.Drawing.Color]::Tomato); $errs++

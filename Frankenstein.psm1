@@ -9531,9 +9531,10 @@ function Get-FrankensteinPrereqs {
         Detail = "v$($psv.Major).$($psv.Minor) installed"
     })
     foreach ($mod in @(
-        @{ Name = 'ExchangeOnlineManagement'; SearchName = 'ExchangeOnlineManagement'; Min = [version]'3.0' }
-        @{ Name = 'Microsoft.Graph';          SearchName = 'Microsoft.Graph*';         Min = [version]'1.0' }
-        @{ Name = 'Fly.Client';               SearchName = 'Fly.Client';               Min = [version]'1.0' }
+        @{ Name = 'ExchangeOnlineManagement';              SearchName = 'ExchangeOnlineManagement';              Min = [version]'3.0'  }
+        @{ Name = 'Microsoft.Graph';                       SearchName = 'Microsoft.Graph*';                      Min = [version]'1.0'  }
+        @{ Name = 'Fly.Client';                            SearchName = 'Fly.Client';                            Min = [version]'1.0'  }
+        @{ Name = 'Microsoft.Online.SharePoint.PowerShell'; SearchName = 'Microsoft.Online.SharePoint.PowerShell'; Min = [version]'16.0' }
     )) {
         $best = Get-Module -ListAvailable -Name $mod.SearchName | Sort-Object Version -Descending | Select-Object -First 1
         $results.Add(@{
@@ -10900,6 +10901,7 @@ function Invoke-FrankensteinMigrator {
         [pscustomobject]@{ Key='permission'; Label='Permission Migrator'; Color=[System.Drawing.Color]::MediumPurple   }
         [pscustomobject]@{ Key='mailbox';    Label='Mailbox Migrator';   Color=[System.Drawing.Color]::MediumSeaGreen  }
         [pscustomobject]@{ Key='domain';     Label='Domain Migrator';    Color=[System.Drawing.Color]::Tomato          }
+        [pscustomobject]@{ Key='onedrive';   Label='OneDrive Migrator';  Color=[System.Drawing.Color]::SteelBlue       }
     )
 
     $rows = @{}
@@ -10982,10 +10984,11 @@ function Invoke-FrankensteinMigrator {
         }
     })
 
-    $rows.dl.Btn.Add_Click({         & $launch 'Group Migrator'       { Invoke-FrankensteinDLMigrator }         })
-    $rows.permission.Btn.Add_Click({ & $launch 'Permission Migrator'  { Invoke-FrankensteinPermissionMigrator }  })
-    $rows.mailbox.Btn.Add_Click({    & $launch 'Mailbox Migrator'    { Invoke-FrankensteinMailboxMigrator }    })
-    $rows.domain.Btn.Add_Click({     & $launch 'Domain Migrator'     { Invoke-FrankensteinDomainMigrator }     })
+    $rows.dl.Btn.Add_Click({         & $launch 'Group Migrator'       { Invoke-FrankensteinDLMigrator }              })
+    $rows.permission.Btn.Add_Click({ & $launch 'Permission Migrator'  { Invoke-FrankensteinPermissionMigrator }      })
+    $rows.mailbox.Btn.Add_Click({    & $launch 'Mailbox Migrator'     { Invoke-FrankensteinMailboxMigrator }         })
+    $rows.domain.Btn.Add_Click({     & $launch 'Domain Migrator'      { Invoke-FrankensteinDomainMigrator }          })
+    $rows.onedrive.Btn.Add_Click({   & $launch 'OneDrive Migrator'    { Invoke-FrankensteinOneDriveMigrator }        })
     #endregion
 
     #region ── Load — populate status labels ────────────────────────────────
@@ -10994,6 +10997,7 @@ function Invoke-FrankensteinMigrator {
         $rows.permission.Lbl.Text = 'Migrate mailbox permissions between M365 tenants'
         $rows.mailbox.Lbl.Text    = 'Migrate mailboxes via AvePoint Fly'
         $rows.domain.Lbl.Text     = 'Remove a custom domain from an M365 tenant'
+        $rows.onedrive.Lbl.Text   = 'Migrate OneDrive for Business content via AvePoint Fly'
 
         $checks  = Get-FrankensteinPrereqs
         $missing = @($checks | Where-Object { -not $_.OK })

@@ -9517,3 +9517,183 @@ function Invoke-FrankensteinDomainMigrator {
     $form.ShowDialog() | Out-Null
     $form.Dispose()
 }
+
+# ============================================================
+#  Frankenstein Migrator — Launchpad
+# ============================================================
+
+function Get-FrankensteinPrereqs {
+    $results = [System.Collections.Generic.List[hashtable]]::new()
+    $psv = $PSVersionTable.PSVersion
+    $results.Add(@{
+        Name   = 'PowerShell'
+        OK     = ($psv.Major -ge 7) -or ($psv.Major -eq 5 -and $psv.Minor -ge 1)
+        Detail = "v$($psv.Major).$($psv.Minor) installed"
+    })
+    foreach ($mod in @(
+        @{ Name = 'ExchangeOnlineManagement'; Min = [version]'3.0' }
+        @{ Name = 'Microsoft.Graph';          Min = [version]'1.0' }
+        @{ Name = 'Fly.Client';               Min = [version]'1.0' }
+    )) {
+        $best = Get-Module -ListAvailable -Name $mod.Name | Sort-Object Version -Descending | Select-Object -First 1
+        $results.Add(@{
+            Name   = $mod.Name
+            OK     = $best -and ($best.Version -ge $mod.Min)
+            Detail = if ($best) { "v$($best.Version)" } else { 'Not installed' }
+        })
+    }
+    return ,$results
+}
+
+function Invoke-FrankensteinMigrator {
+    [CmdletBinding()]
+    param()
+
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing -ErrorAction SilentlyContinue
+
+    #region ── Form ─────────────────────────────────────────────────────────
+    $form                 = New-Object System.Windows.Forms.Form
+    $form.Text            = 'Frankenstein Migrator'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox     = $false
+    $form.StartPosition   = 'CenterScreen'
+    $form.BackColor       = [System.Drawing.Color]::FromArgb(28, 28, 28)
+    $form.Font            = New-Object System.Drawing.Font('Segoe UI', 9)
+
+    $lblTitle           = New-Object System.Windows.Forms.Label
+    $lblTitle.Text      = 'Frankenstein Migrator'
+    $lblTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
+    $lblTitle.ForeColor = [System.Drawing.Color]::Silver
+    $lblTitle.Location  = New-Object System.Drawing.Point(16, 14)
+    $lblTitle.Size      = New-Object System.Drawing.Size(520, 26)
+    $form.Controls.Add($lblTitle)
+
+    $lblSub           = New-Object System.Windows.Forms.Label
+    $lblSub.Text      = 'Select a migration tool:'
+    $lblSub.ForeColor = [System.Drawing.Color]::DimGray
+    $lblSub.Location  = New-Object System.Drawing.Point(16, 44)
+    $lblSub.Size      = New-Object System.Drawing.Size(520, 18)
+    $form.Controls.Add($lblSub)
+
+    $sepTop           = New-Object System.Windows.Forms.Panel
+    $sepTop.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepTop.Location  = New-Object System.Drawing.Point(16, 66)
+    $sepTop.Size      = New-Object System.Drawing.Size(528, 1)
+    $form.Controls.Add($sepTop)
+    #endregion
+
+    #region ── Rows ─────────────────────────────────────────────────────────
+    $rowDefs = @(
+        [pscustomobject]@{ Key='prereq';     Label='Prerequisites';      Color=[System.Drawing.Color]::DarkGoldenrod   }
+        [pscustomobject]@{ Key='dl';         Label='DL Migrator';        Color=[System.Drawing.Color]::CornflowerBlue  }
+        [pscustomobject]@{ Key='permission'; Label='Permission Migrator'; Color=[System.Drawing.Color]::MediumPurple   }
+        [pscustomobject]@{ Key='mailbox';    Label='Mailbox Migrator';   Color=[System.Drawing.Color]::MediumSeaGreen  }
+        [pscustomobject]@{ Key='domain';     Label='Domain Migrator';    Color=[System.Drawing.Color]::Tomato          }
+    )
+
+    $rows = @{}
+    $y = 74
+    foreach ($def in $rowDefs) {
+        $panel           = New-Object System.Windows.Forms.Panel
+        $panel.BackColor = [System.Drawing.Color]::FromArgb(38, 38, 38)
+        $panel.Location  = New-Object System.Drawing.Point(16, $y)
+        $panel.Size      = New-Object System.Drawing.Size(528, 48)
+        $form.Controls.Add($panel)
+
+        $btn                            = New-Object System.Windows.Forms.Button
+        $btn.Text                       = $def.Label
+        $btn.FlatStyle                  = 'Flat'
+        $btn.FlatAppearance.BorderColor = $def.Color
+        $btn.FlatAppearance.BorderSize  = 1
+        $btn.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+        $btn.ForeColor                  = $def.Color
+        $btn.Location                   = New-Object System.Drawing.Point(6, 9)
+        $btn.Size                       = New-Object System.Drawing.Size(182, 30)
+        $panel.Controls.Add($btn)
+
+        $lbl           = New-Object System.Windows.Forms.Label
+        $lbl.ForeColor = [System.Drawing.Color]::DimGray
+        $lbl.Location  = New-Object System.Drawing.Point(198, 15)
+        $lbl.Size      = New-Object System.Drawing.Size(324, 18)
+        $lbl.Text      = ''
+        $panel.Controls.Add($lbl)
+
+        $rows[$def.Key] = @{ Btn = $btn; Lbl = $lbl }
+        $y += 54
+    }
+
+    $sepBot           = New-Object System.Windows.Forms.Panel
+    $sepBot.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepBot.Location  = New-Object System.Drawing.Point(16, $y + 2)
+    $sepBot.Size      = New-Object System.Drawing.Size(528, 1)
+    $form.Controls.Add($sepBot)
+
+    $btnClose                            = New-Object System.Windows.Forms.Button
+    $btnClose.Text                       = 'Close'
+    $btnClose.FlatStyle                  = 'Flat'
+    $btnClose.BackColor                  = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $btnClose.ForeColor                  = [System.Drawing.Color]::Silver
+    $btnClose.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
+    $btnClose.Location                   = New-Object System.Drawing.Point(444, $y + 12)
+    $btnClose.Size                       = New-Object System.Drawing.Size(100, 28)
+    $form.Controls.Add($btnClose)
+    $btnClose.Add_Click({ $form.Close() })
+
+    $form.ClientSize = New-Object System.Drawing.Size(560, ($y + 52))
+    #endregion
+
+    #region ── Button logic ─────────────────────────────────────────────────
+    $launch = {
+        param([string]$name, [scriptblock]$fn)
+        if ($script:FrankensteinActiveMigrator) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "'$script:FrankensteinActiveMigrator' is already open.`nClose it before launching another migrator.",
+                'One at a time', 'OK', 'Warning') | Out-Null
+            return
+        }
+        $script:FrankensteinActiveMigrator = $name
+        try   { & $fn }
+        finally { $script:FrankensteinActiveMigrator = $null }
+    }
+
+    $rows.prereq.Btn.Add_Click({
+        $checks  = Get-FrankensteinPrereqs
+        $lines   = foreach ($c in $checks) { "$(if ($c.OK) { '[OK]     ' } else { '[MISSING]' })  $($c.Name) — $($c.Detail)" }
+        $missing = @($checks | Where-Object { -not $_.OK }).Count
+        [System.Windows.Forms.MessageBox]::Show(
+            ($lines -join "`n"),
+            $(if ($missing -eq 0) { 'All prerequisites installed' } else { "$missing prerequisite(s) missing" }),
+            'OK',
+            $(if ($missing -eq 0) { 'Information' } else { 'Warning' })) | Out-Null
+    })
+
+    $rows.dl.Btn.Add_Click({         & $launch 'DL Migrator'         { Invoke-FrankensteinDLMigrator }         })
+    $rows.permission.Btn.Add_Click({ & $launch 'Permission Migrator'  { Invoke-FrankensteinPermissionMigrator }  })
+    $rows.mailbox.Btn.Add_Click({    & $launch 'Mailbox Migrator'    { Invoke-FrankensteinMailboxMigrator }    })
+    $rows.domain.Btn.Add_Click({     & $launch 'Domain Migrator'     { Invoke-FrankensteinDomainMigrator }     })
+    #endregion
+
+    #region ── Load — populate status labels ────────────────────────────────
+    $form.Add_Load({
+        $rows.dl.Lbl.Text         = 'Migrate distribution groups between M365 tenants'
+        $rows.permission.Lbl.Text = 'Migrate mailbox permissions (Full Access, Send As, Send on Behalf)'
+        $rows.mailbox.Lbl.Text    = 'Migrate mailboxes via AvePoint Fly'
+        $rows.domain.Lbl.Text     = 'Remove a custom domain from an M365 tenant'
+
+        $checks  = Get-FrankensteinPrereqs
+        $missing = @($checks | Where-Object { -not $_.OK })
+        if ($missing.Count -eq 0) {
+            $rows.prereq.Lbl.ForeColor = [System.Drawing.Color]::LimeGreen
+            $rows.prereq.Lbl.Text      = 'All installed'
+        } else {
+            $rows.prereq.Lbl.ForeColor = [System.Drawing.Color]::Tomato
+            $rows.prereq.Lbl.Text      = "$($missing.Count) missing — click for details"
+        }
+    })
+    #endregion
+
+    $form.ShowDialog() | Out-Null
+    $form.Dispose()
+}
+
+Export-ModuleMember -Function Invoke-FrankensteinMigrator

@@ -9217,6 +9217,7 @@ function Invoke-FrankensteinDomainMigrator {
                         try {
                             Set-Mailbox -Identity $m.UserPrincipalName -EmailAddresses @{Remove=$a} -ErrorAction Stop
                             & $markRow 'Mailbox' "$a" 'Removed' ([System.Drawing.Color]::LimeGreen)
+                            & $markRow 'EntraUser' "$a" 'Removed (via Exchange)' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "Removed $a from $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
                         } catch {
                             & $markRow 'Mailbox' "$a" 'Failed' ([System.Drawing.Color]::Tomato)
@@ -9232,6 +9233,7 @@ function Invoke-FrankensteinDomainMigrator {
                         try {
                             Set-MailUser -Identity $m.UserPrincipalName -EmailAddresses @{Remove=$a} -ErrorAction Stop
                             & $markRow 'MailUser' "$a" 'Removed' ([System.Drawing.Color]::LimeGreen)
+                            & $markRow 'EntraUser' "$a" 'Removed (via Exchange)' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "Removed $a from mail user $($m.UserPrincipalName)" ([System.Drawing.Color]::LimeGreen); $done++
                         } catch {
                             & $markRow 'MailUser' "$a" 'Failed' ([System.Drawing.Color]::Tomato)
@@ -9247,6 +9249,7 @@ function Invoke-FrankensteinDomainMigrator {
                         try {
                             Set-DistributionGroup -Identity $g.Name -EmailAddresses @{Remove=$a} -ErrorAction Stop
                             & $markRow 'DistGroup' "$a" 'Removed' ([System.Drawing.Color]::LimeGreen)
+                            & $markRow 'EntraGroup' "$a" 'Removed (via Exchange)' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "Removed $a from group $($g.Name)" ([System.Drawing.Color]::LimeGreen); $done++
                         } catch {
                             & $markRow 'DistGroup' "$a" 'Failed' ([System.Drawing.Color]::Tomato)
@@ -9262,6 +9265,7 @@ function Invoke-FrankensteinDomainMigrator {
                         try {
                             Set-UnifiedGroup -Identity $g.PrimarySmtpAddress -EmailAddresses @{Remove=$a} -ErrorAction Stop
                             & $markRow 'M365Group' "$a" 'Removed' ([System.Drawing.Color]::LimeGreen)
+                            & $markRow 'EntraGroup' "$a" 'Removed (via Exchange)' ([System.Drawing.Color]::LimeGreen)
                             Write-CMLog "Removed $a from M365 group $($g.DisplayName)" ([System.Drawing.Color]::LimeGreen); $done++
                         } catch {
                             & $markRow 'M365Group' "$a" 'Failed' ([System.Drawing.Color]::Tomato)
@@ -9415,31 +9419,24 @@ function Invoke-FrankensteinDomainMigrator {
             $domainPollTimer.Start()
         } catch {
             Write-CMLog "Remove failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
-            Write-CMLog "Scanning for Entra objects still referencing '$domain'..." ([System.Drawing.Color]::DarkGoldenrod)
+            Write-CMLog "Querying domain references blocking deletion..." ([System.Drawing.Color]::DarkGoldenrod)
             try {
-                $blocking = [System.Collections.Generic.List[string]]::new()
-                $allUsers = @(Get-MgUser -All -Property UserPrincipalName,ProxyAddresses -ErrorAction SilentlyContinue)
-                foreach ($u in $allUsers) {
-                    if ($u.UserPrincipalName -match "@$([regex]::Escape($domain))$" -or
-                        ($u.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" })) {
-                        $blocking.Add("User: $($u.UserPrincipalName)")
+                $refs = @(Get-MgDomainDomainNameReference -DomainId $domain -ErrorAction SilentlyContinue)
+                if ($refs.Count -gt 0) {
+                    Write-CMLog "$($refs.Count) object(s) still reference '$domain':" ([System.Drawing.Color]::DarkGoldenrod)
+                    foreach ($r in $refs) {
+                        $label = if ($r.AdditionalProperties['displayName']) { $r.AdditionalProperties['displayName'] }
+                                 elseif ($r.AdditionalProperties['userPrincipalName']) { $r.AdditionalProperties['userPrincipalName'] }
+                                 else { $r.Id }
+                        $type  = if ($r.AdditionalProperties['@odata.type']) { $r.AdditionalProperties['@odata.type'] -replace '#microsoft\.graph\.','' } else { 'unknown' }
+                        Write-CMLog "  [$type] $label" ([System.Drawing.Color]::DarkGoldenrod)
                     }
-                }
-                $allGroups = @(Get-MgGroup -All -Property DisplayName,ProxyAddresses -ErrorAction SilentlyContinue)
-                foreach ($g in $allGroups) {
-                    if ($g.ProxyAddresses | Where-Object { $_ -match "@$([regex]::Escape($domain))$" }) {
-                        $blocking.Add("Group: $($g.DisplayName)")
-                    }
-                }
-                if ($blocking.Count -gt 0) {
-                    Write-CMLog "$($blocking.Count) Entra object(s) still reference the domain:" ([System.Drawing.Color]::DarkGoldenrod)
-                    foreach ($b in $blocking) { Write-CMLog "  $b" ([System.Drawing.Color]::DarkGoldenrod) }
-                    Write-CMLog "If these are Exchange-managed groups, wait 30-60 seconds for Entra sync to catch up, then retry." ([System.Drawing.Color]::DimGray)
+                    Write-CMLog "Clean these objects (Step 3), wait ~60 s for Entra sync, then retry." ([System.Drawing.Color]::DimGray)
                 } else {
-                    Write-CMLog "No Entra objects found referencing '$domain' — may be a transient API error. Try clicking Remove again." ([System.Drawing.Color]::DimGray)
+                    Write-CMLog "No domain references found — this may be a transient Microsoft API error. Wait a moment and try again." ([System.Drawing.Color]::DimGray)
                 }
             } catch {
-                Write-CMLog "Could not identify blocking objects: $($_.Exception.Message)" ([System.Drawing.Color]::DimGray)
+                Write-CMLog "Could not query domain references: $($_.Exception.Message)" ([System.Drawing.Color]::DimGray)
             }
         } finally { $form.UseWaitCursor = $false }
     })

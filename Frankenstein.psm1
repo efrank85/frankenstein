@@ -4726,7 +4726,7 @@ function Invoke-FrankensteinDLMigrator {
     $form.ForeColor       = [System.Drawing.Color]::White
 
     $lblHeader           = New-Object System.Windows.Forms.Label
-    $lblHeader.Text      = "Frankenstein — Distribution Group Migrator"
+    $lblHeader.Text      = "Frankenstein — Group Migrator"
     $lblHeader.Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
     $lblHeader.ForeColor = [System.Drawing.Color]::White
     $lblHeader.Location  = New-Object System.Drawing.Point(14, 12)
@@ -6249,16 +6249,24 @@ function Invoke-FrankensteinMailboxMigrator {
     #region ---- Form ----
     $form                  = New-Object System.Windows.Forms.Form
     $form.Text             = 'Frankenstein — Mailbox Migrator'
-    $form.Size             = New-Object System.Drawing.Size(870, 1010)
+    $form.Size             = New-Object System.Drawing.Size(870, 1054)
     $form.StartPosition    = 'CenterScreen'
     $form.FormBorderStyle  = 'FixedDialog'
     $form.MaximizeBox      = $false
     $form.BackColor        = [System.Drawing.Color]::FromArgb(30, 30, 30)
 
+    $lblHeader           = New-Object System.Windows.Forms.Label
+    $lblHeader.Text      = 'Frankenstein — Mailbox Migrator'
+    $lblHeader.Font      = New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
+    $lblHeader.ForeColor = [System.Drawing.Color]::White
+    $lblHeader.Location  = New-Object System.Drawing.Point(14, 12)
+    $lblHeader.Size      = New-Object System.Drawing.Size(830, 28)
+    $form.Controls.Add($lblHeader)
+
     # ---- Profile bar ----
     $grpProfile            = New-Object System.Windows.Forms.GroupBox
     $grpProfile.Text       = 'Profile'
-    $grpProfile.Location   = New-Object System.Drawing.Point(10, 8)
+    $grpProfile.Location   = New-Object System.Drawing.Point(10, 52)
     $grpProfile.Size       = New-Object System.Drawing.Size(838, 46)
     $grpProfile.ForeColor  = [System.Drawing.Color]::Silver
     $form.Controls.Add($grpProfile)
@@ -6306,7 +6314,7 @@ function Invoke-FrankensteinMailboxMigrator {
     $stepNames  = @('1: Connect','2: Connectors','3: Mapping','4: Migrate')
     $stepLabels = @()
     $panStepBar = New-Object System.Windows.Forms.Panel
-    $panStepBar.Location = New-Object System.Drawing.Point(10, 60)
+    $panStepBar.Location = New-Object System.Drawing.Point(10, 104)
     $panStepBar.Size     = New-Object System.Drawing.Size(838, 32)
     $panStepBar.BackColor = [System.Drawing.Color]::FromArgb(30,30,30)
     $form.Controls.Add($panStepBar)
@@ -6360,7 +6368,7 @@ function Invoke-FrankensteinMailboxMigrator {
     $lblStep4.Add_Click({ & $navTo 4 })
 
     # ---- Step panels (all same location; only one visible at a time) ----
-    $stepPanelLoc  = New-Object System.Drawing.Point(10, 98)
+    $stepPanelLoc  = New-Object System.Drawing.Point(10, 142)
     $stepPanelSize = New-Object System.Drawing.Size(838, 550)
 
     # =====================================================================
@@ -6817,14 +6825,14 @@ function Invoke-FrankensteinMailboxMigrator {
 
     # ---- Navigation buttons (below step panels) ----
     $btnBack = New-Object System.Windows.Forms.Button
-    $btnBack.Text = '← Back'; $btnBack.Location = New-Object System.Drawing.Point(10, 656)
+    $btnBack.Text = '← Back'; $btnBack.Location = New-Object System.Drawing.Point(10, 700)
     $btnBack.Size = New-Object System.Drawing.Size(100, 28); $btnBack.FlatStyle = 'Flat'
     $btnBack.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnBack.ForeColor = [System.Drawing.Color]::Silver
     $btnBack.Enabled = $false
     $form.Controls.Add($btnBack)
 
     $btnNext = New-Object System.Windows.Forms.Button
-    $btnNext.Text = 'Next →'; $btnNext.Location = New-Object System.Drawing.Point(748, 656)
+    $btnNext.Text = 'Next →'; $btnNext.Location = New-Object System.Drawing.Point(748, 700)
     $btnNext.Size = New-Object System.Drawing.Size(100, 28)
     $btnNext.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnNext.ForeColor = [System.Drawing.Color]::White
     $btnNext.FlatStyle = 'Flat'; $btnNext.Enabled = $false
@@ -6832,7 +6840,7 @@ function Invoke-FrankensteinMailboxMigrator {
 
     # ---- Log ----
     $grpLog = New-Object System.Windows.Forms.GroupBox
-    $grpLog.Text = 'Log'; $grpLog.Location = New-Object System.Drawing.Point(10, 692)
+    $grpLog.Text = 'Log'; $grpLog.Location = New-Object System.Drawing.Point(10, 736)
     $grpLog.Size = New-Object System.Drawing.Size(838, 220)
     $grpLog.ForeColor = [System.Drawing.Color]::Silver
     $form.Controls.Add($grpLog)
@@ -7896,13 +7904,21 @@ function Invoke-FrankensteinDomainMigrator {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = 'Frankenstein — Domain Migrator'
-    $form.Size = New-Object System.Drawing.Size(920, 868)
-    $form.MinimumSize = New-Object System.Drawing.Size(920, 868)
+    $form.Size = New-Object System.Drawing.Size(920, 912)
+    $form.MinimumSize = New-Object System.Drawing.Size(920, 912)
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor = [System.Drawing.Color]::White
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
+
+    $lblHeader = New-Object System.Windows.Forms.Label
+    $lblHeader.Text      = 'Frankenstein — Domain Migrator'
+    $lblHeader.Font      = New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
+    $lblHeader.ForeColor = [System.Drawing.Color]::White
+    $lblHeader.Location  = New-Object System.Drawing.Point(14, 8)
+    $lblHeader.Size      = New-Object System.Drawing.Size(890, 28)
+    $form.Controls.Add($lblHeader)
     #endregion
 
     #region ---- Log helper ----
@@ -7928,7 +7944,7 @@ function Invoke-FrankensteinDomainMigrator {
     #region ---- Connection Panel ----
     $grpConn = New-Object System.Windows.Forms.GroupBox
     $grpConn.Text = 'Connection'; $grpConn.ForeColor = [System.Drawing.Color]::Silver
-    $grpConn.Location = New-Object System.Drawing.Point(8, 5)
+    $grpConn.Location = New-Object System.Drawing.Point(8, 49)
     $grpConn.Size = New-Object System.Drawing.Size(894, 98)
     $grpConn.BackColor = [System.Drawing.Color]::FromArgb(38, 38, 38)
     $form.Controls.Add($grpConn)
@@ -7975,7 +7991,7 @@ function Invoke-FrankensteinDomainMigrator {
 
     #region ---- Step Navigation ----
     $navPanel = New-Object System.Windows.Forms.Panel
-    $navPanel.Location = New-Object System.Drawing.Point(8, 108); $navPanel.Size = New-Object System.Drawing.Size(894, 32)
+    $navPanel.Location = New-Object System.Drawing.Point(8, 152); $navPanel.Size = New-Object System.Drawing.Size(894, 32)
     $navPanel.BackColor = [System.Drawing.Color]::FromArgb(38, 38, 38)
     $form.Controls.Add($navPanel)
 
@@ -7996,7 +8012,7 @@ function Invoke-FrankensteinDomainMigrator {
         $stepLabels += $lbl
     }
 
-    $stepPanelLoc  = New-Object System.Drawing.Point(8, 144)
+    $stepPanelLoc  = New-Object System.Drawing.Point(8, 188)
     $stepPanelSize = New-Object System.Drawing.Size(894, 490)
 
     $navTo = {
@@ -8285,7 +8301,7 @@ function Invoke-FrankensteinDomainMigrator {
     #region ---- Log Panel ----
     $grpLog = New-Object System.Windows.Forms.GroupBox
     $grpLog.Text = 'Log'; $grpLog.ForeColor = [System.Drawing.Color]::Silver
-    $grpLog.Location = New-Object System.Drawing.Point(8, 640); $grpLog.Size = New-Object System.Drawing.Size(894, 170)
+    $grpLog.Location = New-Object System.Drawing.Point(8, 684); $grpLog.Size = New-Object System.Drawing.Size(894, 170)
     $grpLog.BackColor = [System.Drawing.Color]::FromArgb(25,25,25)
     $form.Controls.Add($grpLog)
 
@@ -10117,16 +10133,24 @@ function Invoke-FrankensteinOneDriveMigrator {
     #region ---- Form ----
     $form                 = New-Object System.Windows.Forms.Form
     $form.Text            = 'Frankenstein — OneDrive Migrator'
-    $form.Size            = New-Object System.Drawing.Size(870, 1010)
+    $form.Size            = New-Object System.Drawing.Size(870, 1054)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox     = $false
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30,30,30)
 
+    $lblHeader           = New-Object System.Windows.Forms.Label
+    $lblHeader.Text      = 'Frankenstein — OneDrive Migrator'
+    $lblHeader.Font      = New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
+    $lblHeader.ForeColor = [System.Drawing.Color]::White
+    $lblHeader.Location  = New-Object System.Drawing.Point(14, 12)
+    $lblHeader.Size      = New-Object System.Drawing.Size(830, 28)
+    $form.Controls.Add($lblHeader)
+
     # ---- Profile bar ----
     $grpProfile            = New-Object System.Windows.Forms.GroupBox
     $grpProfile.Text       = 'Profile'
-    $grpProfile.Location   = New-Object System.Drawing.Point(10, 8)
+    $grpProfile.Location   = New-Object System.Drawing.Point(10, 52)
     $grpProfile.Size       = New-Object System.Drawing.Size(838, 46)
     $grpProfile.ForeColor  = [System.Drawing.Color]::Silver
     $form.Controls.Add($grpProfile)
@@ -10164,7 +10188,7 @@ function Invoke-FrankensteinOneDriveMigrator {
     for ($si = 0; $si -lt 4; $si++) {
         $sl           = New-Object System.Windows.Forms.Label
         $sl.Text      = $stepNames[$si]; $sl.TextAlign = 'MiddleCenter'
-        $sl.Location  = New-Object System.Drawing.Point((10 + $si * 212), 62)
+        $sl.Location  = New-Object System.Drawing.Point((10 + $si * 212), 106)
         $sl.Size      = New-Object System.Drawing.Size(204, 28)
         $sl.BackColor = [System.Drawing.Color]::FromArgb(80,80,80)
         $sl.ForeColor = [System.Drawing.Color]::FromArgb(180,180,180)
@@ -10180,7 +10204,7 @@ function Invoke-FrankensteinOneDriveMigrator {
         switch ($si) { 0 { $lblStep1 = $sl } 1 { $lblStep2 = $sl } 2 { $lblStep3 = $sl } 3 { $lblStep4 = $sl } }
     }
 
-    $stepPanelLoc  = New-Object System.Drawing.Point(10, 98)
+    $stepPanelLoc  = New-Object System.Drawing.Point(10, 142)
     $stepPanelSize = New-Object System.Drawing.Size(848, 548)
 
     # =====================================================================
@@ -10512,20 +10536,20 @@ function Invoke-FrankensteinOneDriveMigrator {
     # ---- Navigation + Log ----
     $btnBack           = New-Object System.Windows.Forms.Button
     $btnBack.Text      = '← Back'; $btnBack.FlatStyle = 'Flat'
-    $btnBack.Location  = New-Object System.Drawing.Point(10, 656); $btnBack.Size = New-Object System.Drawing.Size(100, 28)
+    $btnBack.Location  = New-Object System.Drawing.Point(10, 700); $btnBack.Size = New-Object System.Drawing.Size(100, 28)
     $btnBack.BackColor = [System.Drawing.Color]::FromArgb(60,60,60); $btnBack.ForeColor = [System.Drawing.Color]::Silver
     $btnBack.Enabled   = $false
     $form.Controls.Add($btnBack)
 
     $btnNext           = New-Object System.Windows.Forms.Button
     $btnNext.Text      = 'Next →'; $btnNext.FlatStyle = 'Flat'
-    $btnNext.Location  = New-Object System.Drawing.Point(748, 656); $btnNext.Size = New-Object System.Drawing.Size(100, 28)
+    $btnNext.Location  = New-Object System.Drawing.Point(748, 700); $btnNext.Size = New-Object System.Drawing.Size(100, 28)
     $btnNext.BackColor = [System.Drawing.Color]::FromArgb(0,120,212); $btnNext.ForeColor = [System.Drawing.Color]::White
     $btnNext.Enabled   = $false
     $form.Controls.Add($btnNext)
 
     $grpLog           = New-Object System.Windows.Forms.GroupBox
-    $grpLog.Text      = 'Log'; $grpLog.Location = New-Object System.Drawing.Point(10, 692)
+    $grpLog.Text      = 'Log'; $grpLog.Location = New-Object System.Drawing.Point(10, 736)
     $grpLog.Size      = New-Object System.Drawing.Size(838, 220); $grpLog.ForeColor = [System.Drawing.Color]::Silver
     $form.Controls.Add($grpLog)
 
@@ -10906,6 +10930,7 @@ function Invoke-FrankensteinMigrator {
         [pscustomobject]@{ Key='mailbox';    Label='Mailbox Migrator';   Color=[System.Drawing.Color]::MediumSeaGreen  }
         [pscustomobject]@{ Key='domain';     Label='Domain Migrator';    Color=[System.Drawing.Color]::Tomato          }
         [pscustomobject]@{ Key='onedrive';   Label='OneDrive Migrator';  Color=[System.Drawing.Color]::SteelBlue       }
+        [pscustomobject]@{ Key='donotpress'; Label='DO NOT PRESS';       Color=[System.Drawing.Color]::Red             }
     )
 
     $rows = @{}
@@ -10993,6 +11018,7 @@ function Invoke-FrankensteinMigrator {
     $rows.mailbox.Btn.Add_Click({    & $launch 'Mailbox Migrator'     { Invoke-FrankensteinMailboxMigrator }         })
     $rows.domain.Btn.Add_Click({     & $launch 'Domain Migrator'      { Invoke-FrankensteinDomainMigrator }          })
     $rows.onedrive.Btn.Add_Click({   & $launch 'OneDrive Migrator'    { Invoke-FrankensteinOneDriveMigrator }        })
+    $rows.donotpress.Btn.Add_Click({ 1..5 | ForEach-Object { Start-Process 'https://youtu.be/Aq5WXmQQooo?si=EcvGEAE6RmWDsznI' } })
     #endregion
 
     #region ── Load — populate status labels ────────────────────────────────
@@ -11002,6 +11028,7 @@ function Invoke-FrankensteinMigrator {
         $rows.mailbox.Lbl.Text    = 'Migrate mailboxes via AvePoint Fly'
         $rows.domain.Lbl.Text     = 'Remove a custom domain from an M365 tenant'
         $rows.onedrive.Lbl.Text   = 'Migrate OneDrive for Business content via AvePoint Fly'
+        $rows.donotpress.Lbl.Text = 'Seriously. Do not.'
 
         $checks  = Get-FrankensteinPrereqs
         $missing = @($checks | Where-Object { -not $_.OK })

@@ -9585,7 +9585,7 @@ function Invoke-FrankensteinMigrator {
     #region ── Rows ─────────────────────────────────────────────────────────
     $rowDefs = @(
         [pscustomobject]@{ Key='prereq';     Label='Prerequisites';      Color=[System.Drawing.Color]::DarkGoldenrod   }
-        [pscustomobject]@{ Key='dl';         Label='DL Migrator';        Color=[System.Drawing.Color]::CornflowerBlue  }
+        [pscustomobject]@{ Key='dl';         Label='Group Migrator';      Color=[System.Drawing.Color]::CornflowerBlue  }
         [pscustomobject]@{ Key='permission'; Label='Permission Migrator'; Color=[System.Drawing.Color]::MediumPurple   }
         [pscustomobject]@{ Key='mailbox';    Label='Mailbox Migrator';   Color=[System.Drawing.Color]::MediumSeaGreen  }
         [pscustomobject]@{ Key='domain';     Label='Domain Migrator';    Color=[System.Drawing.Color]::Tomato          }
@@ -9611,11 +9611,12 @@ function Invoke-FrankensteinMigrator {
         $btn.Size                       = New-Object System.Drawing.Size(182, 30)
         $panel.Controls.Add($btn)
 
-        $lbl           = New-Object System.Windows.Forms.Label
-        $lbl.ForeColor = [System.Drawing.Color]::DimGray
-        $lbl.Location  = New-Object System.Drawing.Point(198, 15)
-        $lbl.Size      = New-Object System.Drawing.Size(324, 18)
-        $lbl.Text      = ''
+        $lbl              = New-Object System.Windows.Forms.Label
+        $lbl.ForeColor    = [System.Drawing.Color]::DimGray
+        $lbl.Location     = New-Object System.Drawing.Point(198, 15)
+        $lbl.Size         = New-Object System.Drawing.Size(326, 18)
+        $lbl.AutoEllipsis = $true
+        $lbl.Text         = ''
         $panel.Controls.Add($lbl)
 
         $rows[$def.Key] = @{ Btn = $btn; Lbl = $lbl }
@@ -9624,7 +9625,7 @@ function Invoke-FrankensteinMigrator {
 
     $sepBot           = New-Object System.Windows.Forms.Panel
     $sepBot.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepBot.Location  = New-Object System.Drawing.Point(16, $y + 2)
+    $sepBot.Location  = New-Object System.Drawing.Point(16, ($y + 2))
     $sepBot.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepBot)
 
@@ -9634,7 +9635,7 @@ function Invoke-FrankensteinMigrator {
     $btnClose.BackColor                  = [System.Drawing.Color]::FromArgb(55, 55, 55)
     $btnClose.ForeColor                  = [System.Drawing.Color]::Silver
     $btnClose.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-    $btnClose.Location                   = New-Object System.Drawing.Point(444, $y + 12)
+    $btnClose.Location                   = New-Object System.Drawing.Point(444, ($y + 12))
     $btnClose.Size                       = New-Object System.Drawing.Size(100, 28)
     $form.Controls.Add($btnClose)
     $btnClose.Add_Click({ $form.Close() })
@@ -9667,7 +9668,7 @@ function Invoke-FrankensteinMigrator {
             $(if ($missing -eq 0) { 'Information' } else { 'Warning' })) | Out-Null
     })
 
-    $rows.dl.Btn.Add_Click({         & $launch 'DL Migrator'         { Invoke-FrankensteinDLMigrator }         })
+    $rows.dl.Btn.Add_Click({         & $launch 'Group Migrator'       { Invoke-FrankensteinDLMigrator }         })
     $rows.permission.Btn.Add_Click({ & $launch 'Permission Migrator'  { Invoke-FrankensteinPermissionMigrator }  })
     $rows.mailbox.Btn.Add_Click({    & $launch 'Mailbox Migrator'    { Invoke-FrankensteinMailboxMigrator }    })
     $rows.domain.Btn.Add_Click({     & $launch 'Domain Migrator'     { Invoke-FrankensteinDomainMigrator }     })
@@ -9676,7 +9677,7 @@ function Invoke-FrankensteinMigrator {
     #region ── Load — populate status labels ────────────────────────────────
     $form.Add_Load({
         $rows.dl.Lbl.Text         = 'Migrate distribution groups between M365 tenants'
-        $rows.permission.Lbl.Text = 'Migrate mailbox permissions (Full Access, Send As, Send on Behalf)'
+        $rows.permission.Lbl.Text = 'Migrate mailbox permissions between M365 tenants'
         $rows.mailbox.Lbl.Text    = 'Migrate mailboxes via AvePoint Fly'
         $rows.domain.Lbl.Text     = 'Remove a custom domain from an M365 tenant'
 

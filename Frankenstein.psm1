@@ -4716,7 +4716,7 @@ function Invoke-FrankensteinDLMigrator {
     #region ---- Build Form ----
 
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "Frankenstein — DL Migrator"
+    $form.Text            = 'Frankenstein — Group Migrator'
     $form.ClientSize      = New-Object System.Drawing.Size(800, 994)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedSingle'

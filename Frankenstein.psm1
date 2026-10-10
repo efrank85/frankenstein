@@ -11018,7 +11018,17 @@ function Invoke-FrankensteinMigrator {
     $rows.mailbox.Btn.Add_Click({    & $launch 'Mailbox Migrator'     { Invoke-FrankensteinMailboxMigrator }         })
     $rows.domain.Btn.Add_Click({     & $launch 'Domain Migrator'      { Invoke-FrankensteinDomainMigrator }          })
     $rows.onedrive.Btn.Add_Click({   & $launch 'OneDrive Migrator'    { Invoke-FrankensteinOneDriveMigrator }        })
-    $rows.donotpress.Btn.Add_Click({ 1..5 | ForEach-Object { Start-Process 'https://youtu.be/Aq5WXmQQooo?si=EcvGEAE6RmWDsznI' } })
+    $rows.donotpress.Btn.Add_Click({
+        $url = 'https://youtu.be/Aq5WXmQQooo?si=EcvGEAE6RmWDsznI'
+        $browsers = @(
+            @{ Path = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'; Args = "--new-window `"$url`"" }
+            @{ Path = 'C:\Program Files\Google\Chrome\Application\chrome.exe';        Args = "--new-window `"$url`"" }
+            @{ Path = 'C:\Program Files\Mozilla Firefox\firefox.exe';                 Args = "-new-window `"$url`""  }
+        )
+        $b = $browsers | Where-Object { Test-Path $_.Path } | Select-Object -First 1
+        if ($b) { 1..5 | ForEach-Object { Start-Process $b.Path $b.Args } }
+        else     { 1..5 | ForEach-Object { Start-Process $url } }
+    })
     #endregion
 
     #region ── Load — populate status labels ────────────────────────────────

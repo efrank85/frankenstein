@@ -9556,10 +9556,11 @@ function Show-FrankensteinPrereqs {
                 [Security.Principal.WindowsBuiltInRole]::Administrator)
 
     $modDefs = @(
-        [pscustomobject]@{ Name = 'PowerShell';               Min = $null;          CanInstall = $false }
-        [pscustomobject]@{ Name = 'ExchangeOnlineManagement'; SearchName = 'ExchangeOnlineManagement'; Min = [version]'3.0'; CanInstall = $true  }
-        [pscustomobject]@{ Name = 'Microsoft.Graph';          SearchName = 'Microsoft.Graph*';         Min = [version]'1.0'; CanInstall = $true  }
-        [pscustomobject]@{ Name = 'Fly.Client';               SearchName = 'Fly.Client';               Min = [version]'1.0'; CanInstall = $true  }
+        [pscustomobject]@{ Name = 'PowerShell';                            Min = $null;          CanInstall = $false }
+        [pscustomobject]@{ Name = 'ExchangeOnlineManagement';             SearchName = 'ExchangeOnlineManagement';              Min = [version]'3.0';  CanInstall = $true  }
+        [pscustomobject]@{ Name = 'Microsoft.Graph';                      SearchName = 'Microsoft.Graph*';                      Min = [version]'1.0';  CanInstall = $true  }
+        [pscustomobject]@{ Name = 'Fly.Client';                           SearchName = 'Fly.Client';                            Min = [version]'1.0';  CanInstall = $true  }
+        [pscustomobject]@{ Name = 'Microsoft.Online.SharePoint.PowerShell'; SearchName = 'Microsoft.Online.SharePoint.PowerShell'; Min = [version]'16.0'; CanInstall = $true  }
     )
 
     $checkOne = {
@@ -9588,7 +9589,7 @@ function Show-FrankensteinPrereqs {
     $form.StartPosition   = 'CenterScreen'
     $form.BackColor       = [System.Drawing.Color]::FromArgb(28, 28, 28)
     $form.Font            = New-Object System.Drawing.Font('Segoe UI', 9)
-    $form.ClientSize      = New-Object System.Drawing.Size(560, 580)
+    $form.ClientSize      = New-Object System.Drawing.Size(560, 640)
 
     $lblTitle           = New-Object System.Windows.Forms.Label
     $lblTitle.Text      = 'Prerequisites'
@@ -9613,7 +9614,7 @@ function Show-FrankensteinPrereqs {
 
     $sepLog           = New-Object System.Windows.Forms.Panel
     $sepLog.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepLog.Location  = New-Object System.Drawing.Point(16, 312)
+    $sepLog.Location  = New-Object System.Drawing.Point(16, 372)
     $sepLog.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepLog)
 
@@ -9623,7 +9624,7 @@ function Show-FrankensteinPrereqs {
     $log.Font        = New-Object System.Drawing.Font('Consolas', 8)
     $log.ReadOnly    = $true
     $log.BorderStyle = 'None'
-    $log.Location    = New-Object System.Drawing.Point(16, 318)
+    $log.Location    = New-Object System.Drawing.Point(16, 378)
     $log.Size        = New-Object System.Drawing.Size(528, 60)
     $log.ScrollBars  = 'Vertical'
     $form.Controls.Add($log)
@@ -9631,7 +9632,7 @@ function Show-FrankensteinPrereqs {
     # ── Required M365 Permissions ────────────────────────────────────────────
     $sepPerm           = New-Object System.Windows.Forms.Panel
     $sepPerm.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepPerm.Location  = New-Object System.Drawing.Point(16, 384)
+    $sepPerm.Location  = New-Object System.Drawing.Point(16, 444)
     $sepPerm.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepPerm)
 
@@ -9639,7 +9640,7 @@ function Show-FrankensteinPrereqs {
     $lblPermTitle.Text      = 'Required M365 Permissions'
     $lblPermTitle.ForeColor = [System.Drawing.Color]::Silver
     $lblPermTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $lblPermTitle.Location  = New-Object System.Drawing.Point(16, 390)
+    $lblPermTitle.Location  = New-Object System.Drawing.Point(16, 450)
     $lblPermTitle.Size      = New-Object System.Drawing.Size(528, 18)
     $form.Controls.Add($lblPermTitle)
 
@@ -9649,7 +9650,7 @@ function Show-FrankensteinPrereqs {
     $rtbPerms.Font        = New-Object System.Drawing.Font('Segoe UI', 8.5)
     $rtbPerms.ReadOnly    = $true
     $rtbPerms.BorderStyle = 'None'
-    $rtbPerms.Location    = New-Object System.Drawing.Point(16, 410)
+    $rtbPerms.Location    = New-Object System.Drawing.Point(16, 470)
     $rtbPerms.Size        = New-Object System.Drawing.Size(528, 124)
     $rtbPerms.ScrollBars  = 'Vertical'
     $form.Controls.Add($rtbPerms)
@@ -9663,6 +9664,9 @@ function Show-FrankensteinPrereqs {
         @{ Text = 'Mailbox Migrator';     Bold = $true;  Color = [System.Drawing.Color]::Silver         }
         @{ Text = '  Source & Target tenant: Exchange Administrator';     Bold = $false; Color = [System.Drawing.Color]::DimGray }
         @{ Text = '  Fly.Client: API Client ID + Secret (configured in Fly web UI → Settings → Connections)'; Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = 'OneDrive Migrator';     Bold = $true;  Color = [System.Drawing.Color]::Silver         }
+        @{ Text = '  Source & Target tenant: SharePoint Administrator (for SPO Admin connection)';                       Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = '  Fly.Client: API Client ID + Secret (configured in Fly web UI → Settings → Connections)';           Bold = $false; Color = [System.Drawing.Color]::DimGray }
         @{ Text = 'Domain Migrator';      Bold = $true;  Color = [System.Drawing.Color]::Silver         }
         @{ Text = '  Tenant: Global Administrator + Exchange Administrator'; Bold = $false; Color = [System.Drawing.Color]::DimGray }
         @{ Text = '  Graph API consent: Domain.ReadWrite.All, User.ReadWrite.All, Group.ReadWrite.All';  Bold = $false; Color = [System.Drawing.Color]::DimGray }
@@ -9679,7 +9683,7 @@ function Show-FrankensteinPrereqs {
 
     $sepFoot           = New-Object System.Windows.Forms.Panel
     $sepFoot.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepFoot.Location  = New-Object System.Drawing.Point(16, 540)
+    $sepFoot.Location  = New-Object System.Drawing.Point(16, 600)
     $sepFoot.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepFoot)
 
@@ -9690,7 +9694,7 @@ function Show-FrankensteinPrereqs {
     $btnInstallAll.ForeColor                  = [System.Drawing.Color]::DimGray
     $btnInstallAll.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
     $btnInstallAll.Enabled                    = $false
-    $btnInstallAll.Location                   = New-Object System.Drawing.Point(16, 546)
+    $btnInstallAll.Location                   = New-Object System.Drawing.Point(16, 606)
     $btnInstallAll.Size                       = New-Object System.Drawing.Size(160, 26)
     $form.Controls.Add($btnInstallAll)
 
@@ -9700,7 +9704,7 @@ function Show-FrankensteinPrereqs {
     $btnRefresh.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $btnRefresh.ForeColor                  = [System.Drawing.Color]::Silver
     $btnRefresh.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-    $btnRefresh.Location                   = New-Object System.Drawing.Point(184, 546)
+    $btnRefresh.Location                   = New-Object System.Drawing.Point(184, 606)
     $btnRefresh.Size                       = New-Object System.Drawing.Size(100, 26)
     $form.Controls.Add($btnRefresh)
 
@@ -9710,14 +9714,14 @@ function Show-FrankensteinPrereqs {
     $btnClose.BackColor                  = [System.Drawing.Color]::FromArgb(55, 55, 55)
     $btnClose.ForeColor                  = [System.Drawing.Color]::Silver
     $btnClose.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-    $btnClose.Location                   = New-Object System.Drawing.Point(444, 546)
+    $btnClose.Location                   = New-Object System.Drawing.Point(444, 606)
     $btnClose.Size                       = New-Object System.Drawing.Size(100, 26)
     $form.Controls.Add($btnClose)
     $btnClose.Add_Click({ $form.Close() })
     #endregion
 
     #region ── Prerequisite rows ──────────────────────────────────────────────
-    # Layout: 4 rows × 60px starting at y=70 → rows end at y=310; log sep at y=312
+    # Layout: 5 rows × 60px starting at y=70 → rows end at y=370; log sep at y=372
     $rowControls = [System.Collections.Generic.List[hashtable]]::new()
     $y = 70
 

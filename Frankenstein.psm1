@@ -9531,11 +9531,11 @@ function Get-FrankensteinPrereqs {
         Detail = "v$($psv.Major).$($psv.Minor) installed"
     })
     foreach ($mod in @(
-        @{ Name = 'ExchangeOnlineManagement'; Min = [version]'3.0' }
-        @{ Name = 'Microsoft.Graph';          Min = [version]'1.0' }
-        @{ Name = 'Fly.Client';               Min = [version]'1.0' }
+        @{ Name = 'ExchangeOnlineManagement'; SearchName = 'ExchangeOnlineManagement'; Min = [version]'3.0' }
+        @{ Name = 'Microsoft.Graph';          SearchName = 'Microsoft.Graph*';         Min = [version]'1.0' }
+        @{ Name = 'Fly.Client';               SearchName = 'Fly.Client';               Min = [version]'1.0' }
     )) {
-        $best = Get-Module -ListAvailable -Name $mod.Name | Sort-Object Version -Descending | Select-Object -First 1
+        $best = Get-Module -ListAvailable -Name $mod.SearchName | Sort-Object Version -Descending | Select-Object -First 1
         $results.Add(@{
             Name   = $mod.Name
             OK     = $best -and ($best.Version -ge $mod.Min)
@@ -9556,9 +9556,9 @@ function Show-FrankensteinPrereqs {
 
     $modDefs = @(
         [pscustomobject]@{ Name = 'PowerShell';               Min = $null;          CanInstall = $false }
-        [pscustomobject]@{ Name = 'ExchangeOnlineManagement'; Min = [version]'3.0'; CanInstall = $true  }
-        [pscustomobject]@{ Name = 'Microsoft.Graph';          Min = [version]'1.0'; CanInstall = $true  }
-        [pscustomobject]@{ Name = 'Fly.Client';               Min = [version]'1.0'; CanInstall = $true  }
+        [pscustomobject]@{ Name = 'ExchangeOnlineManagement'; SearchName = 'ExchangeOnlineManagement'; Min = [version]'3.0'; CanInstall = $true  }
+        [pscustomobject]@{ Name = 'Microsoft.Graph';          SearchName = 'Microsoft.Graph*';         Min = [version]'1.0'; CanInstall = $true  }
+        [pscustomobject]@{ Name = 'Fly.Client';               SearchName = 'Fly.Client';               Min = [version]'1.0'; CanInstall = $true  }
     )
 
     $checkOne = {
@@ -9568,7 +9568,8 @@ function Show-FrankensteinPrereqs {
             $ok  = ($psv.Major -ge 7) -or ($psv.Major -eq 5 -and $psv.Minor -ge 1)
             return @{ OK = $ok; Detail = "v$($psv.Major).$($psv.Minor) — min 5.1 or 7+"; Installed = $true; Upgradeable = $false }
         }
-        $best = Get-Module -ListAvailable -Name $def.Name | Sort-Object Version -Descending | Select-Object -First 1
+        $searchName = if ($def.SearchName) { $def.SearchName } else { $def.Name }
+        $best = Get-Module -ListAvailable -Name $searchName | Sort-Object Version -Descending | Select-Object -First 1
         $ok   = $best -and ($best.Version -ge $def.Min)
         @{
             OK          = $ok
@@ -9656,12 +9657,13 @@ function Show-FrankensteinPrereqs {
         @{ Text = 'Group Migrator';       Bold = $true;  Color = [System.Drawing.Color]::Silver         }
         @{ Text = '  Source & Target tenant: Exchange Administrator';     Bold = $false; Color = [System.Drawing.Color]::DimGray }
         @{ Text = 'Permission Migrator';  Bold = $true;  Color = [System.Drawing.Color]::Silver         }
-        @{ Text = '  Source & Target tenant: Exchange Administrator';     Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = '  Source & Target tenant: Exchange Administrator';             Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = '  Graph (user/group resolution): Global Reader or higher';     Bold = $false; Color = [System.Drawing.Color]::DimGray }
         @{ Text = 'Mailbox Migrator';     Bold = $true;  Color = [System.Drawing.Color]::Silver         }
         @{ Text = '  Source & Target tenant: Exchange Administrator';     Bold = $false; Color = [System.Drawing.Color]::DimGray }
         @{ Text = '  Fly.Client: API Client ID + Secret (configured in Fly web UI → Settings → Connections)'; Bold = $false; Color = [System.Drawing.Color]::DimGray }
         @{ Text = 'Domain Migrator';      Bold = $true;  Color = [System.Drawing.Color]::Silver         }
-        @{ Text = '  Tenant: Global Administrator';                       Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = '  Tenant: Global Administrator + Exchange Administrator'; Bold = $false; Color = [System.Drawing.Color]::DimGray }
         @{ Text = '  Graph API consent: Domain.ReadWrite.All, User.ReadWrite.All, Group.ReadWrite.All';  Bold = $false; Color = [System.Drawing.Color]::DimGray }
     )
     $boldFont   = New-Object System.Drawing.Font('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)

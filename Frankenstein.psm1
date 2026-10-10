@@ -9545,6 +9545,420 @@ function Get-FrankensteinPrereqs {
     return ,$results
 }
 
+function Show-FrankensteinPrereqs {
+    [CmdletBinding()]
+    param()
+
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing -ErrorAction SilentlyContinue
+
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+                [Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    $modDefs = @(
+        [pscustomobject]@{ Name = 'PowerShell';               Min = $null;          CanInstall = $false }
+        [pscustomobject]@{ Name = 'ExchangeOnlineManagement'; Min = [version]'3.0'; CanInstall = $true  }
+        [pscustomobject]@{ Name = 'Microsoft.Graph';          Min = [version]'1.0'; CanInstall = $true  }
+        [pscustomobject]@{ Name = 'Fly.Client';               Min = [version]'1.0'; CanInstall = $true  }
+    )
+
+    $checkOne = {
+        param($def)
+        if ($def.Name -eq 'PowerShell') {
+            $psv = $PSVersionTable.PSVersion
+            $ok  = ($psv.Major -ge 7) -or ($psv.Major -eq 5 -and $psv.Minor -ge 1)
+            return @{ OK = $ok; Detail = "v$($psv.Major).$($psv.Minor) — min 5.1 or 7+"; Installed = $true; Upgradeable = $false }
+        }
+        $best = Get-Module -ListAvailable -Name $def.Name | Sort-Object Version -Descending | Select-Object -First 1
+        $ok   = $best -and ($best.Version -ge $def.Min)
+        @{
+            OK          = $ok
+            Detail      = if ($best) { "v$($best.Version) — min v$($def.Min)" } else { 'Not installed' }
+            Installed   = [bool]$best
+            Upgradeable = $best -and -not $ok
+        }
+    }
+
+    #region ── Form ──────────────────────────────────────────────────────────────
+    $form                 = New-Object System.Windows.Forms.Form
+    $form.Text            = 'Frankenstein — Prerequisites'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox     = $false
+    $form.StartPosition   = 'CenterScreen'
+    $form.BackColor       = [System.Drawing.Color]::FromArgb(28, 28, 28)
+    $form.Font            = New-Object System.Drawing.Font('Segoe UI', 9)
+    $form.ClientSize      = New-Object System.Drawing.Size(560, 580)
+
+    $lblTitle           = New-Object System.Windows.Forms.Label
+    $lblTitle.Text      = 'Prerequisites'
+    $lblTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)
+    $lblTitle.ForeColor = [System.Drawing.Color]::Silver
+    $lblTitle.Location  = New-Object System.Drawing.Point(16, 12)
+    $lblTitle.Size      = New-Object System.Drawing.Size(400, 26)
+    $form.Controls.Add($lblTitle)
+
+    $lblScope           = New-Object System.Windows.Forms.Label
+    $lblScope.Text      = if ($isAdmin) { 'Elevated — installs go to AllUsers scope' } else { 'Not elevated — installs go to CurrentUser scope' }
+    $lblScope.ForeColor = if ($isAdmin) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::DarkGoldenrod }
+    $lblScope.Location  = New-Object System.Drawing.Point(16, 42)
+    $lblScope.Size      = New-Object System.Drawing.Size(528, 16)
+    $form.Controls.Add($lblScope)
+
+    $sepTop           = New-Object System.Windows.Forms.Panel
+    $sepTop.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepTop.Location  = New-Object System.Drawing.Point(16, 64)
+    $sepTop.Size      = New-Object System.Drawing.Size(528, 1)
+    $form.Controls.Add($sepTop)
+
+    $sepLog           = New-Object System.Windows.Forms.Panel
+    $sepLog.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepLog.Location  = New-Object System.Drawing.Point(16, 312)
+    $sepLog.Size      = New-Object System.Drawing.Size(528, 1)
+    $form.Controls.Add($sepLog)
+
+    $log             = New-Object System.Windows.Forms.RichTextBox
+    $log.BackColor   = [System.Drawing.Color]::FromArgb(18, 18, 18)
+    $log.ForeColor   = [System.Drawing.Color]::Silver
+    $log.Font        = New-Object System.Drawing.Font('Consolas', 8)
+    $log.ReadOnly    = $true
+    $log.BorderStyle = 'None'
+    $log.Location    = New-Object System.Drawing.Point(16, 318)
+    $log.Size        = New-Object System.Drawing.Size(528, 60)
+    $log.ScrollBars  = 'Vertical'
+    $form.Controls.Add($log)
+
+    # ── Required M365 Permissions ────────────────────────────────────────────
+    $sepPerm           = New-Object System.Windows.Forms.Panel
+    $sepPerm.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepPerm.Location  = New-Object System.Drawing.Point(16, 384)
+    $sepPerm.Size      = New-Object System.Drawing.Size(528, 1)
+    $form.Controls.Add($sepPerm)
+
+    $lblPermTitle           = New-Object System.Windows.Forms.Label
+    $lblPermTitle.Text      = 'Required M365 Permissions'
+    $lblPermTitle.ForeColor = [System.Drawing.Color]::Silver
+    $lblPermTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $lblPermTitle.Location  = New-Object System.Drawing.Point(16, 390)
+    $lblPermTitle.Size      = New-Object System.Drawing.Size(528, 18)
+    $form.Controls.Add($lblPermTitle)
+
+    $rtbPerms             = New-Object System.Windows.Forms.RichTextBox
+    $rtbPerms.BackColor   = [System.Drawing.Color]::FromArgb(28, 28, 28)
+    $rtbPerms.ForeColor   = [System.Drawing.Color]::Silver
+    $rtbPerms.Font        = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $rtbPerms.ReadOnly    = $true
+    $rtbPerms.BorderStyle = 'None'
+    $rtbPerms.Location    = New-Object System.Drawing.Point(16, 410)
+    $rtbPerms.Size        = New-Object System.Drawing.Size(528, 124)
+    $rtbPerms.ScrollBars  = 'Vertical'
+    $form.Controls.Add($rtbPerms)
+
+    $permLines = @(
+        @{ Text = 'Group Migrator';       Bold = $true;  Color = [System.Drawing.Color]::Silver         }
+        @{ Text = '  Source & Target tenant: Exchange Administrator';     Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = 'Permission Migrator';  Bold = $true;  Color = [System.Drawing.Color]::Silver         }
+        @{ Text = '  Source & Target tenant: Exchange Administrator';     Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = 'Mailbox Migrator';     Bold = $true;  Color = [System.Drawing.Color]::Silver         }
+        @{ Text = '  Source & Target tenant: Exchange Administrator';     Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = '  Fly.Client: API Client ID + Secret (configured in Fly web UI → Settings → Connections)'; Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = 'Domain Migrator';      Bold = $true;  Color = [System.Drawing.Color]::Silver         }
+        @{ Text = '  Tenant: Global Administrator';                       Bold = $false; Color = [System.Drawing.Color]::DimGray }
+        @{ Text = '  Graph API consent: Domain.ReadWrite.All, User.ReadWrite.All, Group.ReadWrite.All';  Bold = $false; Color = [System.Drawing.Color]::DimGray }
+    )
+    $boldFont   = New-Object System.Drawing.Font('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)
+    $normalFont = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    foreach ($line in $permLines) {
+        $rtbPerms.SelectionStart  = $rtbPerms.TextLength
+        $rtbPerms.SelectionLength = 0
+        $rtbPerms.SelectionColor  = $line.Color
+        $rtbPerms.SelectionFont   = if ($line.Bold) { $boldFont } else { $normalFont }
+        $rtbPerms.AppendText("$($line.Text)`n")
+    }
+
+    $sepFoot           = New-Object System.Windows.Forms.Panel
+    $sepFoot.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepFoot.Location  = New-Object System.Drawing.Point(16, 540)
+    $sepFoot.Size      = New-Object System.Drawing.Size(528, 1)
+    $form.Controls.Add($sepFoot)
+
+    $btnInstallAll                            = New-Object System.Windows.Forms.Button
+    $btnInstallAll.Text                       = 'Install All Missing'
+    $btnInstallAll.FlatStyle                  = 'Flat'
+    $btnInstallAll.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $btnInstallAll.ForeColor                  = [System.Drawing.Color]::DimGray
+    $btnInstallAll.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+    $btnInstallAll.Enabled                    = $false
+    $btnInstallAll.Location                   = New-Object System.Drawing.Point(16, 546)
+    $btnInstallAll.Size                       = New-Object System.Drawing.Size(160, 26)
+    $form.Controls.Add($btnInstallAll)
+
+    $btnRefresh                            = New-Object System.Windows.Forms.Button
+    $btnRefresh.Text                       = 'Refresh'
+    $btnRefresh.FlatStyle                  = 'Flat'
+    $btnRefresh.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $btnRefresh.ForeColor                  = [System.Drawing.Color]::Silver
+    $btnRefresh.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
+    $btnRefresh.Location                   = New-Object System.Drawing.Point(184, 546)
+    $btnRefresh.Size                       = New-Object System.Drawing.Size(100, 26)
+    $form.Controls.Add($btnRefresh)
+
+    $btnClose                            = New-Object System.Windows.Forms.Button
+    $btnClose.Text                       = 'Close'
+    $btnClose.FlatStyle                  = 'Flat'
+    $btnClose.BackColor                  = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $btnClose.ForeColor                  = [System.Drawing.Color]::Silver
+    $btnClose.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
+    $btnClose.Location                   = New-Object System.Drawing.Point(444, 546)
+    $btnClose.Size                       = New-Object System.Drawing.Size(100, 26)
+    $form.Controls.Add($btnClose)
+    $btnClose.Add_Click({ $form.Close() })
+    #endregion
+
+    #region ── Prerequisite rows ──────────────────────────────────────────────
+    # Layout: 4 rows × 60px starting at y=70 → rows end at y=310; log sep at y=312
+    $rowControls = [System.Collections.Generic.List[hashtable]]::new()
+    $y = 70
+
+    foreach ($def in $modDefs) {
+        $pill           = New-Object System.Windows.Forms.Panel
+        $pill.Size      = New-Object System.Drawing.Size(12, 12)
+        $pill.Location  = New-Object System.Drawing.Point(16, ($y + 14))
+        $pill.BackColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
+        $form.Controls.Add($pill)
+
+        $lblName           = New-Object System.Windows.Forms.Label
+        $lblName.Text      = $def.Name
+        $lblName.ForeColor = [System.Drawing.Color]::Silver
+        $lblName.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+        $lblName.Location  = New-Object System.Drawing.Point(38, ($y + 4))
+        $lblName.Size      = New-Object System.Drawing.Size(390, 18)
+        $form.Controls.Add($lblName)
+
+        $lblDetail              = New-Object System.Windows.Forms.Label
+        $lblDetail.Text         = 'Checking...'
+        $lblDetail.ForeColor    = [System.Drawing.Color]::DimGray
+        $lblDetail.AutoEllipsis = $true
+        $lblDetail.Location     = New-Object System.Drawing.Point(38, ($y + 24))
+        $lblDetail.Size         = New-Object System.Drawing.Size(390, 16)
+        $form.Controls.Add($lblDetail)
+
+        $btn                            = New-Object System.Windows.Forms.Button
+        $btn.FlatStyle                  = 'Flat'
+        $btn.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+        $btn.ForeColor                  = [System.Drawing.Color]::DimGray
+        $btn.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+        $btn.Text                       = '...'
+        $btn.Enabled                    = $false
+        $btn.Location                   = New-Object System.Drawing.Point(444, ($y + 10))
+        $btn.Size                       = New-Object System.Drawing.Size(100, 26)
+        $form.Controls.Add($btn)
+
+        $rowSep           = New-Object System.Windows.Forms.Panel
+        $rowSep.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 40)
+        $rowSep.Location  = New-Object System.Drawing.Point(16, ($y + 56))
+        $rowSep.Size      = New-Object System.Drawing.Size(528, 1)
+        $form.Controls.Add($rowSep)
+
+        $rowControls.Add(@{ Def = $def; Pill = $pill; Detail = $lblDetail; Btn = $btn })
+        $y += 60
+    }
+    #endregion
+
+    #region ── Row state update ───────────────────────────────────────────────
+    $updateRow = {
+        param($row, $status)
+        if ($status.OK) {
+            $row.Pill.BackColor                   = [System.Drawing.Color]::LimeGreen
+            $row.Detail.Text                      = $status.Detail
+            $row.Detail.ForeColor                 = [System.Drawing.Color]::DimGray
+            $row.Btn.Text                         = 'Up to date'
+            $row.Btn.ForeColor                    = [System.Drawing.Color]::DimGray
+            $row.Btn.FlatAppearance.BorderColor   = [System.Drawing.Color]::FromArgb(60, 60, 60)
+            $row.Btn.Enabled                      = $false
+        } elseif ($row.Def.CanInstall -and $status.Upgradeable) {
+            $row.Pill.BackColor                   = [System.Drawing.Color]::DarkGoldenrod
+            $row.Detail.Text                      = $status.Detail
+            $row.Detail.ForeColor                 = [System.Drawing.Color]::DarkGoldenrod
+            $row.Btn.Text                         = 'Update'
+            $row.Btn.ForeColor                    = [System.Drawing.Color]::DarkGoldenrod
+            $row.Btn.FlatAppearance.BorderColor   = [System.Drawing.Color]::DarkGoldenrod
+            $row.Btn.Enabled                      = $true
+        } elseif ($row.Def.CanInstall) {
+            $row.Pill.BackColor                   = [System.Drawing.Color]::Tomato
+            $row.Detail.Text                      = $status.Detail
+            $row.Detail.ForeColor                 = [System.Drawing.Color]::Tomato
+            $row.Btn.Text                         = 'Install'
+            $row.Btn.ForeColor                    = [System.Drawing.Color]::Tomato
+            $row.Btn.FlatAppearance.BorderColor   = [System.Drawing.Color]::Tomato
+            $row.Btn.Enabled                      = $true
+        } else {
+            $row.Pill.BackColor                   = if ($status.OK) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::Tomato }
+            $row.Detail.Text                      = $status.Detail
+            $row.Detail.ForeColor                 = [System.Drawing.Color]::DimGray
+            $row.Btn.Text                         = 'N/A'
+            $row.Btn.ForeColor                    = [System.Drawing.Color]::DimGray
+            $row.Btn.FlatAppearance.BorderColor   = [System.Drawing.Color]::FromArgb(60, 60, 60)
+            $row.Btn.Enabled                      = $false
+        }
+    }
+    #endregion
+
+    #region ── Helpers ────────────────────────────────────────────────────────
+    $writeLog = {
+        param([string]$msg, [System.Drawing.Color]$color = [System.Drawing.Color]::Silver)
+        $log.SelectionStart  = $log.TextLength
+        $log.SelectionLength = 0
+        $log.SelectionColor  = $color
+        $log.AppendText("$msg`n")
+        $log.ScrollToCaret()
+    }
+
+    $refreshAll = {
+        foreach ($row in $rowControls) {
+            $status = & $checkOne $row.Def
+            & $updateRow $row $status
+        }
+        $anyActionable = ($rowControls | Where-Object { $_.Btn.Enabled } | Measure-Object).Count -gt 0
+        $btnInstallAll.Enabled = $anyActionable
+        if ($anyActionable) {
+            $btnInstallAll.ForeColor                = [System.Drawing.Color]::Tomato
+            $btnInstallAll.FlatAppearance.BorderColor = [System.Drawing.Color]::Tomato
+        } else {
+            $btnInstallAll.ForeColor                = [System.Drawing.Color]::DimGray
+            $btnInstallAll.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+        }
+    }
+    #endregion
+
+    #region ── Background install — runspace + polling timer ──────────────────
+    $script:PQRunspace   = $null
+    $script:PQPipeline   = $null
+    $script:PQAsync      = $null
+    $script:PQQueue      = $null
+    $script:PQCurrentRow = $null
+
+    $pollTimer          = New-Object System.Windows.Forms.Timer
+    $pollTimer.Interval = 600
+
+    $doNextInstall = $null  # forward-declared; $onInstallComplete references it at call-time
+
+    $onInstallComplete = {
+        $hadErrors = $script:PQPipeline.HadErrors
+        $errMsgs   = @($script:PQPipeline.Streams.Error | ForEach-Object { $_.Exception.Message })
+        $script:PQPipeline.Dispose()
+        $script:PQRunspace.Dispose()
+        $script:PQRunspace = $null
+        $script:PQPipeline = $null
+        $script:PQAsync    = $null
+
+        if ($hadErrors -and $errMsgs.Count -gt 0) {
+            & $writeLog "Error: $($errMsgs[0])" ([System.Drawing.Color]::Tomato)
+        } else {
+            & $writeLog 'Done.' ([System.Drawing.Color]::LimeGreen)
+        }
+
+        if ($script:PQCurrentRow) {
+            $status = & $checkOne $script:PQCurrentRow.Def
+            & $updateRow $script:PQCurrentRow $status
+            $script:PQCurrentRow = $null
+        }
+
+        if ($script:PQQueue -and $script:PQQueue.Count -gt 0) {
+            & $doNextInstall
+        } else {
+            $script:PQQueue     = $null
+            $btnRefresh.Enabled = $true
+            & $refreshAll
+        }
+    }
+
+    $pollTimer.Add_Tick({
+        if ($script:PQAsync -and $script:PQAsync.IsCompleted) {
+            $pollTimer.Stop()
+            & $onInstallComplete
+        }
+    })
+
+    $doNextInstall = {
+        if (-not $script:PQQueue -or $script:PQQueue.Count -eq 0) { return }
+        $r = $script:PQQueue.Dequeue()
+        $script:PQCurrentRow = $r
+
+        $isUpdate = ($r.Btn.Text -eq 'Update')
+        $scope    = if ($isAdmin) { 'AllUsers' } else { 'CurrentUser' }
+        & $writeLog "$(if ($isUpdate) { 'Updating' } else { 'Installing' }) $($r.Def.Name)..." ([System.Drawing.Color]::CornflowerBlue)
+        $r.Btn.Text = 'Working...'
+
+        $cmd = if ($isUpdate) {
+            "Update-Module -Name '$($r.Def.Name)' -Force -ErrorAction Stop"
+        } else {
+            "Install-Module -Name '$($r.Def.Name)' -Force -AllowClobber -Scope $scope -ErrorAction Stop"
+        }
+
+        $rs = [runspacefactory]::CreateRunspace()
+        $rs.ApartmentState = 'STA'
+        $rs.ThreadOptions  = 'ReuseThread'
+        $rs.Open()
+        $ps = [powershell]::Create()
+        $ps.Runspace = $rs
+        [void]$ps.AddScript($cmd)
+        $script:PQRunspace = $rs
+        $script:PQPipeline = $ps
+        $script:PQAsync    = $ps.BeginInvoke()
+        $pollTimer.Start()
+    }
+
+    $startQueue = {
+        param([System.Collections.Queue]$q)
+        if ($script:PQAsync) { & $writeLog 'An operation is already in progress.' ([System.Drawing.Color]::DarkGoldenrod); return }
+        foreach ($r in $rowControls) { $r.Btn.Enabled = $false }
+        $btnInstallAll.Enabled = $false
+        $btnRefresh.Enabled    = $false
+        $script:PQQueue = $q
+        & $doNextInstall
+    }
+
+    # Use Tag to avoid loop-closure capture of $row
+    foreach ($row in $rowControls) {
+        $row.Btn.Tag = $row
+        $row.Btn.Add_Click({
+            $r = $this.Tag
+            if (-not $r.Def.CanInstall) { return }
+            $q = [System.Collections.Queue]::new()
+            $q.Enqueue($r)
+            & $startQueue $q
+        })
+    }
+
+    $btnInstallAll.Add_Click({
+        $q = [System.Collections.Queue]::new()
+        foreach ($r in $rowControls) {
+            if ($r.Btn.Enabled -and $r.Btn.Text -in 'Install', 'Update') { $q.Enqueue($r) }
+        }
+        if ($q.Count -eq 0) { return }
+        & $writeLog "Queuing $($q.Count) module(s)..." ([System.Drawing.Color]::Silver)
+        & $startQueue $q
+    })
+
+    $btnRefresh.Add_Click({
+        if ($script:PQAsync) { return }
+        & $writeLog 'Refreshing...' ([System.Drawing.Color]::DimGray)
+        & $refreshAll
+    })
+
+    $form.Add_FormClosing({
+        $pollTimer.Stop()
+        $pollTimer.Dispose()
+        if ($script:PQPipeline) { try { $script:PQPipeline.Stop() } catch {}; $script:PQPipeline.Dispose(); $script:PQPipeline = $null }
+        if ($script:PQRunspace) { $script:PQRunspace.Dispose(); $script:PQRunspace = $null }
+        $script:PQAsync = $null; $script:PQQueue = $null; $script:PQCurrentRow = $null
+    })
+    #endregion
+
+    $form.Add_Load({ & $refreshAll })
+    $form.ShowDialog() | Out-Null
+    $form.Dispose()
+}
+
 function Invoke-FrankensteinMigrator {
     [CmdletBinding()]
     param()
@@ -9658,14 +10072,17 @@ function Invoke-FrankensteinMigrator {
     }
 
     $rows.prereq.Btn.Add_Click({
+        Show-FrankensteinPrereqs
+        # Refresh the launchpad's status label after the prereq window closes
         $checks  = Get-FrankensteinPrereqs
-        $lines   = foreach ($c in $checks) { "$(if ($c.OK) { '[OK]     ' } else { '[MISSING]' })  $($c.Name) — $($c.Detail)" }
-        $missing = @($checks | Where-Object { -not $_.OK }).Count
-        [System.Windows.Forms.MessageBox]::Show(
-            ($lines -join "`n"),
-            $(if ($missing -eq 0) { 'All prerequisites installed' } else { "$missing prerequisite(s) missing" }),
-            'OK',
-            $(if ($missing -eq 0) { 'Information' } else { 'Warning' })) | Out-Null
+        $missing = @($checks | Where-Object { -not $_.OK })
+        if ($missing.Count -eq 0) {
+            $rows.prereq.Lbl.ForeColor = [System.Drawing.Color]::LimeGreen
+            $rows.prereq.Lbl.Text      = 'All installed'
+        } else {
+            $rows.prereq.Lbl.ForeColor = [System.Drawing.Color]::Tomato
+            $rows.prereq.Lbl.Text      = "$($missing.Count) missing — click for details"
+        }
     })
 
     $rows.dl.Btn.Add_Click({         & $launch 'Group Migrator'       { Invoke-FrankensteinDLMigrator }         })

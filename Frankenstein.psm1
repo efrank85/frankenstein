@@ -9421,26 +9421,12 @@ function Invoke-FrankensteinDomainMigrator {
             $domainPollTimer.Start()
         } catch {
             Write-CMLog "Remove failed: $($_.Exception.Message)" ([System.Drawing.Color]::Tomato)
-            Write-CMLog "Querying domain references blocking deletion..." ([System.Drawing.Color]::DarkGoldenrod)
+            if ($_.ErrorDetails.Message) { Write-CMLog "API detail: $($_.ErrorDetails.Message)" ([System.Drawing.Color]::Tomato) }
+            # Log domain state so we know what Microsoft thinks is still blocking
             try {
-                $resp = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/domains/$domain/domainNameReferences" -ErrorAction Stop
-                $refs = @($resp.value)
-                if ($refs.Count -gt 0) {
-                    Write-CMLog "$($refs.Count) object(s) still reference '$domain':" ([System.Drawing.Color]::DarkGoldenrod)
-                    foreach ($r in $refs) {
-                        $label = if ($r['displayName']) { $r['displayName'] }
-                                 elseif ($r['userPrincipalName']) { $r['userPrincipalName'] }
-                                 else { $r['id'] }
-                        $type  = if ($r['@odata.type']) { $r['@odata.type'] -replace '#microsoft\.graph\.','' } else { 'unknown' }
-                        Write-CMLog "  [$type] $label" ([System.Drawing.Color]::DarkGoldenrod)
-                    }
-                    Write-CMLog "Clean these objects (Step 3), wait ~60 s for Entra sync, then retry." ([System.Drawing.Color]::DimGray)
-                } else {
-                    Write-CMLog "No domain references found via API — this may be a transient Microsoft error. Wait 30 s and try again." ([System.Drawing.Color]::DimGray)
-                }
-            } catch {
-                Write-CMLog "Could not query domain references: $($_.Exception.Message)" ([System.Drawing.Color]::DimGray)
-            }
+                $di = Get-MgDomain -DomainId $domain -ErrorAction SilentlyContinue
+                if ($di) { Write-CMLog "Domain state — IsVerified:$($di.IsVerified) IsDefault:$($di.IsDefault) SupportedServices:$($di.SupportedServices -join ',')" ([System.Drawing.Color]::DimGray) }
+            } catch {}
         } finally { $form.UseWaitCursor = $false }
     })
 

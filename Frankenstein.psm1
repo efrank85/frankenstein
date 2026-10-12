@@ -1744,7 +1744,7 @@ NOTES
                 'FullAccess' {
                     Add-MailboxPermission -Identity $mbxPrimary -User $delegatePrimary `
                         -AccessRights FullAccess -InheritanceType All `
-                        -AutoMapping $false -ErrorAction Stop | Out-Null
+                        -ErrorAction Stop | Out-Null
                 }
                 'SendAs' {
                     Add-RecipientPermission -Identity $mbxPrimary -Trustee $delegatePrimary `
@@ -3204,7 +3204,7 @@ NOTES
                 switch ($perm.PermissionType) {
                     'FullAccess' {
                         Add-MailboxPermission -Identity $mbxTarget -User $delTarget -AccessRights FullAccess `
-                            -InheritanceType All -AutoMapping $false -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
+                            -InheritanceType All -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
                         $log.Status = 'Success'; $log.Details = 'FullAccess granted'
                         Write-PMLog "  OK    [FullAccess] $delTarget -> $mbxTarget" ([System.Drawing.Color]::LimeGreen)
                     }

@@ -4101,7 +4101,7 @@ function Invoke-FrankensteinDLMigrator {
         } elseif ($radOnPrem.Checked -and $script:DLOnPremSession) {
             Invoke-Command -Session $script:DLOnPremSession -ScriptBlock {
                 param($n, $dn, $a, $s, $t, $o)
-                $p = @{ Name = $n; DisplayName = $dn; Alias = $a; PrimarySmtpAddress = $s; Type = $t }
+                $p = @{ Name = $n; DisplayName = $dn; Alias = $a; PrimarySmtpAddress = $s; Type = $t; SamAccountName = $n }
                 if ($o) { $p['OrganizationalUnit'] = $o }
                 New-DistributionGroup @p -ErrorAction Stop
             } -ArgumentList $Name, $DisplayName, $Alias, $PrimarySmtp, $DLType, $OU

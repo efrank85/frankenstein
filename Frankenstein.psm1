@@ -9641,13 +9641,15 @@ function Show-FrankensteinDiscovery {
     param()
 
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing -ErrorAction SilentlyContinue
+    [System.Windows.Forms.Application]::EnableVisualStyles()
 
     $form                 = New-Object System.Windows.Forms.Form
     $form.Text            = 'Frankenstein — Discovery Tools'
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox     = $false
     $form.StartPosition   = 'CenterScreen'
-    $form.BackColor       = [System.Drawing.Color]::FromArgb(28, 28, 28)
+    $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
+    $form.ForeColor       = [System.Drawing.Color]::White
     $form.Font            = New-Object System.Drawing.Font('Segoe UI', 9)
 
     $lblTitle           = New-Object System.Windows.Forms.Label

@@ -11384,14 +11384,14 @@ function Invoke-FrankensteinMigrator {
 
     #region ── Rows ─────────────────────────────────────────────────────────
     $rowDefs = @(
-        [pscustomobject]@{ Key='prereq';     Label='Prerequisites';      Color=[System.Drawing.Color]::DarkGoldenrod   }
-        [pscustomobject]@{ Key='dl';         Label='Group Migrator';      Color=[System.Drawing.Color]::CornflowerBlue  }
-        [pscustomobject]@{ Key='permission'; Label='Permission Migrator'; Color=[System.Drawing.Color]::MediumPurple   }
-        [pscustomobject]@{ Key='mailbox';    Label='Mailbox Migrator';   Color=[System.Drawing.Color]::MediumSeaGreen  }
-        [pscustomobject]@{ Key='domain';     Label='Domain Migrator';    Color=[System.Drawing.Color]::Tomato          }
-        [pscustomobject]@{ Key='onedrive';   Label='OneDrive Migrator';  Color=[System.Drawing.Color]::SteelBlue       }
+        [pscustomobject]@{ Key='prereq';     Label='Prerequisites';      Color=[System.Drawing.Color]::DarkGoldenrod    }
         [pscustomobject]@{ Key='discovery';  Label='Discovery Tools';    Color=[System.Drawing.Color]::MediumAquamarine }
-        [pscustomobject]@{ Key='docs';        Label='Documentation';      Color=[System.Drawing.Color]::DarkGoldenrod  }
+        [pscustomobject]@{ Key='dl';         Label='Group Migrator';     Color=[System.Drawing.Color]::CornflowerBlue   }
+        [pscustomobject]@{ Key='permission'; Label='Permission Migrator'; Color=[System.Drawing.Color]::MediumPurple   }
+        [pscustomobject]@{ Key='mailbox';    Label='Mailbox Migrator';   Color=[System.Drawing.Color]::MediumSeaGreen   }
+        [pscustomobject]@{ Key='domain';     Label='Domain Migrator';    Color=[System.Drawing.Color]::Tomato           }
+        [pscustomobject]@{ Key='onedrive';   Label='OneDrive Migrator';  Color=[System.Drawing.Color]::SteelBlue        }
+        [pscustomobject]@{ Key='docs';       Label='Documentation';      Color=[System.Drawing.Color]::DarkGoldenrod    }
     )
 
     $rows = @{}

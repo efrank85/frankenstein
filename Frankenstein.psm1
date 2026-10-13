@@ -9605,7 +9605,7 @@ function Show-FrankensteinPrereqs {
     $form.StartPosition   = 'CenterScreen'
     $form.BackColor       = [System.Drawing.Color]::FromArgb(28, 28, 28)
     $form.Font            = New-Object System.Drawing.Font('Segoe UI', 9)
-    $form.ClientSize      = New-Object System.Drawing.Size(560, 640)
+    $form.ClientSize      = New-Object System.Drawing.Size(560, 760)
 
     $lblTitle           = New-Object System.Windows.Forms.Label
     $lblTitle.Text      = 'Prerequisites'
@@ -9628,11 +9628,18 @@ function Show-FrankensteinPrereqs {
     $sepTop.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepTop)
 
-    $sepLog           = New-Object System.Windows.Forms.Panel
-    $sepLog.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepLog.Location  = New-Object System.Drawing.Point(16, 372)
-    $sepLog.Size      = New-Object System.Drawing.Size(528, 1)
-    $form.Controls.Add($sepLog)
+    #region ── TabControl (Log/Permissions + Discovery) ──────────────────────
+    $tabCtrl            = New-Object System.Windows.Forms.TabControl
+    $tabCtrl.Location   = New-Object System.Drawing.Point(16, 376)
+    $tabCtrl.Size       = New-Object System.Drawing.Size(528, 342)
+    $tabCtrl.Font       = New-Object System.Drawing.Font('Segoe UI', 9)
+    $form.Controls.Add($tabCtrl)
+
+    # ── Tab 1: Log & Permissions ─────────────────────────────────────────────
+    $tabMods          = New-Object System.Windows.Forms.TabPage
+    $tabMods.Text     = 'Log && Permissions'
+    $tabMods.BackColor = [System.Drawing.Color]::FromArgb(28, 28, 28)
+    $tabCtrl.TabPages.Add($tabMods)
 
     $log             = New-Object System.Windows.Forms.RichTextBox
     $log.BackColor   = [System.Drawing.Color]::FromArgb(18, 18, 18)
@@ -9640,25 +9647,24 @@ function Show-FrankensteinPrereqs {
     $log.Font        = New-Object System.Drawing.Font('Consolas', 8)
     $log.ReadOnly    = $true
     $log.BorderStyle = 'None'
-    $log.Location    = New-Object System.Drawing.Point(16, 378)
-    $log.Size        = New-Object System.Drawing.Size(528, 60)
+    $log.Location    = New-Object System.Drawing.Point(4, 4)
+    $log.Size        = New-Object System.Drawing.Size(516, 62)
     $log.ScrollBars  = 'Vertical'
-    $form.Controls.Add($log)
+    $tabMods.Controls.Add($log)
 
-    # ── Required M365 Permissions ────────────────────────────────────────────
-    $sepPerm           = New-Object System.Windows.Forms.Panel
-    $sepPerm.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepPerm.Location  = New-Object System.Drawing.Point(16, 444)
-    $sepPerm.Size      = New-Object System.Drawing.Size(528, 1)
-    $form.Controls.Add($sepPerm)
+    $sepPermTab           = New-Object System.Windows.Forms.Panel
+    $sepPermTab.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepPermTab.Location  = New-Object System.Drawing.Point(4, 70)
+    $sepPermTab.Size      = New-Object System.Drawing.Size(516, 1)
+    $tabMods.Controls.Add($sepPermTab)
 
     $lblPermTitle           = New-Object System.Windows.Forms.Label
     $lblPermTitle.Text      = 'Required M365 Permissions'
     $lblPermTitle.ForeColor = [System.Drawing.Color]::Silver
     $lblPermTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $lblPermTitle.Location  = New-Object System.Drawing.Point(16, 450)
-    $lblPermTitle.Size      = New-Object System.Drawing.Size(528, 18)
-    $form.Controls.Add($lblPermTitle)
+    $lblPermTitle.Location  = New-Object System.Drawing.Point(4, 76)
+    $lblPermTitle.Size      = New-Object System.Drawing.Size(516, 18)
+    $tabMods.Controls.Add($lblPermTitle)
 
     $rtbPerms             = New-Object System.Windows.Forms.RichTextBox
     $rtbPerms.BackColor   = [System.Drawing.Color]::FromArgb(28, 28, 28)
@@ -9666,10 +9672,10 @@ function Show-FrankensteinPrereqs {
     $rtbPerms.Font        = New-Object System.Drawing.Font('Segoe UI', 8.5)
     $rtbPerms.ReadOnly    = $true
     $rtbPerms.BorderStyle = 'None'
-    $rtbPerms.Location    = New-Object System.Drawing.Point(16, 470)
-    $rtbPerms.Size        = New-Object System.Drawing.Size(528, 124)
+    $rtbPerms.Location    = New-Object System.Drawing.Point(4, 98)
+    $rtbPerms.Size        = New-Object System.Drawing.Size(516, 212)
     $rtbPerms.ScrollBars  = 'Vertical'
-    $form.Controls.Add($rtbPerms)
+    $tabMods.Controls.Add($rtbPerms)
 
     $permLines = @(
         @{ Text = 'Group Migrator';       Bold = $true;  Color = [System.Drawing.Color]::Silver         }
@@ -9697,9 +9703,200 @@ function Show-FrankensteinPrereqs {
         $rtbPerms.AppendText("$($line.Text)`n")
     }
 
+    # ── Tab 2: Discovery ──────────────────────────────────────────────────────
+    $tabDisc           = New-Object System.Windows.Forms.TabPage
+    $tabDisc.Text      = 'Discovery'
+    $tabDisc.BackColor = [System.Drawing.Color]::FromArgb(28, 28, 28)
+    $tabCtrl.TabPages.Add($tabDisc)
+
+    $discY = 6
+
+    $makeSep = {
+        param([int]$y)
+        $s           = New-Object System.Windows.Forms.Panel
+        $s.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
+        $s.Location  = New-Object System.Drawing.Point(4, $y)
+        $s.Size      = New-Object System.Drawing.Size(512, 1)
+        $tabDisc.Controls.Add($s)
+    }
+
+    $makeLaunchBtn = {
+        param([int]$y, [int]$h = 26)
+        $b                            = New-Object System.Windows.Forms.Button
+        $b.FlatStyle                  = 'Flat'
+        $b.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+        $b.ForeColor                  = [System.Drawing.Color]::CornflowerBlue
+        $b.FlatAppearance.BorderColor = [System.Drawing.Color]::CornflowerBlue
+        $b.Text                       = 'Launch'
+        $b.Location                   = New-Object System.Drawing.Point(430, $y)
+        $b.Size                       = New-Object System.Drawing.Size(82, $h)
+        $tabDisc.Controls.Add($b)
+        return $b
+    }
+
+    $makeChk = {
+        param([string]$text, [int]$x, [int]$y)
+        $c           = New-Object System.Windows.Forms.CheckBox
+        $c.Text      = $text
+        $c.ForeColor = [System.Drawing.Color]::DimGray
+        $c.Location  = New-Object System.Drawing.Point($x, $y)
+        $c.AutoSize  = $true
+        $tabDisc.Controls.Add($c)
+        return $c
+    }
+
+    $makeToolLabel = {
+        param([string]$text, [int]$y)
+        $l           = New-Object System.Windows.Forms.Label
+        $l.Text      = $text
+        $l.ForeColor = [System.Drawing.Color]::Silver
+        $l.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+        $l.Location  = New-Object System.Drawing.Point(4, ($y + 4))
+        $l.Size      = New-Object System.Drawing.Size(150, 18)
+        $tabDisc.Controls.Add($l)
+    }
+
+    # ── Recipient Counts ─────────────────────────────────────────────────────
+    & $makeToolLabel 'Recipient Counts' $discY
+    $lblRCDesc           = New-Object System.Windows.Forms.Label
+    $lblRCDesc.Text      = 'Counts all recipient types in the connected EXO session'
+    $lblRCDesc.ForeColor = [System.Drawing.Color]::DimGray
+    $lblRCDesc.Location  = New-Object System.Drawing.Point(4, ($discY + 22))
+    $lblRCDesc.Size      = New-Object System.Drawing.Size(420, 16)
+    $tabDisc.Controls.Add($lblRCDesc)
+    $btnRC                            = New-Object System.Windows.Forms.Button
+    $btnRC.FlatStyle                  = 'Flat'
+    $btnRC.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $btnRC.ForeColor                  = [System.Drawing.Color]::CornflowerBlue
+    $btnRC.FlatAppearance.BorderColor = [System.Drawing.Color]::CornflowerBlue
+    $btnRC.Text                       = 'Run'
+    $btnRC.Location                   = New-Object System.Drawing.Point(430, ($discY + 2))
+    $btnRC.Size                       = New-Object System.Drawing.Size(82, 36)
+    $tabDisc.Controls.Add($btnRC)
+    $discY += 46
+
+    & $makeSep $discY; $discY += 5
+
+    # ── Exchange Discovery ───────────────────────────────────────────────────
+    & $makeToolLabel 'Exchange Discovery' $discY
+    $radEXOnline       = New-Object System.Windows.Forms.RadioButton
+    $radEXOnline.Text  = 'Online'
+    $radEXOnline.ForeColor = [System.Drawing.Color]::DimGray
+    $radEXOnline.Location  = New-Object System.Drawing.Point(158, ($discY + 2))
+    $radEXOnline.AutoSize  = $true
+    $radEXOnline.Checked   = $true
+    $tabDisc.Controls.Add($radEXOnline)
+    $radEXOnPrem       = New-Object System.Windows.Forms.RadioButton
+    $radEXOnPrem.Text  = 'On-Premises'
+    $radEXOnPrem.ForeColor = [System.Drawing.Color]::DimGray
+    $radEXOnPrem.Location  = New-Object System.Drawing.Point(228, ($discY + 2))
+    $radEXOnPrem.AutoSize  = $true
+    $tabDisc.Controls.Add($radEXOnPrem)
+    $chkEXSession  = & $makeChk 'Use Current Session' 158 ($discY + 22)
+    $chkEXVDirs    = & $makeChk 'Virtual Directories' 290 ($discY + 22)
+    $chkEXPF       = & $makeChk 'Public Folders'      158 ($discY + 40)
+    $chkEXCsv      = & $makeChk 'Export CSV'          290 ($discY + 40)
+    $btnEX         = & $makeLaunchBtn ($discY + 2) 54
+    $discY += 62
+
+    & $makeSep $discY; $discY += 5
+
+    # ── Entra Discovery ──────────────────────────────────────────────────────
+    & $makeToolLabel 'Entra Discovery' $discY
+    $chkEntSession = & $makeChk 'Use Current Session' 158 ($discY + 4)
+    $chkEntCsv     = & $makeChk 'Export CSV'          310 ($discY + 4)
+    $btnEnt        = & $makeLaunchBtn ($discY + 2)
+    $discY += 32
+
+    & $makeSep $discY; $discY += 5
+
+    # ── Mailbox Report ───────────────────────────────────────────────────────
+    & $makeToolLabel 'Mailbox Report' $discY
+    $chkMRUser     = & $makeChk 'User'        158 ($discY + 2)
+    $chkMRShared   = & $makeChk 'Shared'      210 ($discY + 2)
+    $chkMRRoom     = & $makeChk 'Room'        272 ($discY + 2)
+    $chkMREquip    = & $makeChk 'Equipment'   318 ($discY + 2)
+    $chkMRDisabled = & $makeChk 'Incl. Disabled'    158 ($discY + 20)
+    $chkMRStats    = & $makeChk 'Incl. Statistics'  272 ($discY + 20)
+    $chkMRSession  = & $makeChk 'Use Current Session' 158 ($discY + 38)
+    $btnMR         = & $makeLaunchBtn ($discY + 2) 54
+    $discY += 62
+
+    & $makeSep $discY; $discY += 5
+
+    # ── G Suite Discovery ────────────────────────────────────────────────────
+    & $makeToolLabel 'G Suite Discovery' $discY
+    $chkGSGroupSettings  = & $makeChk 'Group Settings'   158 ($discY + 2)
+    $chkGSMembership     = & $makeChk 'Membership'       290 ($discY + 2)
+    $chkGSDelegates      = & $makeChk 'Delegates'        378 ($discY + 2)
+    $chkGSSendAs         = & $makeChk 'Send-As'          158 ($discY + 20)
+    $chkGSAutoFwd        = & $makeChk 'Auto-Forward'     240 ($discY + 20)
+    $chkGSCsv            = & $makeChk 'Export CSV'       358 ($discY + 20)
+    $btnGS               = & $makeLaunchBtn ($discY + 2) 38
+    $discY += 46
+
+    & $makeSep $discY; $discY += 6
+    $lblDiscNote           = New-Object System.Windows.Forms.Label
+    $lblDiscNote.Text      = 'Tools open in a new PowerShell console. Ensure the required session is active before launching.'
+    $lblDiscNote.ForeColor = [System.Drawing.Color]::FromArgb(100, 100, 100)
+    $lblDiscNote.Location  = New-Object System.Drawing.Point(4, $discY)
+    $lblDiscNote.Size      = New-Object System.Drawing.Size(512, 32)
+    $tabDisc.Controls.Add($lblDiscNote)
+
+    # ── Discovery launch handlers ─────────────────────────────────────────────
+    $launchPS = {
+        param([string]$cmd)
+        Start-Process powershell.exe -ArgumentList '-NoExit', '-Command', "Import-Module Frankenstein -ErrorAction SilentlyContinue; $cmd"
+    }
+
+    $btnRC.Add_Click({
+        & $launchPS 'Get-FrankensteinRecipientCounts'
+    })
+
+    $btnEX.Add_Click({
+        $switches = ''
+        if ($radEXOnline.Checked)   { $switches += ' -Online' }
+        if ($chkEXSession.Checked)  { $switches += ' -UseCurrentSession' }
+        if ($chkEXVDirs.Checked)    { $switches += ' -VirtualDirectories' }
+        if ($chkEXPF.Checked)       { $switches += ' -PublicFolders' }
+        if ($chkEXCsv.Checked)      { $switches += ' -CSV' }
+        & $launchPS "Get-FrankensteinExchangeDiscovery$switches"
+    })
+
+    $btnEnt.Add_Click({
+        $switches = ''
+        if ($chkEntSession.Checked) { $switches += ' -UseCurrentSession' }
+        if ($chkEntCsv.Checked)     { $switches += ' -CSV' }
+        & $launchPS "Get-FrankensteinEntraDiscovery$switches"
+    })
+
+    $btnMR.Add_Click({
+        $switches = ''
+        if ($chkMRUser.Checked)     { $switches += ' -UserMailbox' }
+        if ($chkMRShared.Checked)   { $switches += ' -SharedMailbox' }
+        if ($chkMRRoom.Checked)     { $switches += ' -RoomMailbox' }
+        if ($chkMREquip.Checked)    { $switches += ' -EquipmentMailbox' }
+        if ($chkMRDisabled.Checked) { $switches += ' -IncludeDisabled' }
+        if ($chkMRStats.Checked)    { $switches += ' -IncludeStatistics' }
+        if ($chkMRSession.Checked)  { $switches += ' -UseCurrentSession' }
+        & $launchPS "Get-FrankensteinMailboxReport$switches"
+    })
+
+    $btnGS.Add_Click({
+        $switches = ''
+        if ($chkGSGroupSettings.Checked) { $switches += ' -IncludeGroupSettings' }
+        if ($chkGSMembership.Checked)    { $switches += ' -IncludeGroupMembership' }
+        if ($chkGSDelegates.Checked)     { $switches += ' -IncludeDelegates' }
+        if ($chkGSSendAs.Checked)        { $switches += ' -IncludeSendAsSettings' }
+        if ($chkGSAutoFwd.Checked)       { $switches += ' -IncludeAutoForwardSettings' }
+        if ($chkGSCsv.Checked)           { $switches += ' -CSV' }
+        & $launchPS "Get-FrankensteinGSuiteDiscovery$switches"
+    })
+    #endregion
+
     $sepFoot           = New-Object System.Windows.Forms.Panel
     $sepFoot.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepFoot.Location  = New-Object System.Drawing.Point(16, 600)
+    $sepFoot.Location  = New-Object System.Drawing.Point(16, 724)
     $sepFoot.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepFoot)
 
@@ -9710,7 +9907,7 @@ function Show-FrankensteinPrereqs {
     $btnInstallAll.ForeColor                  = [System.Drawing.Color]::DimGray
     $btnInstallAll.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
     $btnInstallAll.Enabled                    = $false
-    $btnInstallAll.Location                   = New-Object System.Drawing.Point(16, 606)
+    $btnInstallAll.Location                   = New-Object System.Drawing.Point(16, 730)
     $btnInstallAll.Size                       = New-Object System.Drawing.Size(160, 26)
     $form.Controls.Add($btnInstallAll)
 
@@ -9720,7 +9917,7 @@ function Show-FrankensteinPrereqs {
     $btnRefresh.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $btnRefresh.ForeColor                  = [System.Drawing.Color]::Silver
     $btnRefresh.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-    $btnRefresh.Location                   = New-Object System.Drawing.Point(184, 606)
+    $btnRefresh.Location                   = New-Object System.Drawing.Point(184, 730)
     $btnRefresh.Size                       = New-Object System.Drawing.Size(100, 26)
     $form.Controls.Add($btnRefresh)
 
@@ -9730,7 +9927,7 @@ function Show-FrankensteinPrereqs {
     $btnClose.BackColor                  = [System.Drawing.Color]::FromArgb(55, 55, 55)
     $btnClose.ForeColor                  = [System.Drawing.Color]::Silver
     $btnClose.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-    $btnClose.Location                   = New-Object System.Drawing.Point(444, 606)
+    $btnClose.Location                   = New-Object System.Drawing.Point(444, 730)
     $btnClose.Size                       = New-Object System.Drawing.Size(100, 26)
     $form.Controls.Add($btnClose)
     $btnClose.Add_Click({ $form.Close() })

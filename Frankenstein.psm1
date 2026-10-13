@@ -9669,50 +9669,86 @@ function Show-FrankensteinDiscovery {
     $grpConn.Text      = 'Connections'
     $grpConn.ForeColor = [System.Drawing.Color]::DimGray
     $grpConn.Location  = New-Object System.Drawing.Point(16, 54)
-    $grpConn.Size      = New-Object System.Drawing.Size(528, 74)
+    $grpConn.Size      = New-Object System.Drawing.Size(528, 104)
     $grpConn.Font      = New-Object System.Drawing.Font('Segoe UI', 8.5)
     $form.Controls.Add($grpConn)
 
     $lblM365Upn           = New-Object System.Windows.Forms.Label
     $lblM365Upn.Text      = 'M365 UPN:'
-    $lblM365Upn.ForeColor = [System.Drawing.Color]::DimGray
-    $lblM365Upn.Location  = New-Object System.Drawing.Point(8, 18)
-    $lblM365Upn.Size      = New-Object System.Drawing.Size(70, 18)
+    $lblM365Upn.ForeColor = [System.Drawing.Color]::Silver
+    $lblM365Upn.Location  = New-Object System.Drawing.Point(8, 22)
+    $lblM365Upn.Size      = New-Object System.Drawing.Size(82, 18)
     $grpConn.Controls.Add($lblM365Upn)
 
     $txtM365Upn             = New-Object System.Windows.Forms.TextBox
-    $txtM365Upn.Location    = New-Object System.Drawing.Point(82, 16)
-    $txtM365Upn.Size        = New-Object System.Drawing.Size(432, 22)
+    $txtM365Upn.Location    = New-Object System.Drawing.Point(94, 19)
+    $txtM365Upn.Size        = New-Object System.Drawing.Size(252, 22)
     $txtM365Upn.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
     $txtM365Upn.ForeColor   = [System.Drawing.Color]::Silver
     $txtM365Upn.BorderStyle = 'FixedSingle'
+    try { $txtM365Upn.PlaceholderText = 'admin@tenant.com' } catch {}
     $grpConn.Controls.Add($txtM365Upn)
+
+    $btnConnM365                            = New-Object System.Windows.Forms.Button
+    $btnConnM365.Text                       = 'Connect'
+    $btnConnM365.FlatStyle                  = 'Flat'
+    $btnConnM365.BackColor                  = [System.Drawing.Color]::FromArgb(0, 120, 212)
+    $btnConnM365.ForeColor                  = [System.Drawing.Color]::White
+    $btnConnM365.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+    $btnConnM365.Location                   = New-Object System.Drawing.Point(352, 18)
+    $btnConnM365.Size                       = New-Object System.Drawing.Size(80, 24)
+    $grpConn.Controls.Add($btnConnM365)
+
+    $lblM365Status           = New-Object System.Windows.Forms.Label
+    $lblM365Status.Text      = 'Not connected'
+    $lblM365Status.ForeColor = [System.Drawing.Color]::DimGray
+    $lblM365Status.Location  = New-Object System.Drawing.Point(440, 22)
+    $lblM365Status.Size      = New-Object System.Drawing.Size(82, 18)
+    $grpConn.Controls.Add($lblM365Status)
 
     $lblGSConfig           = New-Object System.Windows.Forms.Label
     $lblGSConfig.Text      = 'G Suite Config:'
-    $lblGSConfig.ForeColor = [System.Drawing.Color]::DimGray
-    $lblGSConfig.Location  = New-Object System.Drawing.Point(8, 44)
-    $lblGSConfig.Size      = New-Object System.Drawing.Size(72, 18)
+    $lblGSConfig.ForeColor = [System.Drawing.Color]::Silver
+    $lblGSConfig.Location  = New-Object System.Drawing.Point(8, 60)
+    $lblGSConfig.Size      = New-Object System.Drawing.Size(82, 18)
     $grpConn.Controls.Add($lblGSConfig)
 
     $txtGSConfig             = New-Object System.Windows.Forms.TextBox
-    $txtGSConfig.Location    = New-Object System.Drawing.Point(82, 42)
-    $txtGSConfig.Size        = New-Object System.Drawing.Size(432, 22)
+    $txtGSConfig.Location    = New-Object System.Drawing.Point(94, 57)
+    $txtGSConfig.Size        = New-Object System.Drawing.Size(252, 22)
     $txtGSConfig.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
     $txtGSConfig.ForeColor   = [System.Drawing.Color]::Silver
     $txtGSConfig.BorderStyle = 'FixedSingle'
+    try { $txtGSConfig.PlaceholderText = 'PSGSuite config name' } catch {}
     $grpConn.Controls.Add($txtGSConfig)
+
+    $btnConnGS                            = New-Object System.Windows.Forms.Button
+    $btnConnGS.Text                       = 'Set Config'
+    $btnConnGS.FlatStyle                  = 'Flat'
+    $btnConnGS.BackColor                  = [System.Drawing.Color]::FromArgb(0, 120, 212)
+    $btnConnGS.ForeColor                  = [System.Drawing.Color]::White
+    $btnConnGS.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+    $btnConnGS.Location                   = New-Object System.Drawing.Point(352, 56)
+    $btnConnGS.Size                       = New-Object System.Drawing.Size(80, 24)
+    $grpConn.Controls.Add($btnConnGS)
+
+    $lblGSStatus           = New-Object System.Windows.Forms.Label
+    $lblGSStatus.Text      = 'Not set'
+    $lblGSStatus.ForeColor = [System.Drawing.Color]::DimGray
+    $lblGSStatus.Location  = New-Object System.Drawing.Point(440, 60)
+    $lblGSStatus.Size      = New-Object System.Drawing.Size(82, 18)
+    $grpConn.Controls.Add($lblGSStatus)
 
     # ── Save Output To ────────────────────────────────────────────────────────
     $lblOutPath           = New-Object System.Windows.Forms.Label
     $lblOutPath.Text      = 'Save Output To:'
     $lblOutPath.ForeColor = [System.Drawing.Color]::DimGray
-    $lblOutPath.Location  = New-Object System.Drawing.Point(16, 138)
+    $lblOutPath.Location  = New-Object System.Drawing.Point(16, 168)
     $lblOutPath.Size      = New-Object System.Drawing.Size(90, 18)
     $form.Controls.Add($lblOutPath)
 
     $txtOutPath             = New-Object System.Windows.Forms.TextBox
-    $txtOutPath.Location    = New-Object System.Drawing.Point(110, 136)
+    $txtOutPath.Location    = New-Object System.Drawing.Point(110, 166)
     $txtOutPath.Size        = New-Object System.Drawing.Size(344, 22)
     $txtOutPath.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
     $txtOutPath.ForeColor   = [System.Drawing.Color]::Silver
@@ -9726,7 +9762,7 @@ function Show-FrankensteinDiscovery {
     $btnBrowse.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $btnBrowse.ForeColor                  = [System.Drawing.Color]::Silver
     $btnBrowse.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-    $btnBrowse.Location                   = New-Object System.Drawing.Point(458, 135)
+    $btnBrowse.Location                   = New-Object System.Drawing.Point(458, 165)
     $btnBrowse.Size                       = New-Object System.Drawing.Size(86, 24)
     $form.Controls.Add($btnBrowse)
     $btnBrowse.Add_Click({
@@ -9737,7 +9773,7 @@ function Show-FrankensteinDiscovery {
 
     $sepConn           = New-Object System.Windows.Forms.Panel
     $sepConn.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
-    $sepConn.Location  = New-Object System.Drawing.Point(16, 166)
+    $sepConn.Location  = New-Object System.Drawing.Point(16, 196)
     $sepConn.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepConn)
 
@@ -9746,14 +9782,14 @@ function Show-FrankensteinDiscovery {
     $lblEXTitle.Text      = 'Exchange'
     $lblEXTitle.ForeColor = [System.Drawing.Color]::Silver
     $lblEXTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $lblEXTitle.Location  = New-Object System.Drawing.Point(16, 174)
+    $lblEXTitle.Location  = New-Object System.Drawing.Point(16, 204)
     $lblEXTitle.Size      = New-Object System.Drawing.Size(80, 18)
     $form.Controls.Add($lblEXTitle)
 
     $radEXOnline           = New-Object System.Windows.Forms.RadioButton
     $radEXOnline.Text      = 'Online'
     $radEXOnline.ForeColor = [System.Drawing.Color]::DimGray
-    $radEXOnline.Location  = New-Object System.Drawing.Point(102, 172)
+    $radEXOnline.Location  = New-Object System.Drawing.Point(102, 202)
     $radEXOnline.AutoSize  = $true
     $radEXOnline.Checked   = $true
     $form.Controls.Add($radEXOnline)
@@ -9761,20 +9797,20 @@ function Show-FrankensteinDiscovery {
     $radEXOnPrem           = New-Object System.Windows.Forms.RadioButton
     $radEXOnPrem.Text      = 'On-Premises'
     $radEXOnPrem.ForeColor = [System.Drawing.Color]::DimGray
-    $radEXOnPrem.Location  = New-Object System.Drawing.Point(172, 172)
+    $radEXOnPrem.Location  = New-Object System.Drawing.Point(172, 202)
     $radEXOnPrem.AutoSize  = $true
     $form.Controls.Add($radEXOnPrem)
 
     $lblOnPremFqdn           = New-Object System.Windows.Forms.Label
     $lblOnPremFqdn.Text      = 'Server FQDN:'
     $lblOnPremFqdn.ForeColor = [System.Drawing.Color]::DimGray
-    $lblOnPremFqdn.Location  = New-Object System.Drawing.Point(102, 194)
+    $lblOnPremFqdn.Location  = New-Object System.Drawing.Point(102, 224)
     $lblOnPremFqdn.Size      = New-Object System.Drawing.Size(80, 18)
     $lblOnPremFqdn.Visible   = $false
     $form.Controls.Add($lblOnPremFqdn)
 
     $txtOnPremFqdn             = New-Object System.Windows.Forms.TextBox
-    $txtOnPremFqdn.Location    = New-Object System.Drawing.Point(184, 192)
+    $txtOnPremFqdn.Location    = New-Object System.Drawing.Point(184, 222)
     $txtOnPremFqdn.Size        = New-Object System.Drawing.Size(240, 22)
     $txtOnPremFqdn.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
     $txtOnPremFqdn.ForeColor   = [System.Drawing.Color]::Silver
@@ -9788,14 +9824,14 @@ function Show-FrankensteinDiscovery {
     $btnEXRun.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $btnEXRun.ForeColor                  = [System.Drawing.Color]::CornflowerBlue
     $btnEXRun.FlatAppearance.BorderColor = [System.Drawing.Color]::CornflowerBlue
-    $btnEXRun.Location                   = New-Object System.Drawing.Point(458, 172)
+    $btnEXRun.Location                   = New-Object System.Drawing.Point(458, 202)
     $btnEXRun.Size                       = New-Object System.Drawing.Size(86, 78)
     $form.Controls.Add($btnEXRun)
 
     $chkEXRecipCounts           = New-Object System.Windows.Forms.CheckBox
     $chkEXRecipCounts.Text      = 'Recipient Counts'
     $chkEXRecipCounts.ForeColor = [System.Drawing.Color]::DimGray
-    $chkEXRecipCounts.Location  = New-Object System.Drawing.Point(102, 196)
+    $chkEXRecipCounts.Location  = New-Object System.Drawing.Point(102, 226)
     $chkEXRecipCounts.AutoSize  = $true
     $chkEXRecipCounts.Checked   = $true
     $form.Controls.Add($chkEXRecipCounts)
@@ -9803,7 +9839,7 @@ function Show-FrankensteinDiscovery {
     $chkEXDiscovery           = New-Object System.Windows.Forms.CheckBox
     $chkEXDiscovery.Text      = 'Exchange Discovery'
     $chkEXDiscovery.ForeColor = [System.Drawing.Color]::DimGray
-    $chkEXDiscovery.Location  = New-Object System.Drawing.Point(248, 196)
+    $chkEXDiscovery.Location  = New-Object System.Drawing.Point(248, 226)
     $chkEXDiscovery.AutoSize  = $true
     $chkEXDiscovery.Checked   = $true
     $form.Controls.Add($chkEXDiscovery)
@@ -9811,7 +9847,7 @@ function Show-FrankensteinDiscovery {
     $chkEXMailboxReport           = New-Object System.Windows.Forms.CheckBox
     $chkEXMailboxReport.Text      = 'Mailbox Report'
     $chkEXMailboxReport.ForeColor = [System.Drawing.Color]::DimGray
-    $chkEXMailboxReport.Location  = New-Object System.Drawing.Point(102, 218)
+    $chkEXMailboxReport.Location  = New-Object System.Drawing.Point(102, 248)
     $chkEXMailboxReport.AutoSize  = $true
     $chkEXMailboxReport.Checked   = $true
     $form.Controls.Add($chkEXMailboxReport)
@@ -9819,7 +9855,7 @@ function Show-FrankensteinDiscovery {
     $chkEXVDirs           = New-Object System.Windows.Forms.CheckBox
     $chkEXVDirs.Text      = 'Virtual Directories'
     $chkEXVDirs.ForeColor = [System.Drawing.Color]::DimGray
-    $chkEXVDirs.Location  = New-Object System.Drawing.Point(248, 218)
+    $chkEXVDirs.Location  = New-Object System.Drawing.Point(248, 248)
     $chkEXVDirs.AutoSize  = $true
     $chkEXVDirs.Visible   = $false
     $form.Controls.Add($chkEXVDirs)
@@ -9827,26 +9863,26 @@ function Show-FrankensteinDiscovery {
     $chkEXPF           = New-Object System.Windows.Forms.CheckBox
     $chkEXPF.Text      = 'Public Folders'
     $chkEXPF.ForeColor = [System.Drawing.Color]::DimGray
-    $chkEXPF.Location  = New-Object System.Drawing.Point(384, 218)
+    $chkEXPF.Location  = New-Object System.Drawing.Point(384, 248)
     $chkEXPF.AutoSize  = $true
     $chkEXPF.Visible   = $false
     $form.Controls.Add($chkEXPF)
 
     $radEXOnline.Add_CheckedChanged({
         $onPrem = $radEXOnPrem.Checked
-        $lblOnPremFqdn.Visible   = $onPrem
-        $txtOnPremFqdn.Visible   = $onPrem
-        $chkEXRecipCounts.Location = if ($onPrem) { New-Object System.Drawing.Point(102, 218) } else { New-Object System.Drawing.Point(102, 196) }
-        $chkEXDiscovery.Location   = if ($onPrem) { New-Object System.Drawing.Point(248, 218) } else { New-Object System.Drawing.Point(248, 196) }
-        $chkEXMailboxReport.Location = if ($onPrem) { New-Object System.Drawing.Point(102, 240) } else { New-Object System.Drawing.Point(102, 218) }
-        $chkEXVDirs.Visible      = $onPrem
-        $chkEXPF.Visible         = $onPrem
-        $btnEXRun.Size           = if ($onPrem) { New-Object System.Drawing.Size(86, 100) } else { New-Object System.Drawing.Size(86, 78) }
+        $lblOnPremFqdn.Visible       = $onPrem
+        $txtOnPremFqdn.Visible       = $onPrem
+        $chkEXRecipCounts.Location   = if ($onPrem) { New-Object System.Drawing.Point(102, 248) } else { New-Object System.Drawing.Point(102, 226) }
+        $chkEXDiscovery.Location     = if ($onPrem) { New-Object System.Drawing.Point(248, 248) } else { New-Object System.Drawing.Point(248, 226) }
+        $chkEXMailboxReport.Location = if ($onPrem) { New-Object System.Drawing.Point(102, 270) } else { New-Object System.Drawing.Point(102, 248) }
+        $chkEXVDirs.Visible          = $onPrem
+        $chkEXPF.Visible             = $onPrem
+        $btnEXRun.Size               = if ($onPrem) { New-Object System.Drawing.Size(86, 100) } else { New-Object System.Drawing.Size(86, 78) }
     })
 
     $sepExch           = New-Object System.Windows.Forms.Panel
     $sepExch.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
-    $sepExch.Location  = New-Object System.Drawing.Point(16, 258)
+    $sepExch.Location  = New-Object System.Drawing.Point(16, 288)
     $sepExch.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepExch)
 
@@ -9855,14 +9891,14 @@ function Show-FrankensteinDiscovery {
     $lblEntTitle.Text      = 'Entra Discovery'
     $lblEntTitle.ForeColor = [System.Drawing.Color]::Silver
     $lblEntTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $lblEntTitle.Location  = New-Object System.Drawing.Point(16, 264)
+    $lblEntTitle.Location  = New-Object System.Drawing.Point(16, 294)
     $lblEntTitle.Size      = New-Object System.Drawing.Size(200, 18)
     $form.Controls.Add($lblEntTitle)
 
     $lblEntDesc           = New-Object System.Windows.Forms.Label
     $lblEntDesc.Text      = 'Uses M365 UPN from Connections above'
     $lblEntDesc.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
-    $lblEntDesc.Location  = New-Object System.Drawing.Point(16, 282)
+    $lblEntDesc.Location  = New-Object System.Drawing.Point(16, 312)
     $lblEntDesc.Size      = New-Object System.Drawing.Size(434, 16)
     $form.Controls.Add($lblEntDesc)
 
@@ -9872,13 +9908,13 @@ function Show-FrankensteinDiscovery {
     $btnEntRun.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $btnEntRun.ForeColor                  = [System.Drawing.Color]::CornflowerBlue
     $btnEntRun.FlatAppearance.BorderColor = [System.Drawing.Color]::CornflowerBlue
-    $btnEntRun.Location                   = New-Object System.Drawing.Point(458, 262)
+    $btnEntRun.Location                   = New-Object System.Drawing.Point(458, 292)
     $btnEntRun.Size                       = New-Object System.Drawing.Size(86, 38)
     $form.Controls.Add($btnEntRun)
 
     $sepEntra           = New-Object System.Windows.Forms.Panel
     $sepEntra.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
-    $sepEntra.Location  = New-Object System.Drawing.Point(16, 308)
+    $sepEntra.Location  = New-Object System.Drawing.Point(16, 338)
     $sepEntra.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepEntra)
 
@@ -9887,14 +9923,14 @@ function Show-FrankensteinDiscovery {
     $lblGSTitle.Text      = 'G Suite Discovery'
     $lblGSTitle.ForeColor = [System.Drawing.Color]::Silver
     $lblGSTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $lblGSTitle.Location  = New-Object System.Drawing.Point(16, 314)
+    $lblGSTitle.Location  = New-Object System.Drawing.Point(16, 344)
     $lblGSTitle.Size      = New-Object System.Drawing.Size(200, 18)
     $form.Controls.Add($lblGSTitle)
 
     $lblGSDesc           = New-Object System.Windows.Forms.Label
     $lblGSDesc.Text      = 'Uses G Suite Config from Connections above — requires PSGSuite module'
     $lblGSDesc.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
-    $lblGSDesc.Location  = New-Object System.Drawing.Point(16, 332)
+    $lblGSDesc.Location  = New-Object System.Drawing.Point(16, 362)
     $lblGSDesc.Size      = New-Object System.Drawing.Size(434, 16)
     $form.Controls.Add($lblGSDesc)
 
@@ -9904,13 +9940,13 @@ function Show-FrankensteinDiscovery {
     $btnGSRun.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $btnGSRun.ForeColor                  = [System.Drawing.Color]::CornflowerBlue
     $btnGSRun.FlatAppearance.BorderColor = [System.Drawing.Color]::CornflowerBlue
-    $btnGSRun.Location                   = New-Object System.Drawing.Point(458, 312)
+    $btnGSRun.Location                   = New-Object System.Drawing.Point(458, 342)
     $btnGSRun.Size                       = New-Object System.Drawing.Size(86, 38)
     $form.Controls.Add($btnGSRun)
 
     $sepFoot           = New-Object System.Windows.Forms.Panel
     $sepFoot.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepFoot.Location  = New-Object System.Drawing.Point(16, 360)
+    $sepFoot.Location  = New-Object System.Drawing.Point(16, 390)
     $sepFoot.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepFoot)
 
@@ -9920,12 +9956,12 @@ function Show-FrankensteinDiscovery {
     $btnClose.BackColor                  = [System.Drawing.Color]::FromArgb(55, 55, 55)
     $btnClose.ForeColor                  = [System.Drawing.Color]::Silver
     $btnClose.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-    $btnClose.Location                   = New-Object System.Drawing.Point(458, 366)
+    $btnClose.Location                   = New-Object System.Drawing.Point(458, 396)
     $btnClose.Size                       = New-Object System.Drawing.Size(86, 26)
     $form.Controls.Add($btnClose)
     $btnClose.Add_Click({ $form.Close() })
 
-    $form.ClientSize = New-Object System.Drawing.Size(560, 400)
+    $form.ClientSize = New-Object System.Drawing.Size(560, 430)
 
     # ── Launch helpers ────────────────────────────────────────────────────────
     $launchDiscovery = {
@@ -9938,6 +9974,39 @@ function Show-FrankensteinDiscovery {
         $full = ($preamble + $commands) -join '; '
         Start-Process powershell.exe -ArgumentList '-NoExit', '-Command', $full
     }
+
+    $btnConnM365.Add_Click({
+        $upn = $txtM365Upn.Text.Trim()
+        if (-not $upn) {
+            [System.Windows.Forms.MessageBox]::Show('Enter an M365 UPN first.', 'Connect', 'OK', 'Warning') | Out-Null; return
+        }
+        $lblM365Status.Text      = 'Connecting...'
+        $lblM365Status.ForeColor = [System.Drawing.Color]::DarkGoldenrod
+        $form.Refresh()
+        try {
+            Connect-ExchangeOnline -UserPrincipalName $upn -ShowBanner:$false -ErrorAction Stop
+            $lblM365Status.Text      = 'Connected'
+            $lblM365Status.ForeColor = [System.Drawing.Color]::LimeGreen
+        } catch {
+            $lblM365Status.Text      = 'Failed'
+            $lblM365Status.ForeColor = [System.Drawing.Color]::Tomato
+        }
+    })
+
+    $btnConnGS.Add_Click({
+        $cfg = $txtGSConfig.Text.Trim()
+        if (-not $cfg) {
+            [System.Windows.Forms.MessageBox]::Show('Enter a PSGSuite config name first.', 'Set Config', 'OK', 'Warning') | Out-Null; return
+        }
+        try {
+            Set-PSGSuiteConfig -ConfigName $cfg -ErrorAction Stop
+            $lblGSStatus.Text      = 'Config set'
+            $lblGSStatus.ForeColor = [System.Drawing.Color]::LimeGreen
+        } catch {
+            $lblGSStatus.Text      = 'Failed'
+            $lblGSStatus.ForeColor = [System.Drawing.Color]::Tomato
+        }
+    })
 
     $btnEXRun.Add_Click({
         $upn      = $txtM365Upn.Text.Trim()

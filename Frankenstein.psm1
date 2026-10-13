@@ -9649,7 +9649,6 @@ function Show-FrankensteinDiscovery {
     $form.MaximizeBox     = $false
     $form.StartPosition   = 'CenterScreen'
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor       = [System.Drawing.Color]::White
     $form.Font            = New-Object System.Drawing.Font('Segoe UI', 9)
 
     $lblTitle           = New-Object System.Windows.Forms.Label

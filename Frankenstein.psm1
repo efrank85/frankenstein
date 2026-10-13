@@ -9804,7 +9804,7 @@ function Show-FrankensteinDiscovery {
     $btnEXRun.ForeColor                  = [System.Drawing.Color]::CornflowerBlue
     $btnEXRun.FlatAppearance.BorderColor = [System.Drawing.Color]::CornflowerBlue
     $btnEXRun.Location                   = New-Object System.Drawing.Point(458, 202)
-    $btnEXRun.Size                       = New-Object System.Drawing.Size(86, 78)
+    $btnEXRun.Size                       = New-Object System.Drawing.Size(86, 68)
     $form.Controls.Add($btnEXRun)
 
     $chkEXRecipCounts           = New-Object System.Windows.Forms.CheckBox
@@ -9834,7 +9834,7 @@ function Show-FrankensteinDiscovery {
     $chkEXVDirs           = New-Object System.Windows.Forms.CheckBox
     $chkEXVDirs.Text      = 'Virtual Directories'
     $chkEXVDirs.ForeColor = [System.Drawing.Color]::DimGray
-    $chkEXVDirs.Location  = New-Object System.Drawing.Point(248, 248)
+    $chkEXVDirs.Location  = New-Object System.Drawing.Point(102, 290)
     $chkEXVDirs.AutoSize  = $true
     $chkEXVDirs.Visible   = $false
     $form.Controls.Add($chkEXVDirs)
@@ -9842,21 +9842,55 @@ function Show-FrankensteinDiscovery {
     $chkEXPF           = New-Object System.Windows.Forms.CheckBox
     $chkEXPF.Text      = 'Public Folders'
     $chkEXPF.ForeColor = [System.Drawing.Color]::DimGray
-    $chkEXPF.Location  = New-Object System.Drawing.Point(384, 248)
+    $chkEXPF.Location  = New-Object System.Drawing.Point(248, 290)
     $chkEXPF.AutoSize  = $true
     $chkEXPF.Visible   = $false
     $form.Controls.Add($chkEXPF)
 
     $radEXOnline.Add_CheckedChanged({
-        $onPrem = $radEXOnPrem.Checked
-        $lblOnPremFqdn.Visible       = $onPrem
-        $txtOnPremFqdn.Visible       = $onPrem
-        $chkEXRecipCounts.Location   = if ($onPrem) { New-Object System.Drawing.Point(102, 248) } else { New-Object System.Drawing.Point(102, 226) }
-        $chkEXDiscovery.Location     = if ($onPrem) { New-Object System.Drawing.Point(248, 248) } else { New-Object System.Drawing.Point(248, 226) }
-        $chkEXMailboxReport.Location = if ($onPrem) { New-Object System.Drawing.Point(102, 270) } else { New-Object System.Drawing.Point(102, 248) }
-        $chkEXVDirs.Visible          = $onPrem
-        $chkEXPF.Visible             = $onPrem
-        $btnEXRun.Size               = if ($onPrem) { New-Object System.Drawing.Size(86, 100) } else { New-Object System.Drawing.Size(86, 78) }
+        $onPrem = -not $radEXOnline.Checked
+        $lblOnPremFqdn.Visible = $onPrem
+        $txtOnPremFqdn.Visible = $onPrem
+
+        if ($onPrem) {
+            $chkEXRecipCounts.Location   = New-Object System.Drawing.Point(102, 250)
+            $chkEXDiscovery.Location     = New-Object System.Drawing.Point(248, 250)
+            $chkEXMailboxReport.Location = New-Object System.Drawing.Point(102, 270)
+            $chkEXVDirs.Location         = New-Object System.Drawing.Point(102, 290)
+            $chkEXPF.Location            = New-Object System.Drawing.Point(248, 290)
+            $chkEXVDirs.Visible          = $true
+            $chkEXPF.Visible             = $true
+            $btnEXRun.Size               = New-Object System.Drawing.Size(86, 110)
+            $sepExch.Location            = New-Object System.Drawing.Point(16, 332)
+            $lblEntTitle.Location        = New-Object System.Drawing.Point(16, 338)
+            $lblEntDesc.Location         = New-Object System.Drawing.Point(16, 356)
+            $btnEntRun.Location          = New-Object System.Drawing.Point(458, 336)
+            $sepEntra.Location           = New-Object System.Drawing.Point(16, 382)
+            $lblGSTitle.Location         = New-Object System.Drawing.Point(16, 388)
+            $lblGSDesc.Location          = New-Object System.Drawing.Point(16, 406)
+            $btnGSRun.Location           = New-Object System.Drawing.Point(458, 386)
+            $sepFoot.Location            = New-Object System.Drawing.Point(16, 434)
+            $btnClose.Location           = New-Object System.Drawing.Point(458, 440)
+            $form.ClientSize             = New-Object System.Drawing.Size(560, 474)
+        } else {
+            $chkEXRecipCounts.Location   = New-Object System.Drawing.Point(102, 226)
+            $chkEXDiscovery.Location     = New-Object System.Drawing.Point(248, 226)
+            $chkEXMailboxReport.Location = New-Object System.Drawing.Point(102, 248)
+            $chkEXVDirs.Visible          = $false
+            $chkEXPF.Visible             = $false
+            $btnEXRun.Size               = New-Object System.Drawing.Size(86, 68)
+            $sepExch.Location            = New-Object System.Drawing.Point(16, 288)
+            $lblEntTitle.Location        = New-Object System.Drawing.Point(16, 294)
+            $lblEntDesc.Location         = New-Object System.Drawing.Point(16, 312)
+            $btnEntRun.Location          = New-Object System.Drawing.Point(458, 292)
+            $sepEntra.Location           = New-Object System.Drawing.Point(16, 338)
+            $lblGSTitle.Location         = New-Object System.Drawing.Point(16, 344)
+            $lblGSDesc.Location          = New-Object System.Drawing.Point(16, 362)
+            $btnGSRun.Location           = New-Object System.Drawing.Point(458, 342)
+            $sepFoot.Location            = New-Object System.Drawing.Point(16, 390)
+            $btnClose.Location           = New-Object System.Drawing.Point(458, 396)
+            $form.ClientSize             = New-Object System.Drawing.Size(560, 430)
+        }
     })
 
     $sepExch           = New-Object System.Windows.Forms.Panel

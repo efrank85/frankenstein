@@ -9945,7 +9945,7 @@ function Show-FrankensteinPrereqs {
     $form.StartPosition   = 'CenterScreen'
     $form.BackColor       = [System.Drawing.Color]::FromArgb(28, 28, 28)
     $form.Font            = New-Object System.Drawing.Font('Segoe UI', 9)
-    $form.ClientSize      = New-Object System.Drawing.Size(560, 760)
+    $form.ClientSize      = New-Object System.Drawing.Size(560, 640)
 
     $lblTitle           = New-Object System.Windows.Forms.Label
     $lblTitle.Text      = 'Prerequisites'
@@ -9968,18 +9968,11 @@ function Show-FrankensteinPrereqs {
     $sepTop.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepTop)
 
-    #region ── TabControl ────────────────────────────────────────────────────
-    $tabCtrl          = New-Object System.Windows.Forms.TabControl
-    $tabCtrl.Location = New-Object System.Drawing.Point(16, 374)
-    $tabCtrl.Size     = New-Object System.Drawing.Size(528, 350)
-    $tabCtrl.Font     = New-Object System.Drawing.Font('Segoe UI', 9)
-    $form.Controls.Add($tabCtrl)
-
-    # ── Tab 1: Log & Permissions ──────────────────────────────────────────────
-    $tabMods           = New-Object System.Windows.Forms.TabPage
-    $tabMods.Text      = 'Log && Permissions'
-    $tabMods.BackColor = [System.Drawing.Color]::FromArgb(28, 28, 28)
-    $tabCtrl.TabPages.Add($tabMods)
+    $sepLog           = New-Object System.Windows.Forms.Panel
+    $sepLog.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepLog.Location  = New-Object System.Drawing.Point(16, 372)
+    $sepLog.Size      = New-Object System.Drawing.Size(528, 1)
+    $form.Controls.Add($sepLog)
 
     $log             = New-Object System.Windows.Forms.RichTextBox
     $log.BackColor   = [System.Drawing.Color]::FromArgb(18, 18, 18)
@@ -9987,24 +9980,25 @@ function Show-FrankensteinPrereqs {
     $log.Font        = New-Object System.Drawing.Font('Consolas', 8)
     $log.ReadOnly    = $true
     $log.BorderStyle = 'None'
-    $log.Location    = New-Object System.Drawing.Point(4, 4)
-    $log.Size        = New-Object System.Drawing.Size(516, 62)
+    $log.Location    = New-Object System.Drawing.Point(16, 378)
+    $log.Size        = New-Object System.Drawing.Size(528, 60)
     $log.ScrollBars  = 'Vertical'
-    $tabMods.Controls.Add($log)
+    $form.Controls.Add($log)
 
-    $sepPermTab           = New-Object System.Windows.Forms.Panel
-    $sepPermTab.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepPermTab.Location  = New-Object System.Drawing.Point(4, 70)
-    $sepPermTab.Size      = New-Object System.Drawing.Size(516, 1)
-    $tabMods.Controls.Add($sepPermTab)
+    # ── Required M365 Permissions ────────────────────────────────────────────
+    $sepPerm           = New-Object System.Windows.Forms.Panel
+    $sepPerm.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepPerm.Location  = New-Object System.Drawing.Point(16, 444)
+    $sepPerm.Size      = New-Object System.Drawing.Size(528, 1)
+    $form.Controls.Add($sepPerm)
 
     $lblPermTitle           = New-Object System.Windows.Forms.Label
     $lblPermTitle.Text      = 'Required M365 Permissions'
     $lblPermTitle.ForeColor = [System.Drawing.Color]::Silver
     $lblPermTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $lblPermTitle.Location  = New-Object System.Drawing.Point(4, 76)
-    $lblPermTitle.Size      = New-Object System.Drawing.Size(516, 18)
-    $tabMods.Controls.Add($lblPermTitle)
+    $lblPermTitle.Location  = New-Object System.Drawing.Point(16, 450)
+    $lblPermTitle.Size      = New-Object System.Drawing.Size(528, 18)
+    $form.Controls.Add($lblPermTitle)
 
     $rtbPerms             = New-Object System.Windows.Forms.RichTextBox
     $rtbPerms.BackColor   = [System.Drawing.Color]::FromArgb(28, 28, 28)
@@ -10012,10 +10006,10 @@ function Show-FrankensteinPrereqs {
     $rtbPerms.Font        = New-Object System.Drawing.Font('Segoe UI', 8.5)
     $rtbPerms.ReadOnly    = $true
     $rtbPerms.BorderStyle = 'None'
-    $rtbPerms.Location    = New-Object System.Drawing.Point(4, 98)
-    $rtbPerms.Size        = New-Object System.Drawing.Size(516, 214)
+    $rtbPerms.Location    = New-Object System.Drawing.Point(16, 470)
+    $rtbPerms.Size        = New-Object System.Drawing.Size(528, 124)
     $rtbPerms.ScrollBars  = 'Vertical'
-    $tabMods.Controls.Add($rtbPerms)
+    $form.Controls.Add($rtbPerms)
 
     $permLines = @(
         @{ Text = 'Group Migrator';       Bold = $true;  Color = [System.Drawing.Color]::Silver         }

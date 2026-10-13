@@ -9956,14 +9956,15 @@ function Show-FrankensteinDiscovery {
 
     $btnConnM365.Add_Click({
         $upn = $txtM365Upn.Text.Trim()
-        if (-not $upn) {
-            [System.Windows.Forms.MessageBox]::Show('Enter an M365 UPN first.', 'Connect', 'OK', 'Warning') | Out-Null; return
-        }
         $lblM365Status.Text      = 'Connecting...'
         $lblM365Status.ForeColor = [System.Drawing.Color]::DarkGoldenrod
         $form.Refresh()
         try {
-            Connect-ExchangeOnline -UserPrincipalName $upn -ShowBanner:$false -ErrorAction Stop
+            if ($upn) {
+                Connect-ExchangeOnline -UserPrincipalName $upn -ShowBanner:$false -ErrorAction Stop
+            } else {
+                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            }
             $lblM365Status.Text      = 'Connected'
             $lblM365Status.ForeColor = [System.Drawing.Color]::LimeGreen
         } catch {

@@ -10930,7 +10930,7 @@ function Invoke-FrankensteinMigrator {
         [pscustomobject]@{ Key='mailbox';    Label='Mailbox Migrator';   Color=[System.Drawing.Color]::MediumSeaGreen  }
         [pscustomobject]@{ Key='domain';     Label='Domain Migrator';    Color=[System.Drawing.Color]::Tomato          }
         [pscustomobject]@{ Key='onedrive';   Label='OneDrive Migrator';  Color=[System.Drawing.Color]::SteelBlue       }
-        [pscustomobject]@{ Key='donotpress'; Label='DO NOT PRESS';       Color=[System.Drawing.Color]::Red             }
+        [pscustomobject]@{ Key='docs';        Label='Documentation';      Color=[System.Drawing.Color]::DarkGoldenrod  }
     )
 
     $rows = @{}
@@ -11018,16 +11018,10 @@ function Invoke-FrankensteinMigrator {
     $rows.mailbox.Btn.Add_Click({    & $launch 'Mailbox Migrator'     { Invoke-FrankensteinMailboxMigrator }         })
     $rows.domain.Btn.Add_Click({     & $launch 'Domain Migrator'      { Invoke-FrankensteinDomainMigrator }          })
     $rows.onedrive.Btn.Add_Click({   & $launch 'OneDrive Migrator'    { Invoke-FrankensteinOneDriveMigrator }        })
-    $rows.donotpress.Btn.Add_Click({
-        $url = 'https://youtu.be/Aq5WXmQQooo?si=EcvGEAE6RmWDsznI'
-        $browsers = @(
-            @{ Path = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'; Args = "--new-window `"$url`"" }
-            @{ Path = 'C:\Program Files\Google\Chrome\Application\chrome.exe';        Args = "--new-window `"$url`"" }
-            @{ Path = 'C:\Program Files\Mozilla Firefox\firefox.exe';                 Args = "-new-window `"$url`""  }
-        )
-        $b = $browsers | Where-Object { Test-Path $_.Path } | Select-Object -First 1
-        if ($b) { 1..5 | ForEach-Object { Start-Process $b.Path $b.Args } }
-        else     { 1..5 | ForEach-Object { Start-Process $url } }
+    $rows.docs.Btn.Add_Click({
+        $doc = 'C:\Temp\FrankensteinDocs\Frankenstein Migrator User Guide.docx'
+        if (Test-Path $doc) { Start-Process $doc }
+        else { [System.Windows.Forms.MessageBox]::Show("Documentation file not found at:`n$doc", 'Documentation', 'OK', 'Warning') | Out-Null }
     })
     #endregion
 
@@ -11038,7 +11032,7 @@ function Invoke-FrankensteinMigrator {
         $rows.mailbox.Lbl.Text    = 'Migrate mailboxes via AvePoint Fly'
         $rows.domain.Lbl.Text     = 'Remove a custom domain from an M365 tenant'
         $rows.onedrive.Lbl.Text   = 'Migrate OneDrive for Business content via AvePoint Fly'
-        $rows.donotpress.Lbl.Text = 'Seriously. Do not.'
+        $rows.docs.Lbl.Text       = 'Frankenstein Migrator User Guide'
 
         $checks  = Get-FrankensteinPrereqs
         $missing = @($checks | Where-Object { -not $_.OK })

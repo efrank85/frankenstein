@@ -1219,132 +1219,234 @@ function Get-FrankensteinExchangeDiscovery {
 }
 
 function Get-FrankensteinGSuiteDiscovery {
+    <#
+    .SYNOPSIS
+        Comprehensive G Suite / Google Workspace discovery. Exports all major objects to CSV.
+    .DESCRIPTION
+        Collects: domains, users, groups, group members, group settings, calendar resources,
+        organizational units, licensing, and per-user mailbox settings (delegates, send-as,
+        auto-forward). Always exports to CSV. Per-user mailbox settings require one API call
+        per user and may be slow on large tenants.
+    .NOTES
+        Requires PSGSuite module and an active G Suite config (Set-PSGSuiteConfig -ConfigName).
+    #>
     [CmdletBinding()]
     Param (
-        [Switch]$CSV,
-        [Switch]$IncludeGroupSettings,
-        [Switch]$IncludeGroupMembership,
-        [Switch]$IncludeDelegates,
-        [Switch]$IncludeSendAsSettings,
-        [Switch]$IncludeAutoForwardSettings
+        [Switch]$SkipMailboxSettings  # Skip per-user delegates/send-as/auto-forward (faster for large tenants)
     )
 
-    $DateStamp = (Get-Date).ToString('MMddyy')
-    $OutputDir = ".\GSuiteDiscovery_$DateStamp"
+    $DateStamp = (Get-Date).ToString('yyMMdd_HHmm')
+    $OutputDir = ".\Frankenstein_GSuite_Discovery_$DateStamp"
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
     Push-Location $OutputDir
     Start-Transcript ".\GSuiteDiscoveryTranscript_$DateStamp.txt"
 
+    #region ── Collect base objects ──────────────────────────────────────────
     Get-Linebreak
-    Write-Host "Building Variables..." -ForegroundColor Cyan
-    $GSUser                   = Get-GSUser -Filter *
-    $GSGroup                  = Get-GSGroup
-    $GSDomain                 = Get-GSDomain
-    $GSResource               = Get-GSResource -Filter *
-    $GSOrganizationalUnitList = Get-GSOrganizationalUnitList
-    $GSUserLicenseInfo        = Get-GSUserLicenseInfo
+    Write-Host "Collecting base objects..." -ForegroundColor Cyan
 
-    Write-Host "$($GSUser.Count) Total Users"
-    Write-Host "$($GSGroup.Count) Total Groups"
-    Write-Host "$($GSDomain.Count) Total Domains"
-    Write-Host "$($GSResource.Count) Total Resources"
-    Write-Host "$($GSOrganizationalUnitList.Count) Total Org Units"
-    Write-Host "$($GSUserLicenseInfo.Count) Licenses applied across $($GSUser.Count) users"
+    Write-Host "  Users..." -ForegroundColor Gray
+    $GSUser = @(Get-GSUser -Filter * -ErrorAction Stop)
 
+    Write-Host "  Groups..." -ForegroundColor Gray
+    $GSGroup = @(Get-GSGroup -ErrorAction SilentlyContinue)
+
+    Write-Host "  Domains..." -ForegroundColor Gray
+    $GSDomain = @(Get-GSDomain -ErrorAction SilentlyContinue)
+
+    Write-Host "  Calendar Resources..." -ForegroundColor Gray
+    $GSResource = @(Get-GSResource -Filter * -ErrorAction SilentlyContinue)
+
+    Write-Host "  Organizational Units..." -ForegroundColor Gray
+    $GSOUs = @(Get-GSOrganizationalUnitList -ErrorAction SilentlyContinue)
+
+    Write-Host "  Licensing..." -ForegroundColor Gray
+    $GSLicense = @(Get-GSUserLicenseInfo -ErrorAction SilentlyContinue)
+    #endregion
+
+    #region ── Summary ──────────────────────────────────────────────────────
     Get-Linebreak
-    if ($CSV) {
-        Write-Host "Creating GSUser Report..." -ForegroundColor Cyan
-        $GSUser | Select-Object User, PrimaryEmail, AgreedToTerms,
-            @{Name="Aliases";             Expression={$_.Aliases -join ";"}},
-            Archived, ChangePasswordAtNextLogin, CreationTime, DeletionTime, Id,
-            IncludeInGlobalAddressList, IpWhitelisted, IsAdmin, IsDelegate, IsEnforced,
-            IsEnrolledIn2Sv, IsMailboxSetup, LastLoginTime,
-            @{Name="NonEditableAliases";  Expression={$_.NonEditableAliases -join ";"}},
-            OrgUnitPath,
-            @{Name="Organizations";       Expression={$_.Organizations -join ";"}},
-            @{Name="Phones";              Expression={$_.Phones -join ";"}},
-            RecoveryEmail, Suspended, SuspensionReason |
-            Export-Csv ".\GSUsers_$DateStamp.csv" -NoTypeInformation
+    Write-Host "G Suite Discovery Summary" -ForegroundColor Cyan
+    Write-Host ("{0,-30} : {1}" -f 'Total Users',             $GSUser.Count)
+    Write-Host ("{0,-30} : {1}" -f 'Active Users',            ($GSUser | Where-Object { -not $_.Suspended }).Count)
+    Write-Host ("{0,-30} : {1}" -f 'Suspended Users',         ($GSUser | Where-Object { $_.Suspended }).Count)
+    Write-Host ("{0,-30} : {1}" -f 'Admin Users',             ($GSUser | Where-Object { $_.IsAdmin }).Count)
+    Write-Host ("{0,-30} : {1}" -f '2FA Enrolled',            ($GSUser | Where-Object { $_.IsEnrolledIn2Sv }).Count)
+    Write-Host ("{0,-30} : {1}" -f 'Groups',                  $GSGroup.Count)
+    Write-Host ("{0,-30} : {1}" -f 'Domains',                 $GSDomain.Count)
+    Write-Host ("{0,-30} : {1}" -f 'Calendar Resources',      $GSResource.Count)
+    Write-Host ("{0,-30} : {1}" -f 'Organizational Units',    $GSOUs.Count)
+    Write-Host ("{0,-30} : {1}" -f 'License Assignments',     $GSLicense.Count)
+    #endregion
 
-        $GSUser | Get-GSUserAlias |
-            Select-Object AliasValue, PrimaryEmail |
-            Export-Csv ".\GSUserAlias_$DateStamp.csv" -NoTypeInformation
+    #region ── Domains ───────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Exporting Domains..." -ForegroundColor Cyan
+    $GSDomain | Select-Object DomainName, IsPrimary, Verified, CreationTime |
+        Export-Csv ".\GSDomains_$DateStamp.csv" -NoTypeInformation
+    Write-Host "  $($GSDomain.Count) domain(s) exported."
+    #endregion
+
+    #region ── Users ─────────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Exporting Users..." -ForegroundColor Cyan
+    $GSUser | Select-Object PrimaryEmail,
+        @{N='FullName';       E={ $_.Name.FullName }},
+        @{N='FirstName';      E={ $_.Name.GivenName }},
+        @{N='LastName';       E={ $_.Name.FamilyName }},
+        OrgUnitPath,
+        Suspended,
+        SuspensionReason,
+        IsAdmin,
+        IsDelegatedAdmin,
+        IsEnrolledIn2Sv,
+        IsMailboxSetup,
+        IncludeInGlobalAddressList,
+        ChangePasswordAtNextLogin,
+        CreationTime,
+        LastLoginTime,
+        RecoveryEmail,
+        @{N='Aliases';        E={ ($_.Aliases       | Where-Object {$_}) -join ';' }},
+        @{N='NonEditAliases'; E={ ($_.NonEditableAliases | Where-Object {$_}) -join ';' }},
+        @{N='Department';     E={ ($_.Organizations  | Select-Object -First 1).Department }},
+        @{N='Title';          E={ ($_.Organizations  | Select-Object -First 1).Title }},
+        @{N='Phone';          E={ ($_.Phones         | Select-Object -First 1).Value }},
+        Id |
+        Export-Csv ".\GSUsers_$DateStamp.csv" -NoTypeInformation
+    Write-Host "  $($GSUser.Count) user(s) exported."
+    #endregion
+
+    #region ── Groups ────────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Exporting Groups..." -ForegroundColor Cyan
+    $GSGroup | Select-Object Email, Name, Description,
+        @{N='MemberCount'; E={ $_.DirectMembersCount }},
+        AdminCreated, Id |
+        Export-Csv ".\GSGroups_$DateStamp.csv" -NoTypeInformation
+    Write-Host "  $($GSGroup.Count) group(s) exported."
+
+    Write-Host "Exporting Group Membership..." -ForegroundColor Cyan
+    $memberCount = 0
+    $allMembers = foreach ($grp in $GSGroup) {
+        $members = @(Get-GSGroupMember -Identity $grp.Email -ErrorAction SilentlyContinue)
+        $memberCount += $members.Count
+        $members | Select-Object @{N='GroupEmail'; E={ $grp.Email }},
+            @{N='GroupName';  E={ $grp.Name }},
+            Email, Role, Type, Status, Id
     }
+    $allMembers | Export-Csv ".\GSGroupMembers_$DateStamp.csv" -NoTypeInformation
+    Write-Host "  $memberCount member record(s) across $($GSGroup.Count) group(s) exported."
 
-    if ($IncludeDelegates) {
+    Write-Host "Exporting Group Settings..." -ForegroundColor Cyan
+    $groupSettings = foreach ($grp in $GSGroup) {
+        Get-GSGroupSettings -Identity $grp.Email -ErrorAction SilentlyContinue |
+            Select-Object Email, Name, WhoCanJoin, WhoCanPostMessage, WhoCanViewMembership,
+                WhoCanViewGroup, IsArchived, ArchiveOnly, MembersCanPostAsTheGroup,
+                AllowExternalMembers, AllowWebPosting, SpamModerationLevel,
+                ReplyTo, SendMessageDenyNotification, MembersCanPostAsTheGroup,
+                EnableCollaborativeInbox, FavoriteRepliesOnTop, AllowGoogleCommunication,
+                MessageModerationLevel, WhoCanContactOwner, WhoCanDiscoverGroup
+    }
+    $groupSettings | Export-Csv ".\GSGroupSettings_$DateStamp.csv" -NoTypeInformation
+    Write-Host "  Group settings exported for $($GSGroup.Count) group(s)."
+    #endregion
+
+    #region ── Calendar Resources ─────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Exporting Calendar Resources..." -ForegroundColor Cyan
+    $GSResource | Select-Object ResourceId, ResourceName, ResourceEmail,
+        ResourceType, ResourceDescription, Capacity,
+        BuildingId, FloorName, FloorSection,
+        UserVisibleDescription, GeneratedResourceName |
+        Export-Csv ".\GSCalendarResources_$DateStamp.csv" -NoTypeInformation
+    Write-Host "  $($GSResource.Count) resource(s) exported."
+    #endregion
+
+    #region ── Organizational Units ──────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Exporting Organizational Units..." -ForegroundColor Cyan
+    $GSOUs | Select-Object Name, OrgUnitPath, Description,
+        ParentOrgUnitPath, BlockInheritance, OrgUnitId, ParentOrgUnitId |
+        Export-Csv ".\GSOrgUnits_$DateStamp.csv" -NoTypeInformation
+    Write-Host "  $($GSOUs.Count) org unit(s) exported."
+    #endregion
+
+    #region ── Licensing ─────────────────────────────────────────────────────
+    Get-Linebreak
+    Write-Host "Exporting License Assignments..." -ForegroundColor Cyan
+    $GSLicense | Select-Object UserId, ProductId, ProductName, SkuId, SkuName |
+        Export-Csv ".\GSLicenses_$DateStamp.csv" -NoTypeInformation
+
+    $licenseSummary = $GSLicense | Group-Object ProductName | Sort-Object Count -Descending
+    Write-Host "  License Summary:"
+    foreach ($ls in $licenseSummary) {
+        Write-Host ("    {0,-50} : {1}" -f $ls.Name, $ls.Count)
+    }
+    #endregion
+
+    #region ── Per-User Mailbox Settings ─────────────────────────────────────
+    if (-not $SkipMailboxSettings) {
         Get-Linebreak
-        Write-Host "Processing GSUser Delegates..." -ForegroundColor Cyan
-        $WarningPreference = "SilentlyContinue"
-        $DelegationList = foreach ($User in $GSUser) {
-            $Delegates = Get-GSGmailDelegate -User $User.PrimaryEmail -ErrorAction SilentlyContinue
-            if ($Delegates) {
-                $Delegates | ForEach-Object {
-                    [PSCustomObject]@{
-                        User               = $User.PrimaryEmail
-                        DelegateEmail      = $_.DelegateEmail
-                        VerificationStatus = $_.VerificationStatus
-                    }
+        Write-Host "Collecting per-user mailbox settings ($($GSUser.Count) users)..." -ForegroundColor Cyan
+        Write-Host "  This requires one API call per user per setting type — may take several minutes." -ForegroundColor DarkGoldenrod
+        $WarningPreference = 'SilentlyContinue'
+
+        Write-Host "  Delegates..." -ForegroundColor Gray
+        $delegateRows = foreach ($u in $GSUser) {
+            $delegates = @(Get-GSGmailDelegate -User $u.PrimaryEmail -ErrorAction SilentlyContinue)
+            foreach ($d in $delegates) {
+                [PSCustomObject]@{
+                    UserEmail          = $u.PrimaryEmail
+                    DelegateEmail      = $d.DelegateEmail
+                    VerificationStatus = $d.VerificationStatus
                 }
             }
         }
-        $DelegationList | Export-Csv ".\GSDelegates_$DateStamp.csv" -NoTypeInformation
-        $WarningPreference = "Continue"
-    }
+        $delegateRows | Export-Csv ".\GSMailboxDelegates_$DateStamp.csv" -NoTypeInformation
+        Write-Host "  $($delegateRows.Count) delegate record(s) found."
 
-    if ($IncludeSendAsSettings) {
-        Get-Linebreak
-        Write-Host "Processing GSUser Send As Settings..." -ForegroundColor Cyan
-        $SendAsSettings = foreach ($User in $GSUser) {
-            $SendAs = Get-GSGmailSendAsSettings -User $User.PrimaryEmail
-            if ($SendAs) {
-                $SendAs | ForEach-Object {
-                    [PSCustomObject]@{
-                        User        = $User.PrimaryEmail
-                        SendAsEmail = $_.SendAsEmail
-                        IsDefault   = $_.IsDefault
-                        IsPrimary   = $_.IsPrimary
-                    }
+        Write-Host "  Send-As settings..." -ForegroundColor Gray
+        $sendAsRows = foreach ($u in $GSUser) {
+            $sendAs = @(Get-GSGmailSendAsSettings -User $u.PrimaryEmail -ErrorAction SilentlyContinue)
+            foreach ($s in ($sendAs | Where-Object { -not $_.IsPrimary })) {
+                [PSCustomObject]@{
+                    UserEmail       = $u.PrimaryEmail
+                    SendAsEmail     = $s.SendAsEmail
+                    DisplayName     = $s.DisplayName
+                    IsDefault       = $s.IsDefault
+                    ReplyToAddress  = $s.ReplyToAddress
+                    VerificationStatus = $s.VerificationStatus
                 }
             }
         }
-        $SendAsSettings | Export-Csv ".\GSSendAsSettings_$DateStamp.csv" -NoTypeInformation
-    }
+        $sendAsRows | Export-Csv ".\GSMailboxSendAs_$DateStamp.csv" -NoTypeInformation
+        Write-Host "  $($sendAsRows.Count) non-primary send-as record(s) found."
 
-    if ($IncludeAutoForwardSettings) {
-        Get-Linebreak
-        Write-Host "Collecting Auto Forward Settings..." -ForegroundColor Cyan
-        $GSUser | Get-GSGmailAutoForwardingSettings |
-            Where-Object { $_.Enabled -eq $true } |
-            Select-Object User, Disposition, EmailAddress, Enabled |
-            Export-Csv ".\GSAutoForwardSettings_$DateStamp.csv" -NoTypeInformation
-    }
+        Write-Host "  Auto-forward settings..." -ForegroundColor Gray
+        $autoFwdRows = foreach ($u in $GSUser) {
+            $fwd = Get-GSGmailAutoForwardingSettings -User $u.PrimaryEmail -ErrorAction SilentlyContinue
+            if ($fwd -and $fwd.Enabled) {
+                [PSCustomObject]@{
+                    UserEmail    = $u.PrimaryEmail
+                    ForwardTo    = $fwd.EmailAddress
+                    Disposition  = $fwd.Disposition
+                    Enabled      = $fwd.Enabled
+                }
+            }
+        }
+        $autoFwdRows | Export-Csv ".\GSMailboxAutoForward_$DateStamp.csv" -NoTypeInformation
+        Write-Host "  $($autoFwdRows.Count) user(s) with auto-forward enabled."
 
-    if ($IncludeGroupSettings) {
-        Get-Linebreak
-        Write-Host "Collecting Group Settings..." -ForegroundColor Cyan
-        $GSGroup | Get-GSGroupSettings |
-            Export-Csv ".\GSGroupSettings_$DateStamp.csv" -NoTypeInformation
+        $WarningPreference = 'Continue'
+    } else {
+        Write-Host "Skipping per-user mailbox settings (-SkipMailboxSettings)." -ForegroundColor DarkGoldenrod
     }
+    #endregion
 
-    if ($IncludeGroupMembership) {
-        Get-Linebreak
-        Write-Host "Collecting Group Membership..." -ForegroundColor Cyan
-        $GSGroup | Get-GSGroupMember |
-            Export-Csv ".\GSGroupMembers_$DateStamp.csv" -NoTypeInformation
-    }
-
-    if ($CSV) {
-        Get-Linebreak
-        Write-Host "Collecting Org Units..." -ForegroundColor Cyan
-        $GSOrganizationalUnitList | Select-Object BlockInheritance, Description, Name,
-            OrgUnitId, OrgUnitPath, ParentOrgUnitId, ParentOrgUnitPath |
-            Export-Csv ".\GSOrganizationalUnitList_$DateStamp.csv" -NoTypeInformation
-
-        Get-Linebreak
-        Write-Host "Collecting User License Information..." -ForegroundColor Cyan
-        $GSUserLicenseInfo | Select-Object UserId, ProductId, ProductName, SkuId, SkuName |
-            Export-Csv ".\GSUserLicenseInfo_$DateStamp.csv" -NoTypeInformation
-    }
+    Get-Linebreak
+    Write-Host "G Suite Discovery complete. Output: $((Get-Location).Path)" -ForegroundColor LimeGreen
+    Write-Host "Files created:" -ForegroundColor Cyan
+    Get-ChildItem -Filter "*.csv" | ForEach-Object { Write-Host "  $($_.Name)" -ForegroundColor DimGray }
 
     Stop-Transcript
     Pop-Location
@@ -9534,11 +9636,7 @@ function Invoke-FrankensteinDomainMigrator {
     $form.Dispose()
 }
 
-# ============================================================
-#  Frankenstein Discovery Tools
-# ============================================================
-
-function Show-FrankensteinDiscovery {
+function Show-FrankensteinDiscovery_DISABLED {
     [CmdletBinding()]
     param()
 
@@ -9847,7 +9945,7 @@ function Show-FrankensteinPrereqs {
     $form.StartPosition   = 'CenterScreen'
     $form.BackColor       = [System.Drawing.Color]::FromArgb(28, 28, 28)
     $form.Font            = New-Object System.Drawing.Font('Segoe UI', 9)
-    $form.ClientSize      = New-Object System.Drawing.Size(560, 640)
+    $form.ClientSize      = New-Object System.Drawing.Size(560, 760)
 
     $lblTitle           = New-Object System.Windows.Forms.Label
     $lblTitle.Text      = 'Prerequisites'
@@ -9870,11 +9968,18 @@ function Show-FrankensteinPrereqs {
     $sepTop.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepTop)
 
-    $sepLog           = New-Object System.Windows.Forms.Panel
-    $sepLog.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepLog.Location  = New-Object System.Drawing.Point(16, 372)
-    $sepLog.Size      = New-Object System.Drawing.Size(528, 1)
-    $form.Controls.Add($sepLog)
+    #region ── TabControl ────────────────────────────────────────────────────
+    $tabCtrl          = New-Object System.Windows.Forms.TabControl
+    $tabCtrl.Location = New-Object System.Drawing.Point(16, 374)
+    $tabCtrl.Size     = New-Object System.Drawing.Size(528, 350)
+    $tabCtrl.Font     = New-Object System.Drawing.Font('Segoe UI', 9)
+    $form.Controls.Add($tabCtrl)
+
+    # ── Tab 1: Log & Permissions ──────────────────────────────────────────────
+    $tabMods           = New-Object System.Windows.Forms.TabPage
+    $tabMods.Text      = 'Log && Permissions'
+    $tabMods.BackColor = [System.Drawing.Color]::FromArgb(28, 28, 28)
+    $tabCtrl.TabPages.Add($tabMods)
 
     $log             = New-Object System.Windows.Forms.RichTextBox
     $log.BackColor   = [System.Drawing.Color]::FromArgb(18, 18, 18)
@@ -9882,25 +9987,24 @@ function Show-FrankensteinPrereqs {
     $log.Font        = New-Object System.Drawing.Font('Consolas', 8)
     $log.ReadOnly    = $true
     $log.BorderStyle = 'None'
-    $log.Location    = New-Object System.Drawing.Point(16, 378)
-    $log.Size        = New-Object System.Drawing.Size(528, 60)
+    $log.Location    = New-Object System.Drawing.Point(4, 4)
+    $log.Size        = New-Object System.Drawing.Size(516, 62)
     $log.ScrollBars  = 'Vertical'
-    $form.Controls.Add($log)
+    $tabMods.Controls.Add($log)
 
-    # ── Required M365 Permissions ────────────────────────────────────────────
-    $sepPerm           = New-Object System.Windows.Forms.Panel
-    $sepPerm.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepPerm.Location  = New-Object System.Drawing.Point(16, 444)
-    $sepPerm.Size      = New-Object System.Drawing.Size(528, 1)
-    $form.Controls.Add($sepPerm)
+    $sepPermTab           = New-Object System.Windows.Forms.Panel
+    $sepPermTab.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+    $sepPermTab.Location  = New-Object System.Drawing.Point(4, 70)
+    $sepPermTab.Size      = New-Object System.Drawing.Size(516, 1)
+    $tabMods.Controls.Add($sepPermTab)
 
     $lblPermTitle           = New-Object System.Windows.Forms.Label
     $lblPermTitle.Text      = 'Required M365 Permissions'
     $lblPermTitle.ForeColor = [System.Drawing.Color]::Silver
     $lblPermTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $lblPermTitle.Location  = New-Object System.Drawing.Point(16, 450)
-    $lblPermTitle.Size      = New-Object System.Drawing.Size(528, 18)
-    $form.Controls.Add($lblPermTitle)
+    $lblPermTitle.Location  = New-Object System.Drawing.Point(4, 76)
+    $lblPermTitle.Size      = New-Object System.Drawing.Size(516, 18)
+    $tabMods.Controls.Add($lblPermTitle)
 
     $rtbPerms             = New-Object System.Windows.Forms.RichTextBox
     $rtbPerms.BackColor   = [System.Drawing.Color]::FromArgb(28, 28, 28)
@@ -9908,10 +10012,10 @@ function Show-FrankensteinPrereqs {
     $rtbPerms.Font        = New-Object System.Drawing.Font('Segoe UI', 8.5)
     $rtbPerms.ReadOnly    = $true
     $rtbPerms.BorderStyle = 'None'
-    $rtbPerms.Location    = New-Object System.Drawing.Point(16, 470)
-    $rtbPerms.Size        = New-Object System.Drawing.Size(528, 124)
+    $rtbPerms.Location    = New-Object System.Drawing.Point(4, 98)
+    $rtbPerms.Size        = New-Object System.Drawing.Size(516, 214)
     $rtbPerms.ScrollBars  = 'Vertical'
-    $form.Controls.Add($rtbPerms)
+    $tabMods.Controls.Add($rtbPerms)
 
     $permLines = @(
         @{ Text = 'Group Migrator';       Bold = $true;  Color = [System.Drawing.Color]::Silver         }
@@ -9939,9 +10043,336 @@ function Show-FrankensteinPrereqs {
         $rtbPerms.AppendText("$($line.Text)`n")
     }
 
+    # ── Tab 2: Discovery ──────────────────────────────────────────────────────
+    $tabDisc           = New-Object System.Windows.Forms.TabPage
+    $tabDisc.Text      = 'Discovery'
+    $tabDisc.BackColor = [System.Drawing.Color]::FromArgb(28, 28, 28)
+    $tabCtrl.TabPages.Add($tabDisc)
+
+    # ── Connections GroupBox ──────────────────────────────────────────────────
+    $grpConn            = New-Object System.Windows.Forms.GroupBox
+    $grpConn.Text       = 'Connections'
+    $grpConn.ForeColor  = [System.Drawing.Color]::DimGray
+    $grpConn.Location   = New-Object System.Drawing.Point(4, 4)
+    $grpConn.Size       = New-Object System.Drawing.Size(516, 68)
+    $grpConn.Font       = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $tabDisc.Controls.Add($grpConn)
+
+    $lblM365Upn           = New-Object System.Windows.Forms.Label
+    $lblM365Upn.Text      = 'M365 UPN:'
+    $lblM365Upn.ForeColor = [System.Drawing.Color]::DimGray
+    $lblM365Upn.Location  = New-Object System.Drawing.Point(8, 18)
+    $lblM365Upn.Size      = New-Object System.Drawing.Size(72, 18)
+    $grpConn.Controls.Add($lblM365Upn)
+
+    $txtM365Upn             = New-Object System.Windows.Forms.TextBox
+    $txtM365Upn.Location    = New-Object System.Drawing.Point(84, 16)
+    $txtM365Upn.Size        = New-Object System.Drawing.Size(248, 22)
+    $txtM365Upn.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
+    $txtM365Upn.ForeColor   = [System.Drawing.Color]::Silver
+    $txtM365Upn.BorderStyle = 'FixedSingle'
+    $grpConn.Controls.Add($txtM365Upn)
+
+    $lblGSConfig           = New-Object System.Windows.Forms.Label
+    $lblGSConfig.Text      = 'G Suite Config:'
+    $lblGSConfig.ForeColor = [System.Drawing.Color]::DimGray
+    $lblGSConfig.Location  = New-Object System.Drawing.Point(8, 42)
+    $lblGSConfig.Size      = New-Object System.Drawing.Size(72, 18)
+    $grpConn.Controls.Add($lblGSConfig)
+
+    $txtGSConfig             = New-Object System.Windows.Forms.TextBox
+    $txtGSConfig.Location    = New-Object System.Drawing.Point(84, 40)
+    $txtGSConfig.Size        = New-Object System.Drawing.Size(248, 22)
+    $txtGSConfig.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
+    $txtGSConfig.ForeColor   = [System.Drawing.Color]::Silver
+    $txtGSConfig.BorderStyle = 'FixedSingle'
+    $grpConn.Controls.Add($txtGSConfig)
+
+    # Resize G Suite Config label to fit
+    $lblGSConfig.Size = New-Object System.Drawing.Size(72, 18)
+
+    # ── Output Path ───────────────────────────────────────────────────────────
+    $lblOutPath           = New-Object System.Windows.Forms.Label
+    $lblOutPath.Text      = 'Save Output To:'
+    $lblOutPath.ForeColor = [System.Drawing.Color]::DimGray
+    $lblOutPath.Location  = New-Object System.Drawing.Point(4, 80)
+    $lblOutPath.Size      = New-Object System.Drawing.Size(90, 18)
+    $tabDisc.Controls.Add($lblOutPath)
+
+    $txtOutPath             = New-Object System.Windows.Forms.TextBox
+    $txtOutPath.Location    = New-Object System.Drawing.Point(98, 78)
+    $txtOutPath.Size        = New-Object System.Drawing.Size(340, 22)
+    $txtOutPath.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
+    $txtOutPath.ForeColor   = [System.Drawing.Color]::Silver
+    $txtOutPath.BorderStyle = 'FixedSingle'
+    $txtOutPath.Text        = "C:\Temp\FrankensteinDiscovery_$((Get-Date).ToString('yyMMdd'))"
+    $tabDisc.Controls.Add($txtOutPath)
+
+    $btnBrowse                            = New-Object System.Windows.Forms.Button
+    $btnBrowse.Text                       = '...'
+    $btnBrowse.FlatStyle                  = 'Flat'
+    $btnBrowse.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $btnBrowse.ForeColor                  = [System.Drawing.Color]::Silver
+    $btnBrowse.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
+    $btnBrowse.Location                   = New-Object System.Drawing.Point(442, 77)
+    $btnBrowse.Size                       = New-Object System.Drawing.Size(74, 24)
+    $tabDisc.Controls.Add($btnBrowse)
+    $btnBrowse.Add_Click({
+        $fb = New-Object System.Windows.Forms.FolderBrowserDialog
+        $fb.Description = 'Select output folder'
+        if ($fb.ShowDialog() -eq 'OK') { $txtOutPath.Text = $fb.SelectedPath }
+    })
+
+    $sepDiscConn           = New-Object System.Windows.Forms.Panel
+    $sepDiscConn.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
+    $sepDiscConn.Location  = New-Object System.Drawing.Point(4, 106)
+    $sepDiscConn.Size      = New-Object System.Drawing.Size(516, 1)
+    $tabDisc.Controls.Add($sepDiscConn)
+
+    # ── Exchange Block ────────────────────────────────────────────────────────
+    $lblEXTitle           = New-Object System.Windows.Forms.Label
+    $lblEXTitle.Text      = 'Exchange'
+    $lblEXTitle.ForeColor = [System.Drawing.Color]::Silver
+    $lblEXTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $lblEXTitle.Location  = New-Object System.Drawing.Point(4, 112)
+    $lblEXTitle.Size      = New-Object System.Drawing.Size(100, 18)
+    $tabDisc.Controls.Add($lblEXTitle)
+
+    $radEXOnline           = New-Object System.Windows.Forms.RadioButton
+    $radEXOnline.Text      = 'Online'
+    $radEXOnline.ForeColor = [System.Drawing.Color]::DimGray
+    $radEXOnline.Location  = New-Object System.Drawing.Point(108, 110)
+    $radEXOnline.AutoSize  = $true
+    $radEXOnline.Checked   = $true
+    $tabDisc.Controls.Add($radEXOnline)
+
+    $radEXOnPrem           = New-Object System.Windows.Forms.RadioButton
+    $radEXOnPrem.Text      = 'On-Premises'
+    $radEXOnPrem.ForeColor = [System.Drawing.Color]::DimGray
+    $radEXOnPrem.Location  = New-Object System.Drawing.Point(178, 110)
+    $radEXOnPrem.AutoSize  = $true
+    $tabDisc.Controls.Add($radEXOnPrem)
+
+    $lblOnPremFqdn           = New-Object System.Windows.Forms.Label
+    $lblOnPremFqdn.Text      = 'Server FQDN:'
+    $lblOnPremFqdn.ForeColor = [System.Drawing.Color]::DimGray
+    $lblOnPremFqdn.Location  = New-Object System.Drawing.Point(108, 132)
+    $lblOnPremFqdn.Size      = New-Object System.Drawing.Size(80, 18)
+    $lblOnPremFqdn.Visible   = $false
+    $tabDisc.Controls.Add($lblOnPremFqdn)
+
+    $txtOnPremFqdn             = New-Object System.Windows.Forms.TextBox
+    $txtOnPremFqdn.Location    = New-Object System.Drawing.Point(192, 130)
+    $txtOnPremFqdn.Size        = New-Object System.Drawing.Size(210, 22)
+    $txtOnPremFqdn.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
+    $txtOnPremFqdn.ForeColor   = [System.Drawing.Color]::Silver
+    $txtOnPremFqdn.BorderStyle = 'FixedSingle'
+    $txtOnPremFqdn.Visible     = $false
+    $tabDisc.Controls.Add($txtOnPremFqdn)
+
+    $btnEXRun                            = New-Object System.Windows.Forms.Button
+    $btnEXRun.Text                       = 'Run'
+    $btnEXRun.FlatStyle                  = 'Flat'
+    $btnEXRun.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $btnEXRun.ForeColor                  = [System.Drawing.Color]::CornflowerBlue
+    $btnEXRun.FlatAppearance.BorderColor = [System.Drawing.Color]::CornflowerBlue
+    $btnEXRun.Location                   = New-Object System.Drawing.Point(430, 110)
+    $btnEXRun.Size                       = New-Object System.Drawing.Size(82, 72)
+    $tabDisc.Controls.Add($btnEXRun)
+
+    $chkEXRecipCounts          = New-Object System.Windows.Forms.CheckBox
+    $chkEXRecipCounts.Text     = 'Recipient Counts'
+    $chkEXRecipCounts.ForeColor = [System.Drawing.Color]::DimGray
+    $chkEXRecipCounts.Location  = New-Object System.Drawing.Point(108, 152)
+    $chkEXRecipCounts.AutoSize  = $true
+    $chkEXRecipCounts.Checked   = $true
+    $tabDisc.Controls.Add($chkEXRecipCounts)
+
+    $chkEXDiscovery          = New-Object System.Windows.Forms.CheckBox
+    $chkEXDiscovery.Text     = 'Exchange Discovery'
+    $chkEXDiscovery.ForeColor = [System.Drawing.Color]::DimGray
+    $chkEXDiscovery.Location  = New-Object System.Drawing.Point(246, 152)
+    $chkEXDiscovery.AutoSize  = $true
+    $chkEXDiscovery.Checked   = $true
+    $tabDisc.Controls.Add($chkEXDiscovery)
+
+    $chkEXMailboxReport          = New-Object System.Windows.Forms.CheckBox
+    $chkEXMailboxReport.Text     = 'Mailbox Report'
+    $chkEXMailboxReport.ForeColor = [System.Drawing.Color]::DimGray
+    $chkEXMailboxReport.Location  = New-Object System.Drawing.Point(108, 170)
+    $chkEXMailboxReport.AutoSize  = $true
+    $chkEXMailboxReport.Checked   = $true
+    $tabDisc.Controls.Add($chkEXMailboxReport)
+
+    $chkEXVDirs           = New-Object System.Windows.Forms.CheckBox
+    $chkEXVDirs.Text      = 'Virtual Directories'
+    $chkEXVDirs.ForeColor = [System.Drawing.Color]::DimGray
+    $chkEXVDirs.Location  = New-Object System.Drawing.Point(246, 170)
+    $chkEXVDirs.AutoSize  = $true
+    $chkEXVDirs.Visible   = $false
+    $tabDisc.Controls.Add($chkEXVDirs)
+
+    $chkEXPF           = New-Object System.Windows.Forms.CheckBox
+    $chkEXPF.Text      = 'Public Folders'
+    $chkEXPF.ForeColor = [System.Drawing.Color]::DimGray
+    $chkEXPF.Location  = New-Object System.Drawing.Point(376, 170)
+    $chkEXPF.AutoSize  = $true
+    $chkEXPF.Visible   = $false
+    $tabDisc.Controls.Add($chkEXPF)
+
+    $radEXOnline.Add_CheckedChanged({
+        $onPrem = $radEXOnPrem.Checked
+        $lblOnPremFqdn.Visible    = $onPrem
+        $txtOnPremFqdn.Visible    = $onPrem
+        $chkEXVDirs.Visible       = $onPrem
+        $chkEXPF.Visible          = $onPrem
+        $chkEXMailboxReport.Text  = if ($onPrem) { 'Mailbox Report' } else { 'Mailbox Report' }
+    })
+
+    $sepExch           = New-Object System.Windows.Forms.Panel
+    $sepExch.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
+    $sepExch.Location  = New-Object System.Drawing.Point(4, 192)
+    $sepExch.Size      = New-Object System.Drawing.Size(516, 1)
+    $tabDisc.Controls.Add($sepExch)
+
+    # ── Entra Discovery ───────────────────────────────────────────────────────
+    $lblEntTitle           = New-Object System.Windows.Forms.Label
+    $lblEntTitle.Text      = 'Entra Discovery'
+    $lblEntTitle.ForeColor = [System.Drawing.Color]::Silver
+    $lblEntTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $lblEntTitle.Location  = New-Object System.Drawing.Point(4, 198)
+    $lblEntTitle.Size      = New-Object System.Drawing.Size(200, 18)
+    $tabDisc.Controls.Add($lblEntTitle)
+
+    $lblEntDesc           = New-Object System.Windows.Forms.Label
+    $lblEntDesc.Text      = 'Uses M365 UPN connection'
+    $lblEntDesc.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
+    $lblEntDesc.Location  = New-Object System.Drawing.Point(4, 216)
+    $lblEntDesc.Size      = New-Object System.Drawing.Size(420, 16)
+    $tabDisc.Controls.Add($lblEntDesc)
+
+    $btnEntRun                            = New-Object System.Windows.Forms.Button
+    $btnEntRun.Text                       = 'Run'
+    $btnEntRun.FlatStyle                  = 'Flat'
+    $btnEntRun.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $btnEntRun.ForeColor                  = [System.Drawing.Color]::CornflowerBlue
+    $btnEntRun.FlatAppearance.BorderColor = [System.Drawing.Color]::CornflowerBlue
+    $btnEntRun.Location                   = New-Object System.Drawing.Point(430, 196)
+    $btnEntRun.Size                       = New-Object System.Drawing.Size(82, 38)
+    $tabDisc.Controls.Add($btnEntRun)
+
+    $sepEntra           = New-Object System.Windows.Forms.Panel
+    $sepEntra.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
+    $sepEntra.Location  = New-Object System.Drawing.Point(4, 240)
+    $sepEntra.Size      = New-Object System.Drawing.Size(516, 1)
+    $tabDisc.Controls.Add($sepEntra)
+
+    # ── G Suite Discovery ─────────────────────────────────────────────────────
+    $lblGSTitle           = New-Object System.Windows.Forms.Label
+    $lblGSTitle.Text      = 'G Suite Discovery'
+    $lblGSTitle.ForeColor = [System.Drawing.Color]::Silver
+    $lblGSTitle.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $lblGSTitle.Location  = New-Object System.Drawing.Point(4, 246)
+    $lblGSTitle.Size      = New-Object System.Drawing.Size(200, 18)
+    $tabDisc.Controls.Add($lblGSTitle)
+
+    $lblGSDesc           = New-Object System.Windows.Forms.Label
+    $lblGSDesc.Text      = 'Uses G Suite config from Connections above — requires PSGSuite module'
+    $lblGSDesc.ForeColor = [System.Drawing.Color]::FromArgb(90, 90, 90)
+    $lblGSDesc.Location  = New-Object System.Drawing.Point(4, 264)
+    $lblGSDesc.Size      = New-Object System.Drawing.Size(420, 16)
+    $tabDisc.Controls.Add($lblGSDesc)
+
+    $btnGSRun                            = New-Object System.Windows.Forms.Button
+    $btnGSRun.Text                       = 'Run'
+    $btnGSRun.FlatStyle                  = 'Flat'
+    $btnGSRun.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $btnGSRun.ForeColor                  = [System.Drawing.Color]::CornflowerBlue
+    $btnGSRun.FlatAppearance.BorderColor = [System.Drawing.Color]::CornflowerBlue
+    $btnGSRun.Location                   = New-Object System.Drawing.Point(430, 244)
+    $btnGSRun.Size                       = New-Object System.Drawing.Size(82, 38)
+    $tabDisc.Controls.Add($btnGSRun)
+
+    $sepGS           = New-Object System.Windows.Forms.Panel
+    $sepGS.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
+    $sepGS.Location  = New-Object System.Drawing.Point(4, 288)
+    $sepGS.Size      = New-Object System.Drawing.Size(516, 1)
+    $tabDisc.Controls.Add($sepGS)
+
+    $lblDiscNote           = New-Object System.Windows.Forms.Label
+    $lblDiscNote.Text      = 'Tools open in a new PowerShell console. Output is saved to the folder above.'
+    $lblDiscNote.ForeColor = [System.Drawing.Color]::FromArgb(85, 85, 85)
+    $lblDiscNote.Location  = New-Object System.Drawing.Point(4, 294)
+    $lblDiscNote.Size      = New-Object System.Drawing.Size(516, 32)
+    $tabDisc.Controls.Add($lblDiscNote)
+
+    # ── Discovery button handlers ─────────────────────────────────────────────
+    $launchDiscovery = {
+        param([string[]]$commands)
+        $outPath = $txtOutPath.Text.Trim()
+        $preamble = @('Import-Module Frankenstein -ErrorAction SilentlyContinue')
+        if ($outPath) {
+            $preamble += "if (-not (Test-Path '$outPath')) { New-Item -ItemType Directory -Path '$outPath' -Force | Out-Null }; Set-Location '$outPath'"
+        }
+        $full = ($preamble + $commands) -join '; '
+        Start-Process powershell.exe -ArgumentList '-NoExit', '-Command', $full
+    }
+
+    $btnEXRun.Add_Click({
+        $upn  = $txtM365Upn.Text.Trim()
+        $fqdn = $txtOnPremFqdn.Text.Trim()
+        $isOnline = $radEXOnline.Checked
+
+        if ($isOnline -and -not $upn) {
+            [System.Windows.Forms.MessageBox]::Show('Enter an M365 UPN in the Connections section.', 'Exchange', 'OK', 'Warning') | Out-Null; return
+        }
+        if (-not $isOnline -and -not $fqdn) {
+            [System.Windows.Forms.MessageBox]::Show('Enter the on-premises Exchange server FQDN.', 'Exchange', 'OK', 'Warning') | Out-Null; return
+        }
+
+        $cmds = @()
+        if ($isOnline) {
+            $cmds += "Connect-ExchangeOnline -UserPrincipalName '$upn' -ErrorAction SilentlyContinue"
+        } else {
+            $cmds += "Connect-ExchangeOnPremServer -ExchangeServerFQDN '$fqdn'"
+        }
+
+        if ($chkEXRecipCounts.Checked)   { $cmds += 'Get-FrankensteinRecipientCounts' }
+        if ($chkEXDiscovery.Checked) {
+            $sw = if ($isOnline) { '-Online -UseCurrentSession' } else { '-UseCurrentSession' }
+            if (-not $isOnline -and $chkEXVDirs.Checked) { $sw += ' -VirtualDirectories' }
+            if (-not $isOnline -and $chkEXPF.Checked)    { $sw += ' -PublicFolders' }
+            $cmds += "Get-FrankensteinExchangeDiscovery $sw"
+        }
+        if ($chkEXMailboxReport.Checked) { $cmds += 'Get-FrankensteinMailboxReport -UseCurrentSession' }
+
+        & $launchDiscovery $cmds
+    })
+
+    $btnEntRun.Add_Click({
+        $upn = $txtM365Upn.Text.Trim()
+        if (-not $upn) {
+            [System.Windows.Forms.MessageBox]::Show('Enter an M365 UPN in the Connections section.', 'Entra Discovery', 'OK', 'Warning') | Out-Null; return
+        }
+        $cmds = @(
+            "Connect-MgGraph -ErrorAction SilentlyContinue",
+            'Get-FrankensteinEntraDiscovery -UseCurrentSession'
+        )
+        & $launchDiscovery $cmds
+    })
+
+    $btnGSRun.Add_Click({
+        $gsConfig = $txtGSConfig.Text.Trim()
+        $cmds = @()
+        if ($gsConfig) { $cmds += "Set-PSGSuiteConfig -ConfigName '$gsConfig' -ErrorAction SilentlyContinue" }
+        $cmds += 'Get-FrankensteinGSuiteDiscovery'
+        & $launchDiscovery $cmds
+    })
+    #endregion
+
     $sepFoot           = New-Object System.Windows.Forms.Panel
     $sepFoot.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-    $sepFoot.Location  = New-Object System.Drawing.Point(16, 600)
+    $sepFoot.Location  = New-Object System.Drawing.Point(16, 730)
     $sepFoot.Size      = New-Object System.Drawing.Size(528, 1)
     $form.Controls.Add($sepFoot)
 
@@ -9952,7 +10383,7 @@ function Show-FrankensteinPrereqs {
     $btnInstallAll.ForeColor                  = [System.Drawing.Color]::DimGray
     $btnInstallAll.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
     $btnInstallAll.Enabled                    = $false
-    $btnInstallAll.Location                   = New-Object System.Drawing.Point(16, 606)
+    $btnInstallAll.Location                   = New-Object System.Drawing.Point(16, 736)
     $btnInstallAll.Size                       = New-Object System.Drawing.Size(160, 26)
     $form.Controls.Add($btnInstallAll)
 
@@ -9962,7 +10393,7 @@ function Show-FrankensteinPrereqs {
     $btnRefresh.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $btnRefresh.ForeColor                  = [System.Drawing.Color]::Silver
     $btnRefresh.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-    $btnRefresh.Location                   = New-Object System.Drawing.Point(184, 606)
+    $btnRefresh.Location                   = New-Object System.Drawing.Point(184, 736)
     $btnRefresh.Size                       = New-Object System.Drawing.Size(100, 26)
     $form.Controls.Add($btnRefresh)
 
@@ -9972,7 +10403,7 @@ function Show-FrankensteinPrereqs {
     $btnClose.BackColor                  = [System.Drawing.Color]::FromArgb(55, 55, 55)
     $btnClose.ForeColor                  = [System.Drawing.Color]::Silver
     $btnClose.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-    $btnClose.Location                   = New-Object System.Drawing.Point(444, 606)
+    $btnClose.Location                   = New-Object System.Drawing.Point(444, 736)
     $btnClose.Size                       = New-Object System.Drawing.Size(100, 26)
     $form.Controls.Add($btnClose)
     $btnClose.Add_Click({ $form.Close() })
@@ -11172,7 +11603,6 @@ function Invoke-FrankensteinMigrator {
         [pscustomobject]@{ Key='mailbox';    Label='Mailbox Migrator';   Color=[System.Drawing.Color]::MediumSeaGreen  }
         [pscustomobject]@{ Key='domain';     Label='Domain Migrator';    Color=[System.Drawing.Color]::Tomato          }
         [pscustomobject]@{ Key='onedrive';   Label='OneDrive Migrator';  Color=[System.Drawing.Color]::SteelBlue       }
-        [pscustomobject]@{ Key='discovery';  Label='Discovery Tools';    Color=[System.Drawing.Color]::MediumTurquoise }
         [pscustomobject]@{ Key='docs';        Label='Documentation';      Color=[System.Drawing.Color]::DarkGoldenrod  }
     )
 
@@ -11261,7 +11691,6 @@ function Invoke-FrankensteinMigrator {
     $rows.mailbox.Btn.Add_Click({    & $launch 'Mailbox Migrator'     { Invoke-FrankensteinMailboxMigrator }         })
     $rows.domain.Btn.Add_Click({     & $launch 'Domain Migrator'      { Invoke-FrankensteinDomainMigrator }          })
     $rows.onedrive.Btn.Add_Click({   & $launch 'OneDrive Migrator'    { Invoke-FrankensteinOneDriveMigrator }        })
-    $rows.discovery.Btn.Add_Click({ Show-FrankensteinDiscovery })
     $rows.docs.Btn.Add_Click({
         $doc = 'C:\Temp\FrankensteinDocs\Frankenstein Migrator User Guide.docx'
         if (Test-Path $doc) { Start-Process $doc }
@@ -11276,7 +11705,6 @@ function Invoke-FrankensteinMigrator {
         $rows.mailbox.Lbl.Text    = 'Migrate mailboxes via AvePoint Fly'
         $rows.domain.Lbl.Text     = 'Remove a custom domain from an M365 tenant'
         $rows.onedrive.Lbl.Text   = 'Migrate OneDrive for Business content via AvePoint Fly'
-        $rows.discovery.Lbl.Text  = 'Recipient counts, Exchange, Entra, Mailbox, and G Suite discovery'
         $rows.docs.Lbl.Text       = 'Frankenstein Migrator User Guide'
 
         $checks  = Get-FrankensteinPrereqs

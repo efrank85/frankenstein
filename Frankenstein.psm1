@@ -9673,70 +9673,48 @@ function Show-FrankensteinDiscovery {
     $grpConn.Font      = New-Object System.Drawing.Font('Segoe UI', 8.5)
     $form.Controls.Add($grpConn)
 
-    $lblM365Upn           = New-Object System.Windows.Forms.Label
-    $lblM365Upn.Text      = 'M365 UPN:'
-    $lblM365Upn.ForeColor = [System.Drawing.Color]::Silver
-    $lblM365Upn.Location  = New-Object System.Drawing.Point(8, 22)
-    $lblM365Upn.Size      = New-Object System.Drawing.Size(82, 18)
-    $grpConn.Controls.Add($lblM365Upn)
+    $btnConnM365          = New-Object System.Windows.Forms.Button
+    $btnConnM365.Text     = 'Connect M365'
+    $btnConnM365.Location = New-Object System.Drawing.Point(8, 18)
+    $btnConnM365.Size     = New-Object System.Drawing.Size(120, 28)
+    $grpConn.Controls.Add($btnConnM365)
 
     $txtM365Upn             = New-Object System.Windows.Forms.TextBox
-    $txtM365Upn.Location    = New-Object System.Drawing.Point(94, 19)
-    $txtM365Upn.Size        = New-Object System.Drawing.Size(252, 22)
+    $txtM365Upn.Location    = New-Object System.Drawing.Point(136, 20)
+    $txtM365Upn.Size        = New-Object System.Drawing.Size(218, 22)
     $txtM365Upn.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
     $txtM365Upn.ForeColor   = [System.Drawing.Color]::Silver
     $txtM365Upn.BorderStyle = 'FixedSingle'
     try { $txtM365Upn.PlaceholderText = 'admin@tenant.com' } catch {}
     $grpConn.Controls.Add($txtM365Upn)
 
-    $btnConnM365                            = New-Object System.Windows.Forms.Button
-    $btnConnM365.Text                       = 'Connect'
-    $btnConnM365.FlatStyle                  = 'Flat'
-    $btnConnM365.BackColor                  = [System.Drawing.Color]::FromArgb(0, 120, 212)
-    $btnConnM365.ForeColor                  = [System.Drawing.Color]::White
-    $btnConnM365.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
-    $btnConnM365.Location                   = New-Object System.Drawing.Point(352, 18)
-    $btnConnM365.Size                       = New-Object System.Drawing.Size(80, 24)
-    $grpConn.Controls.Add($btnConnM365)
-
     $lblM365Status           = New-Object System.Windows.Forms.Label
     $lblM365Status.Text      = 'Not connected'
-    $lblM365Status.ForeColor = [System.Drawing.Color]::DimGray
-    $lblM365Status.Location  = New-Object System.Drawing.Point(440, 22)
-    $lblM365Status.Size      = New-Object System.Drawing.Size(82, 18)
+    $lblM365Status.ForeColor = [System.Drawing.Color]::Gray
+    $lblM365Status.Location  = New-Object System.Drawing.Point(362, 24)
+    $lblM365Status.Size      = New-Object System.Drawing.Size(160, 18)
     $grpConn.Controls.Add($lblM365Status)
 
-    $lblGSConfig           = New-Object System.Windows.Forms.Label
-    $lblGSConfig.Text      = 'G Suite Config:'
-    $lblGSConfig.ForeColor = [System.Drawing.Color]::Silver
-    $lblGSConfig.Location  = New-Object System.Drawing.Point(8, 60)
-    $lblGSConfig.Size      = New-Object System.Drawing.Size(82, 18)
-    $grpConn.Controls.Add($lblGSConfig)
+    $btnConnGS            = New-Object System.Windows.Forms.Button
+    $btnConnGS.Text       = 'Set G Suite Config'
+    $btnConnGS.Location   = New-Object System.Drawing.Point(8, 56)
+    $btnConnGS.Size       = New-Object System.Drawing.Size(120, 28)
+    $grpConn.Controls.Add($btnConnGS)
 
     $txtGSConfig             = New-Object System.Windows.Forms.TextBox
-    $txtGSConfig.Location    = New-Object System.Drawing.Point(94, 57)
-    $txtGSConfig.Size        = New-Object System.Drawing.Size(252, 22)
+    $txtGSConfig.Location    = New-Object System.Drawing.Point(136, 58)
+    $txtGSConfig.Size        = New-Object System.Drawing.Size(218, 22)
     $txtGSConfig.BackColor   = [System.Drawing.Color]::FromArgb(38, 38, 38)
     $txtGSConfig.ForeColor   = [System.Drawing.Color]::Silver
     $txtGSConfig.BorderStyle = 'FixedSingle'
     try { $txtGSConfig.PlaceholderText = 'PSGSuite config name' } catch {}
     $grpConn.Controls.Add($txtGSConfig)
 
-    $btnConnGS                            = New-Object System.Windows.Forms.Button
-    $btnConnGS.Text                       = 'Set Config'
-    $btnConnGS.FlatStyle                  = 'Flat'
-    $btnConnGS.BackColor                  = [System.Drawing.Color]::FromArgb(0, 120, 212)
-    $btnConnGS.ForeColor                  = [System.Drawing.Color]::White
-    $btnConnGS.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
-    $btnConnGS.Location                   = New-Object System.Drawing.Point(352, 56)
-    $btnConnGS.Size                       = New-Object System.Drawing.Size(80, 24)
-    $grpConn.Controls.Add($btnConnGS)
-
     $lblGSStatus           = New-Object System.Windows.Forms.Label
     $lblGSStatus.Text      = 'Not set'
-    $lblGSStatus.ForeColor = [System.Drawing.Color]::DimGray
-    $lblGSStatus.Location  = New-Object System.Drawing.Point(440, 60)
-    $lblGSStatus.Size      = New-Object System.Drawing.Size(82, 18)
+    $lblGSStatus.ForeColor = [System.Drawing.Color]::Gray
+    $lblGSStatus.Location  = New-Object System.Drawing.Point(362, 62)
+    $lblGSStatus.Size      = New-Object System.Drawing.Size(160, 18)
     $grpConn.Controls.Add($lblGSStatus)
 
     # ── Save Output To ────────────────────────────────────────────────────────

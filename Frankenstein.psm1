@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Creation of Eric Frank. Discovers Exchange On-Premises and Online Information. Test adfadsfdf
+    Creation of Eric Frank. Discovers Exchange On-Premises and Online Information. Test adfadsfdf. Test more.
 
 .DESCRIPTION
     This module contains functions used to collect and export data in preparation

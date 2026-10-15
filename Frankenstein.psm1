@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Creation of Eric Frank. Discovers Exchange On-Premises and Online Information.
+    Creation of Eric Frank. Discovers Exchange On-Premises and Online Information. Test adfadsfdf
 
 .DESCRIPTION
     This module contains functions used to collect and export data in preparation
@@ -31,6 +31,7 @@ function Get-FrankensteinHelp {
     1) Get-FrankensteinExchangeDiscovery
        Provides Exchange on-premises or Exchange Online discovery. Outputs a transcript and optional CSVs.
        Switches: [-VirtualDirectories] [-CSV] [-UseCurrentSession] [-Online] [-PublicFolders]
+       
 
     2) Get-FrankensteinPublicFolderDiscovery
        Outputs CSVs for Exchange Public Folder information.
